@@ -17,7 +17,7 @@ The chart reads bootstrap/runtime values from four pre-existing Secrets:
 - `vrrelay-ingest-origin-runtime`
 - `vrrelay-edge-runtime`
 
-All role Secrets contain `VRRELAY_POSTGRES_URL`, `VRRELAY_VALKEY_URL`, `VRRELAY_MASTER_KEY`, the selected object-store credentials, and the same random `VRRELAY_MEDIAMTX_READ_TOKEN`. The ingest-origin and edge Secrets also contain the same 10–79 character `VRRELAY_LIVE_SRT_PASSPHRASE`, which encrypts the origin-to-edge SRT transport. The controller Secret also contains the temporary `VRRELAY_SETUP_TOKEN`. Each non-controller Secret contains a different `VRRELAY_NODE_JOIN_TOKEN` issued for exactly that role. Use a different master key for every node.
+All role Secrets contain `VRRELAY_POSTGRES_URL`, `VRRELAY_VALKEY_URL`, `VRRELAY_MASTER_KEY`, `VRRELAY_TRUSTED_PROXY_CIDRS`, the selected object-store credentials, and the same random `VRRELAY_MEDIAMTX_READ_TOKEN`. Set `VRRELAY_TRUSTED_PROXY_CIDRS` to a nonempty comma-separated list containing only the ingress or reverse-proxy source ranges trusted by that role. The ingest-origin and edge Secrets also contain the same 10–79 character `VRRELAY_LIVE_SRT_PASSPHRASE`, which encrypts the origin-to-edge SRT transport. The controller Secret also contains the temporary `VRRELAY_SETUP_TOKEN`. Each non-controller Secret contains a different `VRRELAY_NODE_JOIN_TOKEN` issued for exactly that role. Use a different master key for every node.
 
 Create Secrets from temporary files outside the repository; never place their values in a Helm values file or Git:
 

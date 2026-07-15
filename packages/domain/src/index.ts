@@ -7,6 +7,8 @@ export type ProviderType = z.infer<typeof ProviderTypeSchema>;
 export const AuthenticationModeSchema = z.enum(['user_token', 'api_key']);
 export type AuthenticationMode = z.infer<typeof AuthenticationModeSchema>;
 
+export const UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE = 'Unsafe public HTTP transport is enabled.';
+
 export const ProviderCapabilitySchema = z.enum([
   'search',
   'hierarchy',
@@ -31,12 +33,19 @@ export const ProviderConnectionSchema = z.object({
   serverVersion: z.string().optional(),
   capabilities: z.array(ProviderCapabilitySchema),
   healthy: z.boolean(),
+  allowPublicHttp: z.boolean().optional(),
   securityNotice: z.string().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime()
 });
 export type ProviderConnection = z.infer<typeof ProviderConnectionSchema>;
-export type PublicProviderConnection = Omit<ProviderConnection, 'secretRef'>;
+export type PublicProviderConnection = Omit<ProviderConnection, 'secretRef' | 'allowPublicHttp'>;
+
+export function providerAllowsPublicHttp(
+  provider: Pick<ProviderConnection, 'allowPublicHttp' | 'securityNotice'>
+): boolean {
+  return provider.allowPublicHttp ?? provider.securityNotice === UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE;
+}
 
 export const MediaSourceRefSchema = z.object({
   providerId: z.string().min(1),
@@ -442,43 +451,6 @@ export const AuditEventSchema = z.object({
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
-export const AgentMessageKindSchema = z.enum([
-  'hello',
-  'heartbeat',
-  'capabilities',
-  'job.offer',
-  'job.accept',
-  'job.reject',
-  'job.progress',
-  'job.complete',
-  'job.fail',
-  'job.cancel',
-  'drain',
-  'certificate.rotate',
-  'certificate.rotated',
-  'log',
-  'response',
-  'error',
-  'provider.bind',
-  'provider.unbind',
-  'provider.browse',
-  'provider.item',
-  'provider.validate',
-  'provider.activity'
-]);
-
-export const AgentEnvelopeSchema = z.object({
-  version: z.literal(1),
-  id: z.string(),
-  sequence: z.number().int().positive(),
-  kind: AgentMessageKindSchema,
-  sentAt: z.iso.datetime(),
-  replyTo: z.string().optional(),
-  deadlineAt: z.iso.datetime().optional(),
-  payload: z.record(z.string(), z.unknown())
-});
-export type AgentEnvelope = z.infer<typeof AgentEnvelopeSchema>;
-
 export const CachedObjectSchema = z.object({
   key: z.string(),
   size: z.number().int().nonnegative(),
@@ -552,7 +524,7 @@ export const PersonalAccessTokenSchema = z.object({
 export type PersonalAccessToken = z.infer<typeof PersonalAccessTokenSchema>;
 
 export function publicProvider(provider: ProviderConnection): PublicProviderConnection {
-  const { secretRef: _secretRef, ...safe } = provider;
+  const { secretRef: _secretRef, allowPublicHttp: _allowPublicHttp, ...safe } = provider;
   return safe;
 }
 

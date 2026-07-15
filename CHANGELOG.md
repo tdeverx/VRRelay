@@ -89,6 +89,18 @@ retained evidence belong in the
 
 ### Security
 
+- Generate node private keys locally, enroll through CSRs and single-use join
+  tokens, stage retry-safe certificate rotation 48 hours before expiry, and
+  activate replacements only after certificate-bound reconnect proof.
+- Replace loose agent payloads with a strict versioned protocol, bounded messages,
+  sequence/deadline/replay enforcement, inbound rate limits, connection-scoped
+  request cleanup, durable drain commands, and restart reconciliation.
+- Add explicit production-mode transport validation, CIDR-scoped proxy trust,
+  DNS-pinned Jellyfin requests with redirect blocking, comprehensive
+  metadata/link-local address rejection, role-minimal HTTP surfaces, and FFmpeg
+  failure redaction for internal grants, credentials, and private URLs. Legacy
+  false-like `VRRELAY_TRUST_PROXY` values remain a no-op for upgrade safety;
+  true or ambiguous values now fail closed.
 - Keep provider credentials, node identities, playback grants, source URLs,
   backend secrets, certificates, and private media out of public contracts and
   repository fixtures.

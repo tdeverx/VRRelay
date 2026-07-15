@@ -77,11 +77,25 @@ if (!ingestService?.includes('name: webrtc-ice, port: 8189'))
 for (const [role, secret] of [
   ['controller', 'vrrelay-controller-runtime'],
   ['source-worker', 'vrrelay-source-worker-runtime'],
-  ['ingest-origin', 'vrrelay-ingest-origin-runtime']
+  ['ingest-origin', 'vrrelay-ingest-origin-runtime'],
+  ['edge', 'vrrelay-edge-runtime']
 ]) {
   const workload = document('Deployment', `vrrelay-${role}`);
   if (!workload?.includes(`secretRef: { name: "${secret}" }`))
     failures.push(`${role} Deployment does not use its node-scoped Secret`);
+  if (!/name:\s*VRRELAY_ENVIRONMENT,\s*value:\s*production/.test(workload ?? ''))
+    failures.push(`${role} Deployment does not activate production configuration validation`);
+  if (
+    !workload?.includes('name: VRRELAY_TRUSTED_PROXY_CIDRS') ||
+    !workload.includes('key: VRRELAY_TRUSTED_PROXY_CIDRS')
+  )
+    failures.push(`${role} Deployment does not require explicit trusted-proxy CIDRs`);
+  if (role !== 'controller') {
+    if (!/name:\s*VRRELAY_CONTROLLER_AGENT_URL[^\n]*wss:\/\//.test(workload ?? ''))
+      failures.push(`${role} Deployment does not configure WSS agent transport`);
+    if (!/name:\s*VRRELAY_CONTROLLER_ENROLLMENT_URL[^\n]*https:\/\//.test(workload ?? ''))
+      failures.push(`${role} Deployment does not configure HTTPS enrollment`);
+  }
 }
 
 requireText(

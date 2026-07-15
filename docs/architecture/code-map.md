@@ -18,29 +18,30 @@ packages/adapters ┘             └──> packages/contracts
 
 ## Runtime entry points
 
-| Concern                      | Start here                                      | Notes                                                                                                       |
-| ---------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Process entry                | `apps/relay/src/main.ts`                        | Loads configuration and dispatches to the selected composition root.                                        |
-| Role selection               | `apps/relay/src/composition/role-plan.ts`       | Accepts one dedicated role or all four roles for standalone.                                                |
-| Composition roots            | `apps/relay/src/composition/roots.ts`           | Dispatches controller, source-worker, ingest-origin, edge, and standalone to distinct runtime factories.    |
-| Runtime ownership            | `apps/relay/src/composition/runtime-graph.ts`   | Documents and tests which services and infrastructure each role may construct.                              |
-| Runtime construction         | `apps/relay/src/composition/runtime.ts`         | Builds the role-specific object graphs, background work, and ordered shutdown sequences.                    |
-| Controller HTTP/API          | `apps/relay/src/server.ts`                      | Authentication, administrative API, public playback URLs, node enrollment/control, and embedded dashboard.  |
-| Data-plane HTTP              | `apps/relay/src/composition/role-server.ts`     | Exposes only source-worker, ingest-origin, or edge routes owned by the selected role.                       |
-| Repository startup           | `apps/relay/src/composition/repository.ts`      | Selects SQLite or PostgreSQL without leaking driver types into application services.                        |
-| Migration ownership          | `apps/relay/src/composition/schema-startup.ts`  | Controller/standalone migrate; dedicated data-plane roles only assert that the schema is current.           |
-| PostgreSQL backup hook       | `apps/relay/src/composition/postgres-backup.ts` | Creates the pre-migration dump artifact; real dump/restore evidence remains a later release gate.           |
-| Node protocol                | `apps/relay/src/agent-transport.ts`             | mTLS controller and outbound agent connection, sequencing, deadlines, remote provider calls, and jobs.      |
-| Authentication               | `apps/relay/src/auth.ts`                        | Atomic first-run administrator setup, cookies, CSRF, and personal access tokens.                            |
-| Administrative audit         | `apps/relay/src/audited-operation.ts`           | Writes a durable attempt before mutation and a correlated terminal result after it.                         |
-| Configuration                | `apps/relay/src/config.ts`                      | Environment parsing and safe defaults.                                                                      |
-| Core models                  | `packages/domain/src/index.ts`                  | Provider-neutral Zod schemas and inferred TypeScript types.                                                 |
-| Use cases and ports          | `packages/application/src`                      | Provider, profile, VOD, live, audit, cache, metrics, and persistence contracts.                             |
-| Cluster scheduling           | `packages/application/src/cluster-service.ts`   | Enrollment, node health, placement, certificate state, and lease transitions with bounded CAS retries.      |
-| Infrastructure adapters      | `packages/adapters/src`                         | Jellyfin, FFmpeg, repositories, object stores, coordination, network policy, and secret stores.             |
-| Public request/event schemas | `packages/contracts/src/index.ts`               | Runtime request validation shared by the API and dashboard.                                                 |
-| REST description             | `contracts/openapi/vrrelay-v1.yaml`             | Versioned external API used to generate the dashboard transport.                                            |
-| Dashboard API facade         | `apps/web/src/lib/api.ts`                       | CSRF-aware calls over the generated client; provider setup credentials are not retained in dashboard state. |
+| Concern                      | Start here                                      | Notes                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Process entry                | `apps/relay/src/main.ts`                        | Loads configuration and dispatches to the selected composition root.                                                                   |
+| Role selection               | `apps/relay/src/composition/role-plan.ts`       | Accepts one dedicated role or all four roles for standalone.                                                                           |
+| Composition roots            | `apps/relay/src/composition/roots.ts`           | Dispatches controller, source-worker, ingest-origin, edge, and standalone to distinct runtime factories.                               |
+| Runtime ownership            | `apps/relay/src/composition/runtime-graph.ts`   | Documents and tests which services and infrastructure each role may construct.                                                         |
+| Runtime construction         | `apps/relay/src/composition/runtime.ts`         | Builds the role-specific object graphs, background work, and ordered shutdown sequences.                                               |
+| Controller HTTP/API          | `apps/relay/src/server.ts`                      | Authentication, administrative API, public playback URLs, node enrollment/control, and embedded dashboard.                             |
+| Data-plane HTTP              | `apps/relay/src/composition/role-server.ts`     | Exposes only source-worker, ingest-origin, or edge routes owned by the selected role.                                                  |
+| Repository startup           | `apps/relay/src/composition/repository.ts`      | Selects SQLite or PostgreSQL without leaking driver types into application services.                                                   |
+| Migration ownership          | `apps/relay/src/composition/schema-startup.ts`  | Controller/standalone migrate; dedicated data-plane roles only assert that the schema is current.                                      |
+| PostgreSQL backup hook       | `apps/relay/src/composition/postgres-backup.ts` | Creates the pre-migration dump artifact; real dump/restore evidence remains a later release gate.                                      |
+| Node transport               | `apps/relay/src/agent-transport.ts`             | CSR enrollment, mTLS connection proof, certificate rotation, drain reconciliation, request lifecycle, remote provider calls, and jobs. |
+| Node wire contract           | `packages/contracts/src/agent-protocol.ts`      | Strict versioned envelopes and payload schemas; the reproducible JSON Schema is committed under `contracts/events`.                    |
+| Authentication               | `apps/relay/src/auth.ts`                        | Atomic first-run administrator setup, cookies, CSRF, and personal access tokens.                                                       |
+| Administrative audit         | `apps/relay/src/audited-operation.ts`           | Writes a durable attempt before mutation and a correlated terminal result after it.                                                    |
+| Configuration                | `apps/relay/src/config.ts`                      | Environment parsing, safe defaults, explicit proxy CIDRs, and fail-closed production transport validation.                             |
+| Core models                  | `packages/domain/src/index.ts`                  | Provider-neutral Zod schemas and inferred TypeScript types.                                                                            |
+| Use cases and ports          | `packages/application/src`                      | Provider, profile, VOD, live, audit, cache, metrics, and persistence contracts.                                                        |
+| Cluster scheduling           | `packages/application/src/cluster-service.ts`   | Enrollment, node health, placement, certificate state, and lease transitions with bounded CAS retries.                                 |
+| Infrastructure adapters      | `packages/adapters/src`                         | Jellyfin, FFmpeg, repositories, object stores, coordination, network policy, and secret stores.                                        |
+| Public request/event schemas | `packages/contracts/src/index.ts`               | Runtime request validation shared by the API and dashboard.                                                                            |
+| REST description             | `contracts/openapi/vrrelay-v1.yaml`             | Versioned external API used to generate the dashboard transport.                                                                       |
+| Dashboard API facade         | `apps/web/src/lib/api.ts`                       | CSRF-aware calls over the generated client; provider setup credentials are not retained in dashboard state.                            |
 
 ## VOD request path
 

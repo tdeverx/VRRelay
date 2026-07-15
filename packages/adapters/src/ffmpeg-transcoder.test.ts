@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ProfileRevision } from '@vrrelay/domain';
-import { FFmpegTranscoder } from './ffmpeg-transcoder.js';
+import { FFmpegTranscoder, redactFfmpegError } from './ffmpeg-transcoder.js';
 
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
@@ -15,6 +15,25 @@ afterEach(async () => {
 });
 
 describe('FFmpeg adapter', () => {
+  it('redacts internal grants, credentials, and source URLs from FFmpeg failures', () => {
+    const sensitive = [
+      'Authorization: MediaBrowser Client="VRRelay", Token="provider-secret"',
+      'X-Emby-Token: provider-secret',
+      'Unable to open http://127.0.0.1:8099/internal/source/loopback-grant?token=query-secret',
+      'Input https://jellyfin.private.example/Videos/item/stream?api_key=provider-secret failed',
+      'srt://origin.private.example:8890?passphrase=srt-secret&streamid=read:path:user:token'
+    ].join('\n');
+    const redacted = redactFfmpegError(sensitive);
+    expect(redacted).not.toContain('provider-secret');
+    expect(redacted).not.toContain('loopback-grant');
+    expect(redacted).not.toContain('query-secret');
+    expect(redacted).not.toContain('srt-secret');
+    expect(redacted).not.toContain('jellyfin.private.example');
+    expect(redacted).not.toContain('origin.private.example');
+    expect(redacted).toContain('[REDACTED_HEADER]');
+    expect(redacted).toContain('[REDACTED_URL]');
+  });
+
   it('discovers the installed executable without a fake writable stream', async () => {
     const capabilities = await new FFmpegTranscoder({
       ffmpegPath: process.env.VRRELAY_FFMPEG ?? 'ffmpeg'

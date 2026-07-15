@@ -17,17 +17,42 @@ import type { AuditEvent, ClusterNode, ProviderBinding, ProviderConnection } fro
 import { loadConfig } from './config.js';
 import {
   assertSetupAuthorized,
+  assertProductionNodePublicUrl,
   auditActor,
   auditedOperation,
+  createServer,
   deleteProviderBindingWithCredentialCleanup,
+  isInternalPeer,
+  isLoopbackPeer,
   liveHlsUpstreamUrl,
   liveOriginSourceUrl,
   meteredReadable,
   providerBindingDeletionAuditContext,
-  redactRequestUrl
+  redactRequestUrl,
+  rotateNodeCertificateWithDelivery,
+  setNodeDrainWithDelivery,
+  type ControlPlaneHttpSurface,
+  type ServerServices
 } from './server.js';
 
 const temporaryDirectories: string[] = [];
+const inertServerServices = {
+  repository: {},
+  auth: {},
+  providers: {},
+  profiles: {},
+  sessions: {},
+  live: {},
+  events: {},
+  capabilities: {},
+  cluster: {},
+  objectStore: {},
+  coordination: {},
+  metrics: {},
+  audit: {},
+  backends: {}
+} as ServerServices;
+
 afterEach(async () =>
   Promise.all(
     temporaryDirectories
@@ -125,6 +150,121 @@ describe('HTTP log redaction', () => {
   });
 });
 
+describe('control-plane HTTP surface matrix', () => {
+  it.each([
+    {
+      surface: 'controller',
+      expected: {
+        administration: true,
+        vodManifest: true,
+        liveManifest: true,
+        segment: false,
+        liveMedia: false,
+        sourceGrant: false,
+        ingestAuth: false
+      }
+    },
+    {
+      surface: 'standalone',
+      expected: {
+        administration: true,
+        vodManifest: true,
+        liveManifest: true,
+        segment: true,
+        liveMedia: true,
+        sourceGrant: true,
+        ingestAuth: true
+      }
+    }
+  ] satisfies Array<{
+    surface: ControlPlaneHttpSurface;
+    expected: Record<string, boolean>;
+  }>)('registers the least surface for $surface', async ({ surface, expected }) => {
+    const app = await createServer(loadConfig({}), inertServerServices, surface);
+    await app.ready();
+    expect({
+      administration: app.hasRoute({ method: 'GET', url: '/api/v1/providers' }),
+      vodManifest: app.hasRoute({ method: 'GET', url: '/play/:token/index.m3u8' }),
+      liveManifest: app.hasRoute({ method: 'GET', url: '/play/:token/live.m3u8' }),
+      segment: app.hasRoute({ method: 'GET', url: '/play/:token/segment/:index.ts' }),
+      liveMedia: app.hasRoute({ method: 'GET', url: '/play/:token/live/*' }),
+      sourceGrant: app.hasRoute({ method: 'GET', url: '/internal/source/:token' }),
+      ingestAuth: app.hasRoute({ method: 'POST', url: '/internal/mediamtx/auth' })
+    }).toEqual(expected);
+    await app.close();
+  });
+
+  it('recognizes the complete loopback range without trusting private-network peers', () => {
+    expect(['127.0.0.1', '127.20.30.40', '::1', '::ffff:127.0.0.9'].every(isLoopbackPeer)).toBe(
+      true
+    );
+    expect(isLoopbackPeer('10.0.0.4')).toBe(false);
+    expect(isLoopbackPeer('203.0.113.10')).toBe(false);
+    expect(isInternalPeer('10.0.0.4')).toBe(true);
+    expect(isInternalPeer('fd00::10')).toBe(true);
+    expect(isInternalPeer('203.0.113.10')).toBe(false);
+  });
+
+  it('fails closed instead of serving controller-local media when no edge is available', async () => {
+    let manifestCalls = 0;
+    const app = await createServer(
+      loadConfig({ VRRELAY_NODE_ROLES: 'controller' }),
+      {
+        ...inertServerServices,
+        sessions: {
+          touchViewer: async () => ({ id: 'session-1', preferredRegion: undefined }),
+          manifest: async () => {
+            manifestCalls += 1;
+            return '#EXTM3U';
+          }
+        },
+        cluster: { selectEdge: async () => undefined }
+      } as unknown as ServerServices,
+      'controller'
+    );
+    const response = await app.inject({ method: 'GET', url: '/play/grant/index.m3u8' });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: { code: 'edge_unavailable' } });
+    expect(manifestCalls).toBe(0);
+    await app.close();
+  });
+
+  it('accepts forwarding headers only from configured proxy CIDRs', async () => {
+    const identities: string[] = [];
+    const app = await createServer(
+      loadConfig({ VRRELAY_TRUSTED_PROXY_CIDRS: '10.0.0.0/8' }),
+      {
+        ...inertServerServices,
+        sessions: {
+          touchViewer: async (_token: string, identity: string) => {
+            identities.push(identity);
+            return { id: `session-${identities.length}`, preferredRegion: undefined };
+          },
+          manifest: async () => '#EXTM3U',
+          recordEgress: () => undefined
+        },
+        cluster: { selectEdge: async () => undefined }
+      } as unknown as ServerServices,
+      'standalone'
+    );
+    const trusted = await app.inject({
+      method: 'GET',
+      url: '/play/grant-1/index.m3u8',
+      remoteAddress: '10.20.30.40',
+      headers: { 'x-forwarded-for': '198.51.100.7', 'user-agent': 'fixture' }
+    });
+    const untrusted = await app.inject({
+      method: 'GET',
+      url: '/play/grant-2/index.m3u8',
+      remoteAddress: '203.0.113.9',
+      headers: { 'x-forwarded-for': '127.0.0.1', 'user-agent': 'fixture' }
+    });
+    expect([trusted.statusCode, untrusted.statusCode]).toEqual([200, 200]);
+    expect(identities).toEqual(['198.51.100.7|fixture', '203.0.113.9|fixture']);
+    await app.close();
+  });
+});
+
 describe('first-run setup authorization', () => {
   it('allows setup on a loopback public URL without a token', () => {
     expect(() =>
@@ -149,6 +289,305 @@ describe('first-run setup authorization', () => {
     });
     expect(() => assertSetupAuthorized(config, token)).not.toThrow();
     expect(() => assertSetupAuthorized(config, `${token}x`)).toThrow(/invalid/);
+  });
+});
+
+describe('production node enrollment transport', () => {
+  it('allows development overlay HTTP but requires an HTTPS public node URL in production', () => {
+    expect(() =>
+      assertProductionNodePublicUrl({ environment: 'development' }, 'http://worker.internal:8099')
+    ).not.toThrow();
+    expect(() =>
+      assertProductionNodePublicUrl({ environment: 'production' }, 'http://worker.internal:8099')
+    ).toThrow(/must use HTTPS/);
+    expect(() =>
+      assertProductionNodePublicUrl({ environment: 'production' }, 'https://worker.example.test')
+    ).not.toThrow();
+  });
+
+  it('forwards the CSR and enforces the production URL policy at the HTTP boundary', async () => {
+    const now = new Date().toISOString();
+    const node: ClusterNode = {
+      id: 'csr-node',
+      name: 'CSR node',
+      roles: ['source-worker'],
+      region: 'local',
+      publicUrl: 'https://worker.example.test',
+      state: 'online',
+      capabilities: {
+        encoders: [],
+        hardwareDevices: [],
+        maxWorkers: 1,
+        activeWorkers: 0,
+        queuedWorkers: 0,
+        cacheBytes: 0,
+        cacheLimitBytes: 0,
+        egressMbps: 0,
+        providerIds: []
+      },
+      weight: 100,
+      lastHeartbeatAt: now,
+      createdAt: now,
+      updatedAt: now
+    };
+    const certificate = {
+      certificatePem: 'fixture-certificate',
+      caCertificatePem: 'fixture-ca',
+      expiresAt: now,
+      serialNumber: '01',
+      fingerprintSha256: 'fixture-fingerprint'
+    };
+    const events: AuditEvent[] = [];
+    let enrollmentInput: unknown;
+    const services = {
+      ...inertServerServices,
+      audit: new AuditService({
+        appendAuditEvent: async (event) => void events.push(event),
+        listAuditEvents: async () => events
+      }),
+      cluster: {
+        enroll: async (input: unknown) => {
+          enrollmentInput = input;
+          return { node, certificate };
+        }
+      }
+    } as unknown as ServerServices;
+    const payload = {
+      token: 't'.repeat(32),
+      name: node.name,
+      publicUrl: node.publicUrl,
+      capabilities: node.capabilities,
+      csrPem: '-----BEGIN CERTIFICATE REQUEST-----\nfixture\n-----END CERTIFICATE REQUEST-----'
+    };
+
+    const development = await createServer(loadConfig({}), services, 'controller');
+    const accepted = await development.inject({
+      method: 'POST',
+      url: '/api/v1/nodes/enroll',
+      payload
+    });
+    expect(accepted.statusCode).toBe(201);
+    expect(enrollmentInput).toMatchObject({ csrPem: payload.csrPem, publicUrl: payload.publicUrl });
+    await development.close();
+
+    enrollmentInput = undefined;
+    const production = await createServer(
+      loadConfig({
+        VRRELAY_ENVIRONMENT: 'production',
+        VRRELAY_PUBLIC_URL: 'https://relay.example.test',
+        VRRELAY_ADMIN_URL: 'https://admin.example.test',
+        VRRELAY_PLAYBACK_URL: 'https://play.example.test',
+        VRRELAY_TRUSTED_PROXY_CIDRS: '10.20.0.0/16',
+        VRRELAY_MEDIAMTX_READ_TOKEN: 'm'.repeat(32),
+        VRRELAY_NODE_ROLES: 'controller'
+      }),
+      services,
+      'controller'
+    );
+    const rejected = await production.inject({
+      method: 'POST',
+      url: '/api/v1/nodes/enroll',
+      payload: { ...payload, publicUrl: 'http://worker.internal:8099' }
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toMatchObject({ error: { code: 'insecure_node_public_url' } });
+    expect(enrollmentInput).toBeUndefined();
+    await production.close();
+  });
+});
+
+describe('node drain command delivery', () => {
+  const node = {
+    id: 'drain-node',
+    state: 'draining'
+  } as ClusterNode;
+
+  it('uses the agent controller as the single durable mutation and delivery authority', async () => {
+    let directDrainCalls = 0;
+    const commands: Array<{ nodeId: string; draining: boolean }> = [];
+    const result = await setNodeDrainWithDelivery(
+      {
+        cluster: {
+          drain: async () => {
+            directDrainCalls += 1;
+            return node;
+          },
+          get: async () => node
+        },
+        agentController: {
+          setDrain: async (nodeId, draining) => {
+            commands.push({ nodeId, draining });
+            return { persisted: true as const, acknowledged: true };
+          }
+        }
+      },
+      node.id,
+      true
+    );
+    expect(result).toEqual({ node, commandAcknowledged: true });
+    expect(commands).toEqual([{ nodeId: node.id, draining: true }]);
+    expect(directDrainCalls).toBe(0);
+  });
+
+  it('falls back to the repository-backed cluster service without an agent controller', async () => {
+    let directDrainCalls = 0;
+    const result = await setNodeDrainWithDelivery(
+      {
+        cluster: {
+          drain: async () => {
+            directDrainCalls += 1;
+            return node;
+          },
+          get: async () => undefined
+        }
+      },
+      node.id,
+      false
+    );
+    expect(result).toEqual({ node, commandAcknowledged: null });
+    expect(directDrainCalls).toBe(1);
+  });
+
+  it('returns a durable result when command acknowledgement is deferred to reconnect', async () => {
+    const result = await setNodeDrainWithDelivery(
+      {
+        cluster: {
+          drain: async () => node,
+          get: async () => node
+        },
+        agentController: {
+          setDrain: async () => ({ persisted: true, acknowledged: false })
+        }
+      },
+      node.id,
+      true
+    );
+
+    expect(result).toEqual({ node, commandAcknowledged: false });
+  });
+});
+
+describe('node certificate rotation delivery', () => {
+  it('waits for transport activation before returning the persisted expiry', async () => {
+    const calls: string[] = [];
+    const result = await rotateNodeCertificateWithDelivery(
+      {
+        cluster: {
+          get: async (nodeId) => {
+            calls.push(`get:${nodeId}`);
+            return {
+              id: nodeId,
+              certificateExpiresAt: '2030-01-01T00:00:00.000Z'
+            } as ClusterNode;
+          }
+        },
+        agentController: {
+          connected: () => true,
+          rotateCertificate: async (nodeId, timeoutMs) => {
+            calls.push(`rotate:${nodeId}:${timeoutMs}`);
+          }
+        }
+      },
+      'rotation-node'
+    );
+
+    expect(calls).toEqual(['rotate:rotation-node:60000', 'get:rotation-node']);
+    expect(result).toEqual({ certificateExpiresAt: '2030-01-01T00:00:00.000Z' });
+  });
+
+  it('fails closed before rotation when the node is disconnected', async () => {
+    let rotated = false;
+    await expect(
+      rotateNodeCertificateWithDelivery(
+        {
+          cluster: { get: async () => undefined },
+          agentController: {
+            connected: () => false,
+            rotateCertificate: async () => {
+              rotated = true;
+            }
+          }
+        },
+        'offline-node'
+      )
+    ).rejects.toMatchObject({ code: 'node_unavailable', statusCode: 409 });
+    expect(rotated).toBe(false);
+  });
+
+  it('audits HTTP rotation success and transport timeout with one correlated outcome each', async () => {
+    const events: AuditEvent[] = [];
+    let failRotation = false;
+    const node = {
+      id: 'rotation-audit-node',
+      certificateExpiresAt: '2030-01-01T00:00:00.000Z'
+    } as ClusterNode;
+    const services = {
+      ...inertServerServices,
+      auth: {
+        authenticate: async () => ({
+          kind: 'personal_token' as const,
+          id: 'rotation-auditor',
+          scopes: ['admin'] as const
+        }),
+        requireCsrf: () => undefined
+      },
+      audit: new AuditService({
+        appendAuditEvent: async (event) => void events.push(event),
+        listAuditEvents: async () => events
+      }),
+      cluster: { get: async () => node },
+      agentController: {
+        connected: () => true,
+        rotateCertificate: async () => {
+          if (failRotation) throw new Error('Certificate rotation activation timed out');
+        }
+      }
+    } as unknown as ServerServices;
+    const app = await createServer(loadConfig({}), services, 'controller');
+
+    const succeeded = await app.inject({
+      method: 'POST',
+      url: `/api/v1/nodes/${node.id}/certificate/rotate`,
+      payload: {}
+    });
+    expect(succeeded.statusCode).toBe(200);
+    failRotation = true;
+    const failed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/nodes/${node.id}/certificate/rotate`,
+      payload: {}
+    });
+    expect(failed.statusCode).toBe(500);
+    await app.close();
+
+    expect(events.map(({ outcome }) => outcome)).toEqual([
+      'attempt',
+      'success',
+      'attempt',
+      'failure'
+    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: 'cluster',
+          action: 'node.certificate.rotate',
+          outcome: 'success',
+          actor: { type: 'token', id: 'rotation-auditor' },
+          target: { type: 'node', id: node.id },
+          context: { expiresAt: node.certificateExpiresAt }
+        }),
+        expect.objectContaining({
+          category: 'cluster',
+          action: 'node.certificate.rotate',
+          outcome: 'failure',
+          actor: { type: 'token', id: 'rotation-auditor' },
+          target: { type: 'node', id: node.id },
+          context: { errorType: 'Error' }
+        })
+      ])
+    );
+    expect(events[0]?.operationId).toBe(events[1]?.operationId);
+    expect(events[2]?.operationId).toBe(events[3]?.operationId);
   });
 });
 

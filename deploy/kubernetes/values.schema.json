@@ -12,6 +12,20 @@
         "edge": { "type": "string", "minLength": 1 }
       }
     },
+    "agent": {
+      "type": "object",
+      "required": ["controllerUrl", "enrollmentUrl", "tlsNames"],
+      "properties": {
+        "controllerUrl": { "type": "string", "format": "uri", "pattern": "^wss://" },
+        "enrollmentUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "tlsNames": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "controller": { "$ref": "#/$defs/controllerRole" },
     "sourceWorker": { "$ref": "#/$defs/agentRole" },
     "ingestOrigin": { "$ref": "#/$defs/agentRole" },

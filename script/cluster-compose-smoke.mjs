@@ -14,6 +14,9 @@ const image = `${project}-relay:latest`;
 const controllerUrl = 'http://127.0.0.1:8099';
 const adminPassword = `admin-${randomBytes(24).toString('base64url')}`;
 const environment = {
+  VRRELAY_ENVIRONMENT: 'development',
+  VRRELAY_TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
+  VRRELAY_CONTROLLER_ENROLLMENT_URL: 'http://controller:8099',
   POSTGRES_PASSWORD: randomBytes(24).toString('base64url'),
   MINIO_ROOT_USER: 'vrrelay-root',
   // Intentionally option-like to exercise `mc ... --` handling in the production topology.

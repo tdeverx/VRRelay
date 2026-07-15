@@ -28,7 +28,12 @@ MediaMTX authenticates publishers and readers through VRRelay's internal callbac
 
 ## Distributed Compose
 
-Copy the secret variables from `.env.example`, provide controller and edge HTTPS URLs, then run:
+Copy the secret variables from `.env.example`, provide controller and edge HTTPS
+URLs, set `VRRELAY_CONTROLLER_ENROLLMENT_URL` to the controller's externally
+trusted HTTPS origin, and set `VRRELAY_TRUSTED_PROXY_CIDRS` to only the actual
+TLS proxy source ranges. The cluster manifest defaults to
+`VRRELAY_ENVIRONMENT=production` and fails closed when those transport settings
+or production secrets are unsafe. Then run:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.cluster.yml up --build

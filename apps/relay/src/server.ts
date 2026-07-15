@@ -3,6 +3,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { Readable, Transform } from 'node:stream';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
@@ -48,9 +49,9 @@ import {
   BackendValidationRequestSchema,
   BackendActivationRequestSchema
 } from '@vrrelay/contracts';
-import { validateProviderUrl } from '@vrrelay/adapters';
+import { isPrivateAddress, validateProviderUrl } from '@vrrelay/adapters';
 import { requiresSetupToken, type RelayConfig } from './config.js';
-import { publicProviderBinding } from '@vrrelay/domain';
+import { publicProviderBinding, type ClusterNode } from '@vrrelay/domain';
 import { AuthService, type Principal } from './auth.js';
 import type { AgentController } from './agent-transport.js';
 import type { BackendService } from './backend-service.js';
@@ -87,6 +88,25 @@ export interface ProviderBindingDeletionOutcome {
   orphanAcknowledged: boolean;
 }
 
+export type ControlPlaneHttpSurface = 'controller' | 'standalone';
+
+export function isLoopbackPeer(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase();
+  if (isIP(normalized) === 4) return normalized.startsWith('127.');
+  if (normalized === '::1') return true;
+  const dottedMapped = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)?.[1];
+  if (dottedMapped && isIP(dottedMapped) === 4) return dottedMapped.startsWith('127.');
+  const hexadecimalMapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
+  return Boolean(
+    hexadecimalMapped && (Number.parseInt(hexadecimalMapped[1]!, 16) & 0xff00) === 0x7f00
+  );
+}
+
+export function isInternalPeer(address: string | undefined): boolean {
+  return Boolean(address && (isLoopbackPeer(address) || isPrivateAddress(address)));
+}
+
 interface ProviderBindingCleanupServices {
   cluster: Pick<ClusterService, 'beginBindingDeletion' | 'finalizeBindingDeletion' | 'list'>;
   agentController?: {
@@ -97,6 +117,60 @@ interface ProviderBindingCleanupServices {
       payload: Record<string, unknown>
     ): Promise<unknown>;
   };
+}
+
+interface NodeDrainServices {
+  cluster: Pick<ClusterService, 'drain' | 'get'>;
+  agentController?: {
+    setDrain(
+      nodeId: string,
+      draining: boolean
+    ): Promise<{ persisted: true; acknowledged: boolean }>;
+  };
+}
+
+export interface NodeDrainDeliveryOutcome {
+  node: ClusterNode;
+  commandAcknowledged: boolean | null;
+}
+
+export async function setNodeDrainWithDelivery(
+  services: NodeDrainServices,
+  nodeId: string,
+  draining: boolean
+): Promise<NodeDrainDeliveryOutcome> {
+  if (!services.agentController)
+    return {
+      node: await services.cluster.drain(nodeId, draining),
+      commandAcknowledged: null
+    };
+  const delivery = await services.agentController.setDrain(nodeId, draining);
+  const node = await services.cluster.get(nodeId);
+  if (!node) throw new ApplicationError('not_found', 'Cluster node was not found', 404);
+  return { node, commandAcknowledged: delivery.acknowledged };
+}
+
+interface NodeCertificateRotationServices {
+  cluster: Pick<ClusterService, 'get'>;
+  agentController?: Pick<AgentController, 'connected' | 'rotateCertificate'>;
+}
+
+export async function rotateNodeCertificateWithDelivery(
+  services: NodeCertificateRotationServices,
+  nodeId: string,
+  timeoutMs = 60_000
+): Promise<{ certificateExpiresAt: string }> {
+  if (!services.agentController?.connected(nodeId))
+    throw new ApplicationError(
+      'node_unavailable',
+      'The node must be connected to receive and persist its replacement certificate',
+      409
+    );
+  await services.agentController.rotateCertificate(nodeId, timeoutMs);
+  const node = await services.cluster.get(nodeId);
+  if (!node?.certificateExpiresAt)
+    throw new ApplicationError('not_found', 'Rotated node certificate was not found', 404);
+  return { certificateExpiresAt: node.certificateExpiresAt };
 }
 
 export function providerBindingDeletionAuditContext(result: ProviderBindingDeletionOutcome) {
@@ -242,10 +316,10 @@ export function liveHlsUpstreamUrl(
 }
 
 export function assertSetupAuthorized(
-  config: Pick<RelayConfig, 'publicUrl' | 'setupToken'>,
+  config: Pick<RelayConfig, 'adminUrl' | 'setupToken'>,
   supplied: string | undefined
 ): void {
-  if (!requiresSetupToken(config.publicUrl)) return;
+  if (!requiresSetupToken(config.adminUrl)) return;
   if (!config.setupToken) {
     throw new ApplicationError(
       'setup_token_required',
@@ -260,9 +334,22 @@ export function assertSetupAuthorized(
   }
 }
 
+export function assertProductionNodePublicUrl(
+  config: Pick<RelayConfig, 'environment'>,
+  publicUrl: string
+): void {
+  if (config.environment === 'production' && new URL(publicUrl).protocol !== 'https:')
+    throw new ApplicationError(
+      'insecure_node_public_url',
+      'Production node public URLs must use HTTPS',
+      400
+    );
+}
+
 export async function createServer(
   config: RelayConfig,
-  services: ServerServices
+  services: ServerServices,
+  surface: ControlPlaneHttpSurface = 'standalone'
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -274,6 +361,7 @@ export async function createServer(
           'req.body.password',
           'req.body.setupToken',
           'req.body.apiKey',
+          'req.body.token',
           'res.headers.set-cookie'
         ],
         censor: '[REDACTED]'
@@ -289,7 +377,7 @@ export async function createServer(
         }
       }
     },
-    trustProxy: config.trustProxy,
+    trustProxy: config.trustedProxyCidrs,
     bodyLimit: 1_048_576,
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID()
@@ -428,7 +516,7 @@ export async function createServer(
     const status = await services.auth.setupStatus();
     return {
       ...status,
-      requiresToken: !status.configured && requiresSetupToken(config.publicUrl)
+      requiresToken: !status.configured && requiresSetupToken(config.adminUrl)
     };
   });
   app.post(
@@ -450,7 +538,7 @@ export async function createServer(
       reply.setCookie('vrrelay_session', session.token, {
         httpOnly: true,
         sameSite: 'strict',
-        secure: config.publicUrl.startsWith('https://'),
+        secure: config.adminUrl.startsWith('https://'),
         path: '/',
         expires: new Date(session.expiresAt)
       });
@@ -565,11 +653,13 @@ export async function createServer(
         },
         async () => {
           const body = parse(EnrollNodeRequestSchema, request.body);
+          assertProductionNodePublicUrl(config, body.publicUrl);
           return services.cluster.enroll({
             token: body.token,
             name: body.name,
             publicUrl: body.publicUrl,
             capabilities: body.capabilities,
+            csrPem: body.csrPem,
             ...(body.internalUrl ? { internalUrl: body.internalUrl } : {})
           });
         }
@@ -580,35 +670,40 @@ export async function createServer(
   app.post('/api/v1/nodes/:nodeId/drain', async (request) => {
     const principal = await mutate(request, ['admin']);
     const nodeId = (request.params as { nodeId: string }).nodeId;
-    return auditAs(
+    const { draining } = parse(NodeDrainRequestSchema, request.body);
+    const result = await auditAs(
       request,
       principal,
       {
         category: 'cluster',
         action: 'node.drain',
         target: { type: 'node', id: nodeId },
-        success: (node) => ({ context: { state: node.state } })
+        success: (outcome) => ({
+          context: {
+            state: outcome.node.state,
+            commandAcknowledged: outcome.commandAcknowledged
+          }
+        })
       },
-      () => services.cluster.drain(nodeId, parse(NodeDrainRequestSchema, request.body).draining)
+      () => setNodeDrainWithDelivery(services, nodeId, draining)
     );
+    return result.node;
   });
   app.post('/api/v1/nodes/:nodeId/certificate/rotate', async (request) => {
-    await mutate(request, ['admin']);
+    const principal = await mutate(request, ['admin']);
     parse(RotateNodeCertificateRequestSchema, request.body ?? {});
     const nodeId = (request.params as { nodeId: string }).nodeId;
-    if (!services.agentController?.connected(nodeId))
-      throw new ApplicationError(
-        'node_unavailable',
-        'The node must be connected to receive and persist its replacement certificate',
-        409
-      );
-    await services.agentController.request(nodeId, 'certificate.rotate', {}, 60_000);
-    const node = (await services.cluster.list()).find((candidate) => candidate.id === nodeId);
-    if (!node?.certificateExpiresAt)
-      throw new ApplicationError('not_found', 'Rotated node certificate was not found', 404);
-    return {
-      certificateExpiresAt: node.certificateExpiresAt
-    };
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'cluster',
+        action: 'node.certificate.rotate',
+        target: { type: 'node', id: nodeId },
+        success: (result) => ({ context: { expiresAt: result.certificateExpiresAt } })
+      },
+      () => rotateNodeCertificateWithDelivery(services, nodeId)
+    );
   });
   app.post('/api/v1/nodes/:nodeId/revoke', async (request) => {
     const principal = await mutate(request, ['admin']);
@@ -1019,131 +1114,149 @@ export async function createServer(
       .catch(() => socket.close(1008, 'Authentication required'));
   });
 
-  app.post('/internal/mediamtx/auth', async (request, reply) => {
-    const body = parse(
-      z.object({
-        action: z.string(),
-        path: z.string(),
-        protocol: z.string().optional(),
-        user: z.string().optional(),
-        password: z.string().optional(),
-        token: z.string().optional()
-      }),
-      request.body
-    );
-    return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
-      ? reply.status(204).send()
-      : reply.status(401).send();
-  });
+  if (surface === 'standalone') {
+    app.post('/internal/mediamtx/auth', async (request, reply) => {
+      if (!isInternalPeer(request.raw.socket.remoteAddress))
+        return reply.status(403).send({
+          error: {
+            code: 'forbidden',
+            message: 'Internal MediaMTX auth is private-network or loopback-only'
+          }
+        });
+      const body = parse(
+        z.object({
+          action: z.string(),
+          path: z.string(),
+          protocol: z.string().optional(),
+          user: z.string().optional(),
+          password: z.string().optional(),
+          token: z.string().optional()
+        }),
+        request.body
+      );
+      return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
+        ? reply.status(204).send()
+        : reply.status(401).send();
+    });
 
-  app.get('/internal/source/:token', async (request, reply) => {
-    const peer = request.raw.socket.remoteAddress;
-    if (peer !== '127.0.0.1' && peer !== '::1' && peer !== '::ffff:127.0.0.1') {
-      return reply.status(403).send({
-        error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
-      });
-    }
-    const controller = new AbortController();
-    reply.raw.once('close', () => controller.abort());
-    const source = await services.sessions.openSourceProxy(
-      (request.params as { token: string }).token,
-      request.headers.range,
-      controller.signal
-    );
-    reply.status(source.status);
-    for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
-    return reply
-      .type(source.headers['content-type'] ?? 'application/octet-stream')
-      .send(source.stream);
-  });
+    app.get('/internal/source/:token', async (request, reply) => {
+      if (!isLoopbackPeer(request.raw.socket.remoteAddress)) {
+        return reply.status(403).send({
+          error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
+        });
+      }
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
+      const source = await services.sessions.openSourceProxy(
+        (request.params as { token: string }).token,
+        request.headers.range,
+        controller.signal
+      );
+      reply.status(source.status);
+      for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
+      return reply
+        .type(source.headers['content-type'] ?? 'application/octet-stream')
+        .send(source.stream);
+    });
+  }
 
   app.get('/play/:token/index.m3u8', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const token = tokenFromPath(request);
     const session = await services.sessions.touchViewer(token, viewerIdentity(request));
     const route = await services.cluster.selectEdge(session.id, session.preferredRegion);
+    if (surface === 'controller' && (!route || route.nodeId === config.nodeId))
+      throw new ApplicationError(
+        'edge_unavailable',
+        'No edge is available to serve this playback session',
+        503
+      );
     const base = route ? `${route.publicUrl.replace(/\/$/, '')}/play/${token}/segment` : undefined;
     const manifest = await services.sessions.manifest(token, base);
     services.sessions.recordEgress(Buffer.byteLength(manifest), session.id);
     return reply.type('application/vnd.apple.mpegurl').send(manifest);
   });
-  app.get('/play/:token/segment/:index.ts', async (request, reply) => {
-    const params = request.params as { token: string; index: string };
-    const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
-    const controller = new AbortController();
-    reply.raw.once('close', () => controller.abort());
-    const path = await services.sessions.segment(
-      params.token,
-      Number(params.index),
-      controller.signal
-    );
-    const info = await stat(path);
-    reply.header('Content-Length', info.size);
-    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-    return reply
-      .type('video/mp2t')
-      .send(
-        meteredReadable(createReadStream(path), (bytes) =>
-          services.sessions.recordEgress(bytes, session.id)
-        )
+  if (surface === 'standalone') {
+    app.get('/play/:token/segment/:index.ts', async (request, reply) => {
+      const params = request.params as { token: string; index: string };
+      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
+      const path = await services.sessions.segment(
+        params.token,
+        Number(params.index),
+        controller.signal
       );
-  });
-  app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
-    const params = request.params as { token: string; index: string };
-    const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
-    const controller = new AbortController();
-    reply.raw.once('close', () => controller.abort());
-    const path = await services.sessions.segment(
-      params.token,
-      Number(params.index),
-      controller.signal
-    );
-    const info = await stat(path);
-    reply.header('Content-Length', info.size);
-    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-    return reply
-      .type('video/iso.segment')
-      .send(
-        meteredReadable(createReadStream(path), (bytes) =>
-          services.sessions.recordEgress(bytes, session.id)
-        )
-      );
-  });
-  app.get('/play/:token/segment/init.mp4', async (request, reply) => {
-    const token = tokenFromPath(request);
-    const session = await services.sessions.touchViewer(token, viewerIdentity(request));
-    const controller = new AbortController();
-    reply.raw.once('close', () => controller.abort());
-    const path = await services.sessions.initSegment(token, controller.signal);
-    const info = await stat(path);
-    reply.header('Content-Length', info.size);
-    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-    return reply
-      .type('video/mp4')
-      .send(
-        meteredReadable(createReadStream(path), (bytes) =>
-          services.sessions.recordEgress(bytes, session.id)
-        )
-      );
-  });
-  app.get('/play/:token/stream.mp4', async (request, reply) => {
-    const token = tokenFromPath(request);
-    const session = await services.sessions.touchViewer(token, viewerIdentity(request));
-    const controller = new AbortController();
-    reply.raw.once('close', () => controller.abort());
-    reply.raw.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
-    const output = payloadMeter((bytes) => services.sessions.recordEgress(bytes, session.id));
-    output.pipe(reply.raw);
-    await services.sessions.streamFragmentedMp4(token, output, controller.signal).catch((error) => {
-      output.destroy();
-      throw error;
+      const info = await stat(path);
+      reply.header('Content-Length', info.size);
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      return reply
+        .type('video/mp2t')
+        .send(
+          meteredReadable(createReadStream(path), (bytes) =>
+            services.sessions.recordEgress(bytes, session.id)
+          )
+        );
     });
-  });
+    app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
+      const params = request.params as { token: string; index: string };
+      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
+      const path = await services.sessions.segment(
+        params.token,
+        Number(params.index),
+        controller.signal
+      );
+      const info = await stat(path);
+      reply.header('Content-Length', info.size);
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      return reply
+        .type('video/iso.segment')
+        .send(
+          meteredReadable(createReadStream(path), (bytes) =>
+            services.sessions.recordEgress(bytes, session.id)
+          )
+        );
+    });
+    app.get('/play/:token/segment/init.mp4', async (request, reply) => {
+      const token = tokenFromPath(request);
+      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
+      const path = await services.sessions.initSegment(token, controller.signal);
+      const info = await stat(path);
+      reply.header('Content-Length', info.size);
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      return reply
+        .type('video/mp4')
+        .send(
+          meteredReadable(createReadStream(path), (bytes) =>
+            services.sessions.recordEgress(bytes, session.id)
+          )
+        );
+    });
+    app.get('/play/:token/stream.mp4', async (request, reply) => {
+      const token = tokenFromPath(request);
+      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
+      reply.raw.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
+      const output = payloadMeter((bytes) => services.sessions.recordEgress(bytes, session.id));
+      output.pipe(reply.raw);
+      await services.sessions
+        .streamFragmentedMp4(token, output, controller.signal)
+        .catch((error) => {
+          output.destroy();
+          throw error;
+        });
+    });
+  }
   app.get('/play/:token/live.m3u8', async (request, reply) => {
     const token = tokenFromPath(request);
     const session = await services.sessions.touchViewer(token, viewerIdentity(request));
     const query = request.query as { edge?: string };
-    if (query.edge !== '1') {
+    if (surface === 'controller' || query.edge !== '1') {
       const route = await services.cluster.selectEdge(session.id, session.preferredRegion);
       if (route && route.nodeId !== config.nodeId) {
         const target = `${route.publicUrl.replace(/\/$/, '')}/play/${token}/live.m3u8?edge=1`;
@@ -1152,6 +1265,12 @@ export async function createServer(
         return reply.type('application/vnd.apple.mpegurl').send(redirect);
       }
     }
+    if (surface === 'controller')
+      throw new ApplicationError(
+        'edge_unavailable',
+        'No edge is available to serve this live playback session',
+        503
+      );
     const channel = await services.sessions.resolveLive(token);
     await ensureLiveEdgePath(channel.path);
     const response = await fetch(`${config.mediaMtxHlsUrl}/${channel.path}/index.m3u8`, {
@@ -1171,37 +1290,39 @@ export async function createServer(
     services.sessions.recordEgress(Buffer.byteLength(playlist), session.id);
     return reply.type('application/vnd.apple.mpegurl').send(playlist);
   });
-  app.get('/play/:token/live/*', async (request, reply) => {
-    const params = request.params as { token: string; '*': string };
-    if (!params['*'] || params['*'].includes('..') || params['*'].includes('\\'))
-      return reply.status(400).send();
-    const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
-    const channel = await services.sessions.resolveLive(params.token);
-    await ensureLiveEdgePath(channel.path);
-    const response = await fetch(
-      liveHlsUpstreamUrl(
-        config.mediaMtxHlsUrl,
-        channel.path,
-        params['*'],
-        request.query as Record<string, unknown>
-      ),
-      {
-        headers: {
-          Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
+  if (surface === 'standalone') {
+    app.get('/play/:token/live/*', async (request, reply) => {
+      const params = request.params as { token: string; '*': string };
+      if (!params['*'] || params['*'].includes('..') || params['*'].includes('\\'))
+        return reply.status(400).send();
+      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const channel = await services.sessions.resolveLive(params.token);
+      await ensureLiveEdgePath(channel.path);
+      const response = await fetch(
+        liveHlsUpstreamUrl(
+          config.mediaMtxHlsUrl,
+          channel.path,
+          params['*'],
+          request.query as Record<string, unknown>
+        ),
+        {
+          headers: {
+            Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
+          }
         }
-      }
-    );
-    if (!response.ok || !response.body) return reply.status(response.status).send();
-    reply.header('Cache-Control', response.headers.get('cache-control') ?? 'no-store');
-    return reply
-      .type(response.headers.get('content-type') ?? 'application/octet-stream')
-      .send(
-        meteredReadable(
-          Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
-          (bytes) => services.sessions.recordEgress(bytes, session.id)
-        )
       );
-  });
+      if (!response.ok || !response.body) return reply.status(response.status).send();
+      reply.header('Cache-Control', response.headers.get('cache-control') ?? 'no-store');
+      return reply
+        .type(response.headers.get('content-type') ?? 'application/octet-stream')
+        .send(
+          meteredReadable(
+            Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
+            (bytes) => services.sessions.recordEgress(bytes, session.id)
+          )
+        );
+    });
+  }
 
   const publicRoot = resolve(process.cwd(), 'apps/relay/public');
   if (existsSync(publicRoot)) {

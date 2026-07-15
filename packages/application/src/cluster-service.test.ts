@@ -26,12 +26,22 @@ const capabilities = {
 
 class FakeCertificateAuthority implements CertificateAuthority {
   issued = 0;
+  readonly signedCsrs: Array<{ commonName: string; csrPem: string }> = [];
 
   async issue(_commonName: string, ttlMs: number) {
+    return { ...this.#signed(ttlMs), privateKeyPem: `private-key-${this.issued}` };
+  }
+
+  async signCsr(commonName: string, csrPem: string, ttlMs: number) {
+    if (csrPem === 'malformed-csr') throw new Error('Certificate signing request is invalid');
+    this.signedCsrs.push({ commonName, csrPem });
+    return this.#signed(ttlMs);
+  }
+
+  #signed(ttlMs: number) {
     const serialNumber = `serial-${++this.issued}`;
     return {
       certificatePem: `certificate-${serialNumber}`,
-      privateKeyPem: `private-key-${serialNumber}`,
       caCertificatePem: 'test-ca',
       expiresAt: new Date(Date.now() + ttlMs).toISOString(),
       serialNumber,
@@ -95,7 +105,8 @@ describe('cluster service', () => {
       repository,
       new MemoryCoordinationStore(),
       new BuiltinTrafficDirector(),
-      new InMemoryEventBus()
+      new InMemoryEventBus(),
+      new FakeCertificateAuthority()
     );
     const claim = await cluster.createJoinToken({
       name: 'London edge',
@@ -107,19 +118,261 @@ describe('cluster service', () => {
       token: claim.token,
       name: 'London edge',
       publicUrl: 'https://edge.example',
-      capabilities
+      capabilities,
+      csrPem: 'test-csr'
     });
     await expect(
       cluster.enroll({
         token: claim.token,
         name: 'Duplicate',
         publicUrl: 'https://duplicate.example',
-        capabilities
+        capabilities,
+        csrPem: 'different-csr'
       })
     ).rejects.toThrow(/already used/);
     expect((await cluster.selectEdge('session-a', 'eu-west'))?.nodeId).toBe(enrolled.node.id);
     await cluster.drain(enrolled.node.id, true);
     expect(await cluster.selectEdge('session-a', 'eu-west')).toBeUndefined();
+  });
+
+  it('preserves a join token when CSR validation fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-invalid-csr-'));
+    dirs.push(dir);
+    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const certificates = new FakeCertificateAuthority();
+    const cluster = new ClusterService(
+      repository,
+      new MemoryCoordinationStore(),
+      new BuiltinTrafficDirector(),
+      new InMemoryEventBus(),
+      certificates
+    );
+    const claim = await cluster.createJoinToken({
+      name: 'Recoverable worker',
+      roles: ['source-worker'],
+      region: 'local',
+      expiresInSeconds: 60
+    });
+    const input = {
+      token: claim.token,
+      name: 'Recoverable worker',
+      publicUrl: 'https://recoverable-worker.example',
+      capabilities
+    };
+
+    await expect(cluster.enroll({ ...input, csrPem: 'malformed-csr' })).rejects.toThrow(
+      'signing request is invalid'
+    );
+    await expect(cluster.enroll({ ...input, csrPem: 'valid-csr' })).resolves.toMatchObject({
+      node: { name: 'Recoverable worker' }
+    });
+    expect(certificates.issued).toBe(1);
+    await expect(repository.listNodes()).resolves.toHaveLength(1);
+  });
+
+  it('retries the same staged identity after a repository failure', async () => {
+    class FailBeforeEnrollmentCommitRepository extends SqliteRepository {
+      failNextCreate = true;
+
+      override async createNode(...args: Parameters<SqliteRepository['createNode']>) {
+        if (this.failNextCreate) {
+          this.failNextCreate = false;
+          throw new Error('simulated enrollment repository failure');
+        }
+        return super.createNode(...args);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-retry-'));
+    dirs.push(dir);
+    const repository = new FailBeforeEnrollmentCommitRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const certificates = new FakeCertificateAuthority();
+    const cluster = new ClusterService(
+      repository,
+      new MemoryCoordinationStore(),
+      new BuiltinTrafficDirector(),
+      new InMemoryEventBus(),
+      certificates
+    );
+    const claim = await cluster.createJoinToken({
+      name: 'Retry worker',
+      roles: ['source-worker'],
+      region: 'local',
+      expiresInSeconds: 60
+    });
+    const input = {
+      token: claim.token,
+      name: 'Retry worker',
+      publicUrl: 'https://retry-worker.example',
+      capabilities,
+      csrPem: 'retry-csr'
+    };
+
+    await expect(cluster.enroll(input)).rejects.toThrow('simulated enrollment repository failure');
+    const enrolled = await cluster.enroll({
+      ...input,
+      name: 'Changed retry name',
+      publicUrl: 'https://changed-retry.example',
+      capabilities: { ...capabilities, activeWorkers: 3 }
+    });
+    const retryAfterCompletion = await cluster.enroll({
+      ...input,
+      name: 'Another changed name',
+      capabilities: { ...capabilities, queuedWorkers: 2 }
+    });
+    expect(certificates.issued).toBe(1);
+    expect(retryAfterCompletion).toEqual(enrolled);
+    expect(enrolled.node).toMatchObject({
+      name: 'Retry worker',
+      publicUrl: 'https://retry-worker.example',
+      capabilities
+    });
+    expect(certificates.signedCsrs).toEqual([
+      { commonName: `node:${enrolled.node.id}`, csrPem: 'retry-csr' }
+    ]);
+    await expect(repository.listNodes()).resolves.toHaveLength(1);
+  });
+
+  it('rejects a different CSR after an enrollment identity is staged', async () => {
+    class FailBeforeEnrollmentCommitRepository extends SqliteRepository {
+      failNextCreate = true;
+
+      override async createNode(...args: Parameters<SqliteRepository['createNode']>) {
+        if (this.failNextCreate) {
+          this.failNextCreate = false;
+          throw new Error('simulated enrollment repository failure');
+        }
+        return super.createNode(...args);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-csr-binding-'));
+    dirs.push(dir);
+    const repository = new FailBeforeEnrollmentCommitRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const certificates = new FakeCertificateAuthority();
+    const cluster = new ClusterService(
+      repository,
+      new MemoryCoordinationStore(),
+      new BuiltinTrafficDirector(),
+      new InMemoryEventBus(),
+      certificates
+    );
+    const claim = await cluster.createJoinToken({
+      name: 'CSR-bound worker',
+      roles: ['source-worker'],
+      region: 'local',
+      expiresInSeconds: 60
+    });
+    const input = {
+      token: claim.token,
+      name: 'CSR-bound worker',
+      publicUrl: 'https://csr-bound-worker.example',
+      capabilities
+    };
+
+    await expect(cluster.enroll({ ...input, csrPem: 'first-csr' })).rejects.toThrow(
+      'simulated enrollment repository failure'
+    );
+    await expect(cluster.enroll({ ...input, csrPem: 'different-csr' })).rejects.toThrow(
+      /already used/
+    );
+    await expect(cluster.enroll({ ...input, csrPem: 'first-csr' })).resolves.toMatchObject({
+      certificate: { serialNumber: 'serial-1' }
+    });
+    expect(certificates.issued).toBe(1);
+  });
+
+  it('reconciles a node-and-certificate commit whose result was lost', async () => {
+    class CommitThenThrowEnrollmentRepository extends SqliteRepository {
+      throwAfterCreate = true;
+
+      override async createNode(...args: Parameters<SqliteRepository['createNode']>) {
+        const created = await super.createNode(...args);
+        if (this.throwAfterCreate) {
+          this.throwAfterCreate = false;
+          throw new Error('simulated ambiguous enrollment commit');
+        }
+        return created;
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-ambiguous-'));
+    dirs.push(dir);
+    const repository = new CommitThenThrowEnrollmentRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const certificates = new FakeCertificateAuthority();
+    const cluster = new ClusterService(
+      repository,
+      new MemoryCoordinationStore(),
+      new BuiltinTrafficDirector(),
+      new InMemoryEventBus(),
+      certificates
+    );
+    const claim = await cluster.createJoinToken({
+      name: 'Ambiguous worker',
+      roles: ['source-worker'],
+      region: 'local',
+      expiresInSeconds: 60
+    });
+
+    const enrolled = await cluster.enroll({
+      token: claim.token,
+      name: 'Ambiguous worker',
+      publicUrl: 'https://ambiguous-worker.example',
+      capabilities,
+      csrPem: 'ambiguous-csr'
+    });
+    expect(enrolled.certificate.serialNumber).toBe('serial-1');
+    expect(certificates.issued).toBe(1);
+    await expect(repository.listNodes()).resolves.toHaveLength(1);
+    await expect(repository.listNodeCertificates(enrolled.node.id)).resolves.toHaveLength(1);
+  });
+
+  it('reconciles an enrollment-claim write whose acknowledgement was lost', async () => {
+    class CommitThenThrowCoordinationStore extends MemoryCoordinationStore {
+      setCalls = 0;
+
+      override async set(...args: Parameters<MemoryCoordinationStore['set']>) {
+        await super.set(...args);
+        this.setCalls += 1;
+        if (this.setCalls === 2) throw new Error('simulated ambiguous coordination write');
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-coordination-'));
+    dirs.push(dir);
+    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const coordination = new CommitThenThrowCoordinationStore();
+    const certificates = new FakeCertificateAuthority();
+    const cluster = new ClusterService(
+      repository,
+      coordination,
+      new BuiltinTrafficDirector(),
+      new InMemoryEventBus(),
+      certificates
+    );
+    const claim = await cluster.createJoinToken({
+      name: 'Coordination worker',
+      roles: ['source-worker'],
+      region: 'local',
+      expiresInSeconds: 60
+    });
+
+    await expect(
+      cluster.enroll({
+        token: claim.token,
+        name: 'Coordination worker',
+        publicUrl: 'https://coordination-worker.example',
+        capabilities,
+        csrPem: 'coordination-csr'
+      })
+    ).resolves.toMatchObject({ certificate: { serialNumber: 'serial-1' } });
+    expect(certificates.issued).toBe(1);
+    expect(coordination.setCalls).toBe(3);
   });
 
   it('retries heartbeat conflicts without clearing durable drain state', async () => {
@@ -466,10 +719,16 @@ describe('cluster service', () => {
       token: claim.token,
       name: 'Certificate node',
       publicUrl: 'https://certificate-node.example',
-      capabilities
+      capabilities,
+      csrPem: 'enrollment-csr'
     });
 
-    const rotated = await cluster.rotateCertificate(enrolled.node.id);
+    expect(enrolled.certificate).not.toHaveProperty('privateKeyPem');
+    const signed = await cluster.signNodeCertificate(enrolled.node.id, 'rotation-csr');
+    expect(await repository.listNodeCertificates(enrolled.node.id)).toEqual([
+      expect.objectContaining({ serialNumber: 'serial-1', revokedAt: null })
+    ]);
+    const rotated = await cluster.activateNodeCertificate(enrolled.node.id, signed);
     expect(repository.injectedConflict).toBe(true);
     await expect(repository.getNode(enrolled.node.id)).resolves.toMatchObject({
       state: 'draining',
@@ -530,10 +789,12 @@ describe('cluster service', () => {
       token: claim.token,
       name: 'Revoked node',
       publicUrl: 'https://revoked-node.example',
-      capabilities
+      capabilities,
+      csrPem: 'enrollment-csr'
     });
 
-    await expect(cluster.rotateCertificate(enrolled.node.id)).rejects.toThrow(
+    const signed = await cluster.signNodeCertificate(enrolled.node.id, 'rotation-csr');
+    await expect(cluster.activateNodeCertificate(enrolled.node.id, signed)).rejects.toThrow(
       'Active cluster node was not found'
     );
     await expect(repository.getNode(enrolled.node.id)).resolves.toMatchObject({ state: 'revoked' });
@@ -599,7 +860,8 @@ describe('cluster service', () => {
       token: claim.token,
       name: 'Rotating node',
       publicUrl: 'https://rotating-node.example',
-      capabilities
+      capabilities,
+      csrPem: 'enrollment-csr'
     });
 
     await expect(cluster.revoke(enrolled.node.id)).resolves.toMatchObject({ state: 'revoked' });
@@ -618,7 +880,8 @@ describe('cluster service', () => {
       repository,
       new MemoryCoordinationStore(),
       new BuiltinTrafficDirector(),
-      new InMemoryEventBus()
+      new InMemoryEventBus(),
+      new FakeCertificateAuthority()
     );
     const claim = await cluster.createJoinToken({
       name: 'Worker',
@@ -631,7 +894,8 @@ describe('cluster service', () => {
         token: claim.token,
         name,
         publicUrl: `https://${name.toLowerCase()}.example`,
-        capabilities
+        capabilities,
+        csrPem: 'test-csr'
       });
 
     const results = await Promise.allSettled([attempt('WorkerA'), attempt('WorkerB')]);

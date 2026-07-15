@@ -218,6 +218,7 @@ export class LiveService {
     if (input.action === 'read' || input.action === 'playback') {
       if (
         this.options.allowUnauthenticatedInternalRead &&
+        input.protocol === 'rtsp' &&
         !input.user &&
         !input.password &&
         !input.token

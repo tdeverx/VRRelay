@@ -9,34 +9,120 @@ describe('relay configuration', () => {
     expect(() => loadConfig({ VRRELAY_VERSION: 'v1.2.3' })).toThrow();
   });
 
-  it.each(['false', '0', 'no', 'off', ' FALSE '])(
-    'parses the false-like environment value %j as false',
-    (value) => {
-      const config = loadConfig({
-        VRRELAY_TRUST_PROXY: value,
-        VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: value
-      });
+  it('accepts only explicit trusted-proxy CIDRs and safely migrates the removed boolean switch', () => {
+    expect(
+      loadConfig({
+        VRRELAY_TRUSTED_PROXY_CIDRS: '10.20.0.0/16, fd00:1234::/48'
+      }).trustedProxyCidrs
+    ).toEqual(['10.20.0.0/16', 'fd00:1234::/48']);
+    expect(() => loadConfig({ VRRELAY_TRUSTED_PROXY_CIDRS: '10.20.0.0' })).toThrow(
+      /explicit IPv4 or IPv6 CIDR/
+    );
+    expect(() => loadConfig({ VRRELAY_TRUSTED_PROXY_CIDRS: '10.20.0.0/33' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_TRUSTED_PROXY_CIDRS: '0.0.0.0/0' })).toThrow();
+    for (const value of ['false', '0', 'no', 'off', ' FALSE '])
+      expect(loadConfig({ VRRELAY_TRUST_PROXY: value }).trustedProxyCidrs).toEqual([]);
+    for (const value of ['true', '1', 'yes', 'on', 'definitely', ''])
+      expect(() => loadConfig({ VRRELAY_TRUST_PROXY: value })).toThrow(
+        /VRRELAY_TRUST_PROXY no longer enables proxy trust/
+      );
+  });
 
-      expect(config.trustProxy).toBe(false);
-      expect(config.mediaMtxAllowInternalRead).toBe(false);
+  it.each(['false', '0', 'no', 'off', ' FALSE '])(
+    'parses the false-like MediaMTX environment value %j as false',
+    (value) => {
+      expect(
+        loadConfig({ VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: value }).mediaMtxAllowInternalRead
+      ).toBe(false);
     }
   );
 
   it.each(['true', '1', 'yes', 'on', ' TRUE '])(
-    'parses the true-like environment value %j as true',
+    'parses the true-like MediaMTX environment value %j as true',
     (value) => {
-      const config = loadConfig({
-        VRRELAY_TRUST_PROXY: value,
-        VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: value
-      });
-
-      expect(config.trustProxy).toBe(true);
-      expect(config.mediaMtxAllowInternalRead).toBe(true);
+      expect(
+        loadConfig({ VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: value }).mediaMtxAllowInternalRead
+      ).toBe(true);
     }
   );
 
-  it('rejects ambiguous boolean values instead of enabling them', () => {
-    expect(() => loadConfig({ VRRELAY_TRUST_PROXY: 'definitely' })).toThrow();
+  it('rejects ambiguous MediaMTX boolean values instead of enabling them', () => {
+    expect(() => loadConfig({ VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'definitely' })).toThrow();
+  });
+
+  it('requires secure public surfaces, explicit proxies, and non-default secrets in production', () => {
+    const production = {
+      VRRELAY_ENVIRONMENT: 'production',
+      VRRELAY_PUBLIC_URL: 'https://relay.example.test',
+      VRRELAY_ADMIN_URL: 'https://admin.example.test',
+      VRRELAY_PLAYBACK_URL: 'https://play.example.test',
+      VRRELAY_TRUSTED_PROXY_CIDRS: '10.20.0.0/16',
+      VRRELAY_MEDIAMTX_READ_TOKEN: 'm'.repeat(32)
+    };
+    expect(loadConfig(production)).toMatchObject({
+      environment: 'production',
+      publicUrl: 'https://relay.example.test',
+      adminUrl: 'https://admin.example.test',
+      playbackUrl: 'https://play.example.test',
+      trustedProxyCidrs: ['10.20.0.0/16']
+    });
+    expect(() =>
+      loadConfig({ ...production, VRRELAY_ADMIN_URL: 'http://admin.example.test' })
+    ).toThrow(/must use HTTPS/);
+    expect(() => loadConfig({ ...production, VRRELAY_TRUSTED_PROXY_CIDRS: '' })).toThrow(
+      /explicit trusted-proxy CIDR/
+    );
+    expect(() =>
+      loadConfig({ ...production, VRRELAY_MEDIAMTX_READ_TOKEN: 'development-read-token-change-me' })
+    ).toThrow(/default or placeholder/);
+    expect(() =>
+      loadConfig({
+        ...production,
+        VRRELAY_POSTGRES_URL: 'postgresql://vrrelay:change-me@postgres.internal/vrrelay'
+      })
+    ).toThrow(/placeholder passwords/);
+  });
+
+  it('requires HTTPS enrollment and WSS transport for production data-plane nodes', () => {
+    const productionWorker = {
+      VRRELAY_ENVIRONMENT: 'production',
+      VRRELAY_PUBLIC_URL: 'https://source.example.test',
+      VRRELAY_ADMIN_URL: 'https://source.example.test',
+      VRRELAY_PLAYBACK_URL: 'https://source.example.test',
+      VRRELAY_TRUSTED_PROXY_CIDRS: '10.20.0.0/16',
+      VRRELAY_MEDIAMTX_READ_TOKEN: 'm'.repeat(32),
+      VRRELAY_NODE_ROLES: 'source-worker'
+    };
+    expect(() => loadConfig(productionWorker)).toThrow(/enrollment URL/);
+    expect(() =>
+      loadConfig({
+        ...productionWorker,
+        VRRELAY_CONTROLLER_ENROLLMENT_URL: 'http://controller.example.test/enroll',
+        VRRELAY_CONTROLLER_AGENT_URL: 'ws://controller.example.test/agent'
+      })
+    ).toThrow(/must use HTTPS/);
+    expect(
+      loadConfig({
+        ...productionWorker,
+        VRRELAY_CONTROLLER_ENROLLMENT_URL: 'https://controller.example.test/enroll',
+        VRRELAY_CONTROLLER_AGENT_URL: 'wss://controller.example.test/agent'
+      })
+    ).toMatchObject({
+      controllerEnrollmentUrl: 'https://controller.example.test/enroll',
+      controllerAgentUrl: 'wss://controller.example.test/agent'
+    });
+
+    expect(() =>
+      loadConfig({ ...productionWorker, VRRELAY_NODE_ROLES: 'source-worker,edge' })
+    ).toThrow(/enrollment URL/);
+    expect(
+      loadConfig({
+        ...productionWorker,
+        VRRELAY_NODE_ROLES: 'source-worker,edge',
+        VRRELAY_CONTROLLER_ENROLLMENT_URL: 'https://controller.example.test/enroll',
+        VRRELAY_CONTROLLER_AGENT_URL: 'wss://controller.example.test/agent'
+      }).nodeRoles
+    ).toEqual(['source-worker', 'edge']);
   });
 
   it('requires both managed MediaMTX paths or neither', () => {

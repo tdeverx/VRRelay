@@ -31,6 +31,10 @@ export interface ProviderCredentials {
   apiKey?: string;
 }
 
+export interface ProviderTransportPolicy {
+  allowPublicHttp: boolean;
+}
+
 export interface ProviderIdentity {
   userId?: string;
   username?: string;
@@ -47,6 +51,7 @@ export interface ResolvedSource {
   container?: string;
   defaultAudio?: number;
   defaultSubtitle?: number;
+  allowPublicHttp?: boolean;
 }
 
 export interface SourceResponse {
@@ -69,7 +74,8 @@ export interface MediaProvider {
   authenticate(
     baseUrl: string,
     credentials: ProviderCredentials,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    transportPolicy?: ProviderTransportPolicy
   ): Promise<ProviderIdentity>;
   validate(connection: ProviderConnection, secret: string, signal?: AbortSignal): Promise<void>;
   browse(
@@ -349,13 +355,16 @@ export interface MetricsExporter {
   stop(): Promise<void>;
 }
 
-export interface CertificateBundle {
+export interface SignedCertificate {
   certificatePem: string;
-  privateKeyPem: string;
   caCertificatePem: string;
   expiresAt: string;
   serialNumber: string;
   fingerprintSha256: string;
+}
+
+export interface CertificateBundle extends SignedCertificate {
+  privateKeyPem: string;
 }
 
 export { SwitchableMetricsExporter } from './metrics-exporter.js';
@@ -366,6 +375,12 @@ export interface CertificateAuthority {
     ttlMs: number,
     dnsNames?: readonly string[]
   ): Promise<CertificateBundle>;
+  signCsr(
+    commonName: string,
+    csrPem: string,
+    ttlMs: number,
+    dnsNames?: readonly string[]
+  ): Promise<SignedCertificate>;
   caCertificate(): Promise<string>;
 }
 

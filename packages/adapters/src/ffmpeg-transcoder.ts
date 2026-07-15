@@ -17,6 +17,22 @@ export interface FFmpegOptions {
   maxLogBytes?: number;
 }
 
+export function redactFfmpegError(output: string): string {
+  return output
+    .replace(
+      /\b(?:authorization|proxy-authorization|x-emby-token|cookie|set-cookie)\s*:[^\r\n]*/gi,
+      '[REDACTED_HEADER]'
+    )
+    .replace(/(\/internal\/source\/)[^/?#\s'"<>]+/gi, '$1[REDACTED]')
+    .replace(/(\/play\/)[^/?#\s'"<>]+/gi, '$1[REDACTED]')
+    .replace(
+      /([?&](?:access_token|api[_-]?key|auth|pass(?:phrase|word)?|signature|token|x-amz-signature)=)[^&\s'"<>]*/gi,
+      '$1[REDACTED]'
+    )
+    .replace(/(\bstreamid=)[^&\s'"<>]*/gi, '$1[REDACTED]')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, '[REDACTED_URL]');
+}
+
 export class FFmpegTranscoder implements Transcoder {
   readonly #ffmpegPath: string;
   readonly #maxLogBytes: number;
@@ -312,10 +328,12 @@ export class FFmpegTranscoder implements Transcoder {
       child.stderr.on('data', append);
       const abort = () => child.kill('SIGTERM');
       signal?.addEventListener('abort', abort, { once: true });
-      child.once('error', reject);
+      child.once('error', (error) =>
+        reject(new Error(`FFmpeg could not be started: ${redactFfmpegError(error.message)}`))
+      );
       child.once('close', (code, killedBySignal) => {
         signal?.removeEventListener('abort', abort);
-        if (signal?.aborted) return reject(signal.reason ?? new Error('FFmpeg was aborted'));
+        if (signal?.aborted) return reject(new Error('FFmpeg was aborted'));
         if (code === 0) return resolve(output);
         reject(new Error(`FFmpeg discovery failed (${killedBySignal ?? code ?? 'unknown'})`));
       });
@@ -383,13 +401,17 @@ export class FFmpegTranscoder implements Transcoder {
       if (output) child.stdout.pipe(output, { end: !mergeStderr });
       const abort = () => child.kill('SIGTERM');
       signal?.addEventListener('abort', abort, { once: true });
-      child.once('error', reject);
+      child.once('error', (error) =>
+        reject(new Error(`FFmpeg could not be started: ${redactFfmpegError(error.message)}`))
+      );
       child.once('close', (code, killedBySignal) => {
         signal?.removeEventListener('abort', abort);
-        if (signal?.aborted) return reject(signal.reason ?? new Error('FFmpeg was aborted'));
+        if (signal?.aborted) return reject(new Error('FFmpeg was aborted'));
         if (code === 0) return resolve();
         reject(
-          new Error(`FFmpeg failed (${killedBySignal ?? code ?? 'unknown'}): ${stderr.trim()}`)
+          new Error(
+            `FFmpeg failed (${killedBySignal ?? code ?? 'unknown'}): ${redactFfmpegError(stderr.trim())}`
+          )
         );
       });
     });

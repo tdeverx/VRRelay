@@ -24,6 +24,25 @@ git diff --exit-code -- apps/web/src/lib/generated/vrrelay-api
 
 Generated client files are committed so consumers and reviewers see contract changes directly.
 
+Agent-protocol changes also require the strict contract tests and reproducible
+schema freshness gate:
+
+```sh
+npx vitest run packages/contracts/src/agent-protocol.test.ts
+npm run check:agent-protocol-schema
+```
+
+The complete node-transport suite opens a loopback mTLS WSS listener and therefore
+requires an environment that permits local socket binding:
+
+```sh
+npx vitest run apps/relay/src/agent-transport.test.ts
+```
+
+It covers enrollment retry, certificate proof/rotation/expiry/revocation, replay
+and payload abuse, request cleanup, durable drain/restart behavior, and both DNS
+name and IP-address TLS identities.
+
 ## Distributed acceptance harness
 
 The release-level harness builds the production container and provisions a disposable cluster with

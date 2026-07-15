@@ -107,7 +107,7 @@ services:
     image: bluenviron/mediamtx:1.18.2
     environment:
       MTX_AUTHMETHOD: http
-      MTX_AUTHHTTPADDRESS: http://controller:8099/internal/mediamtx/auth
+      MTX_AUTHHTTPADDRESS: http://ingest-origin:8099/internal/mediamtx/auth
       MTX_API: 'yes'
       MTX_APIADDRESS: :9997
       MTX_HLS: 'yes'
@@ -138,7 +138,6 @@ services:
       VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-origin:8888
       VRRELAY_MEDIAMTX_API_URL: http://mediamtx-origin:9997
       VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-origin:8554
-      VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
     ports:
       - 18100:8099
       - 18110:8100
@@ -192,6 +191,7 @@ services:
       VRRELAY_NODE_JOIN_TOKEN: ${INGEST_JOIN_TOKEN:-missing}
       VRRELAY_MEDIAMTX_API_URL: http://mediamtx-origin:9997
       VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-origin:8554
+      VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
     volumes:
       - ingest-data:/data
       - ingest-cache:/cache

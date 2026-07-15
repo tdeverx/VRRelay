@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
+import { request as httpRequest, type IncomingMessage } from 'node:http';
+import { request as httpsRequest, type RequestOptions } from 'node:https';
+import { isIP } from 'node:net';
 import type {
   MediaProvider,
   PlaybackEvent,
   ProviderCredentials,
   ProviderIdentity,
+  ProviderTransportPolicy,
   ResolvedSource
 } from '@vrrelay/application';
 import type {
@@ -16,7 +20,9 @@ import type {
   ProviderCapability,
   ProviderConnection
 } from '@vrrelay/domain';
+import { providerAllowsPublicHttp } from '@vrrelay/domain';
 import type { CatalogQuery } from '@vrrelay/contracts';
+import { resolveProviderRequestTarget, type PinnedProviderTarget } from './network-policy.js';
 
 interface JellyfinSystemInfo {
   ServerName?: string;
@@ -73,11 +79,38 @@ interface JellyfinItemsResult {
   TotalRecordCount?: number;
 }
 
+export interface JellyfinProviderOptions {
+  resolveTarget?: (rawUrl: string) => Promise<PinnedProviderTarget>;
+  requestConnector?: JellyfinRequestConnector;
+}
+
+export interface JellyfinConnectorRequest {
+  url: URL;
+  options: RequestOptions;
+  body?: string;
+}
+
+export type JellyfinRequestConnector = (
+  request: JellyfinConnectorRequest
+) => Promise<IncomingMessage>;
+
+const nodeRequestConnector: JellyfinRequestConnector = ({ url, options, body }) =>
+  new Promise<IncomingMessage>((resolve, reject) => {
+    const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+    const outgoing = request(url, options, resolve);
+    outgoing.once('error', reject);
+    outgoing.end(body);
+  });
+
 export class JellyfinProvider implements MediaProvider {
   readonly #applicationVersion: string;
+  readonly #resolveTarget: (rawUrl: string) => Promise<PinnedProviderTarget>;
+  readonly #requestConnector: JellyfinRequestConnector;
 
-  constructor(applicationVersion = '0.1.0') {
+  constructor(applicationVersion = '0.1.0', options: JellyfinProviderOptions = {}) {
     this.#applicationVersion = applicationVersion;
+    this.#resolveTarget = options.resolveTarget ?? resolveProviderRequestTarget;
+    this.#requestConnector = options.requestConnector ?? nodeRequestConnector;
   }
   readonly type = 'jellyfin' as const;
   readonly capabilities = [
@@ -93,14 +126,20 @@ export class JellyfinProvider implements MediaProvider {
   async authenticate(
     baseUrl: string,
     credentials: ProviderCredentials,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    transportPolicy: ProviderTransportPolicy = { allowPublicHttp: false }
   ): Promise<ProviderIdentity> {
     const system = await this.#request<JellyfinSystemInfo>(baseUrl, '/System/Info/Public', {
-      signal
+      signal,
+      allowPublicHttp: transportPolicy.allowPublicHttp
     });
 
     if (credentials.apiKey) {
-      await this.#request(baseUrl, '/System/Info', { token: credentials.apiKey, signal });
+      await this.#request(baseUrl, '/System/Info', {
+        token: credentials.apiKey,
+        signal,
+        allowPublicHttp: transportPolicy.allowPublicHttp
+      });
       return {
         accessToken: credentials.apiKey,
         serverName: system.ServerName ?? 'Jellyfin',
@@ -114,6 +153,7 @@ export class JellyfinProvider implements MediaProvider {
     const result = await this.#request<JellyfinAuthResult>(baseUrl, '/Users/AuthenticateByName', {
       method: 'POST',
       signal,
+      allowPublicHttp: transportPolicy.allowPublicHttp,
       body: { Username: credentials.username, Pw: credentials.password }
     });
     if (!result.AccessToken || !result.User?.Id)
@@ -132,7 +172,11 @@ export class JellyfinProvider implements MediaProvider {
     secret: string,
     signal?: AbortSignal
   ): Promise<void> {
-    await this.#request(connection.baseUrl, '/System/Info', { token: secret, signal });
+    await this.#request(connection.baseUrl, '/System/Info', {
+      token: secret,
+      signal,
+      allowPublicHttp: providerAllowsPublicHttp(connection)
+    });
   }
 
   async browse(
@@ -159,7 +203,8 @@ export class JellyfinProvider implements MediaProvider {
       `${path}?${params}`,
       {
         token: secret,
-        signal
+        signal,
+        allowPublicHttp: providerAllowsPublicHttp(connection)
       }
     );
     return {
@@ -182,7 +227,8 @@ export class JellyfinProvider implements MediaProvider {
       connection.id,
       await this.#request<JellyfinItem>(connection.baseUrl, `${path}?${params}`, {
         token: secret,
-        signal
+        signal,
+        allowPublicHttp: providerAllowsPublicHttp(connection)
       })
     );
   }
@@ -216,24 +262,33 @@ export class JellyfinProvider implements MediaProvider {
           .digest('hex'),
       ...(version?.container ? { container: version.container } : {}),
       ...(selectedAudio ? { defaultAudio: selectedAudio.index } : {}),
-      ...(selectedSubtitle ? { defaultSubtitle: selectedSubtitle.index } : {})
+      ...(selectedSubtitle ? { defaultSubtitle: selectedSubtitle.index } : {}),
+      ...(providerAllowsPublicHttp(connection) ? { allowPublicHttp: true } : {})
     };
   }
 
   async openSource(source: ResolvedSource, range?: string, signal?: AbortSignal) {
-    const response = await fetch(source.url, {
+    const response = await this.#send(source.url, {
       headers: { ...source.headers, ...(range ? { Range: range } : {}) },
-      redirect: 'manual',
+      allowPublicHttp: source.allowPublicHttp === true,
       ...(signal ? { signal } : {})
     });
-    if (!response.ok || !response.body)
-      throw new Error(`Jellyfin source request failed (${response.status})`);
+    const status = response.statusCode ?? 0;
+    if (status >= 300 && status < 400) {
+      response.resume();
+      throw new Error('Jellyfin redirects are not allowed; configure the canonical server URL');
+    }
+    if (status < 200 || status >= 300) {
+      response.resume();
+      throw new Error(`Jellyfin source request failed (${status})`);
+    }
     const headers: Record<string, string> = {};
     for (const name of ['accept-ranges', 'content-length', 'content-range', 'content-type']) {
-      const value = response.headers.get(name);
-      if (value) headers[name] = value;
+      const value = response.headers[name];
+      if (typeof value === 'string') headers[name] = value;
+      else if (Array.isArray(value) && value[0]) headers[name] = value[0];
     }
-    return { stream: Readable.fromWeb(response.body as never), status: response.status, headers };
+    return { stream: response as Readable, status, headers };
   }
 
   async reportPlayback(
@@ -252,6 +307,7 @@ export class JellyfinProvider implements MediaProvider {
       method: 'POST',
       token: secret,
       signal,
+      allowPublicHttp: providerAllowsPublicHttp(connection),
       body: {
         ItemId: event.itemId,
         PositionTicks: event.positionTicks,
@@ -328,13 +384,11 @@ export class JellyfinProvider implements MediaProvider {
       token?: string;
       body?: unknown;
       signal?: AbortSignal | undefined;
+      allowPublicHttp?: boolean;
     } = {}
   ): Promise<T> {
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
+    const response = await this.#send(`${baseUrl.replace(/\/$/, '')}${path}`, {
       method: options.method ?? 'GET',
-      // A provider redirect must never forward its bearer token to another
-      // origin or turn an administrator-approved provider into an SSRF hop.
-      redirect: 'manual',
       headers: {
         Accept: 'application/json',
         Authorization: this.#authorization(options.token),
@@ -342,14 +396,90 @@ export class JellyfinProvider implements MediaProvider {
         ...(options.body ? { 'Content-Type': 'application/json' } : {})
       },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-      ...(options.signal ? { signal: options.signal } : {})
+      ...(options.signal ? { signal: options.signal } : {}),
+      allowPublicHttp: options.allowPublicHttp === true
     });
-    if (response.status >= 300 && response.status < 400) {
+    const status = response.statusCode ?? 0;
+    if (status >= 300 && status < 400) {
+      response.resume();
       throw new Error('Jellyfin redirects are not allowed; configure the canonical server URL');
     }
-    if (!response.ok) throw new Error(`Jellyfin request failed (${response.status})`);
-    if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
+    if (status < 200 || status >= 300) {
+      response.resume();
+      throw new Error(`Jellyfin request failed (${status})`);
+    }
+    if (status === 204) {
+      response.resume();
+      return undefined as T;
+    }
+    return this.#readJson<T>(response);
+  }
+
+  async #send(
+    rawUrl: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+      signal?: AbortSignal;
+      allowPublicHttp?: boolean;
+    }
+  ): Promise<IncomingMessage> {
+    // Resolve and validate immediately before opening the socket, then make
+    // Node's connector use only that result. Host and TLS SNI remain bound to
+    // the administrator-approved hostname while DNS cannot be queried again.
+    const target = await this.#resolveTarget(rawUrl);
+    if (
+      target.url.protocol === 'http:' &&
+      !target.privateNetwork &&
+      options.allowPublicHttp !== true
+    )
+      throw new Error('Jellyfin public HTTP transport requires explicit unsafe approval');
+    const hostname = target.url.hostname.replace(/^\[|\]$/g, '');
+    const headers = Object.fromEntries(
+      Object.entries(options.headers ?? {}).filter(([name]) => name.toLowerCase() !== 'host')
+    );
+    headers.Host = target.url.host;
+    try {
+      return await this.#requestConnector({
+        url: target.url,
+        options: {
+          method: options.method ?? 'GET',
+          headers,
+          agent: false,
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(target.url.protocol === 'https:' && isIP(hostname) === 0
+            ? { servername: hostname }
+            : {}),
+          lookup: (_hostname, lookupOptions, callback) => {
+            if (lookupOptions.all) {
+              callback(null, [{ address: target.address, family: target.family }]);
+              return;
+            }
+            callback(null, target.address, target.family);
+          }
+        },
+        ...(options.body ? { body: options.body } : {})
+      });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? 'request_error';
+      throw new Error(`Jellyfin transport failed (${code})`);
+    }
+  }
+
+  async #readJson<T>(response: IncomingMessage): Promise<T> {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of response) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      bytes += buffer.length;
+      if (bytes > 16 * 1024 * 1024) {
+        response.destroy();
+        throw new Error('Jellyfin response exceeded the 16 MiB JSON limit');
+      }
+      chunks.push(buffer);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
   }
 
   #authorization(token?: string): string {

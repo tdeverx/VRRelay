@@ -1,44 +1,164 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { createServer } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
-import { JellyfinProvider } from './jellyfin-provider.js';
+import type { IncomingMessage } from 'node:http';
+import { Readable } from 'node:stream';
+import { describe, expect, it } from 'vitest';
+import { UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE, type ProviderConnection } from '@vrrelay/domain';
+import { JellyfinProvider, type JellyfinConnectorRequest } from './jellyfin-provider.js';
+import { resolveProviderRequestTarget, validateProviderUrl } from './network-policy.js';
 
-const servers: ReturnType<typeof createServer>[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
-  );
-});
+function response(
+  statusCode: number,
+  body = '',
+  headers: IncomingMessage['headers'] = {}
+): IncomingMessage {
+  return Object.assign(Readable.from(body ? [body] : []), {
+    statusCode,
+    headers
+  }) as IncomingMessage;
+}
 
 describe('Jellyfin request transport', () => {
-  it('does not follow authenticated redirects', async () => {
-    let redirectedRequestSeen = false;
-    const server = createServer((request, response) => {
-      if (request.url === '/System/Info/Public') {
-        response.setHeader('content-type', 'application/json');
-        response.end(JSON.stringify({ ServerName: 'Fixture', Version: '1.0.0' }));
-        return;
-      }
-      if (request.url === '/System/Info') {
-        response.statusCode = 302;
-        response.setHeader('location', '/credential-target');
-        response.end();
-        return;
-      }
-      if (request.url === '/credential-target') redirectedRequestSeen = true;
-      response.statusCode = 204;
-      response.end();
-    });
-    servers.push(server);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Test server did not bind');
-
-    const provider = new JellyfinProvider();
+  it('rejects private HTTP that resolves publicly on the pinned connection lookup', async () => {
+    const addresses = ['192.168.10.20', '203.0.113.10'];
+    const lookup = async () => [{ address: addresses.shift()!, family: 4 }];
     await expect(
-      provider.authenticate(`http://127.0.0.1:${address.port}`, { apiKey: 'sensitive-api-key' })
+      validateProviderUrl('http://jellyfin.invalid', false, lookup)
+    ).resolves.toMatchObject({ privateNetwork: true });
+
+    let connectorCalls = 0;
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) => resolveProviderRequestTarget(rawUrl, lookup),
+      requestConnector: async () => {
+        connectorCalls += 1;
+        return response(500);
+      }
+    });
+    await expect(
+      provider.authenticate('http://jellyfin.invalid', { apiKey: 'sensitive-api-key' }, undefined, {
+        allowPublicHttp: false
+      })
+    ).rejects.toThrow(/explicit unsafe approval/);
+    expect(connectorCalls).toBe(0);
+  });
+
+  it('preserves explicitly approved public HTTP transport', async () => {
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async ({ url }) =>
+        url.pathname === '/System/Info/Public'
+          ? response(200, JSON.stringify({ ServerName: 'Fixture', Version: '1.0.0' }))
+          : response(204)
+    });
+    await expect(
+      provider.authenticate('http://jellyfin.invalid', { apiKey: 'sensitive-api-key' }, undefined, {
+        allowPublicHttp: true
+      })
+    ).resolves.toMatchObject({ accessToken: 'sensitive-api-key', serverName: 'Fixture' });
+  });
+
+  it('honors only the exact legacy unsafe-public notice when the policy field is absent', async () => {
+    let connectorCalls = 0;
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async () => {
+        connectorCalls += 1;
+        return response(204);
+      }
+    });
+    const now = new Date().toISOString();
+    const connection = {
+      id: 'legacy-provider',
+      type: 'jellyfin',
+      name: 'Legacy provider',
+      baseUrl: 'http://jellyfin.invalid',
+      authMode: 'api_key',
+      secretRef: 'provider:legacy',
+      capabilities: [],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    } satisfies ProviderConnection;
+
+    await expect(
+      provider.validate(
+        { ...connection, securityNotice: UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE },
+        'sensitive-api-key'
+      )
+    ).resolves.toBeUndefined();
+    await expect(
+      provider.validate(
+        {
+          ...connection,
+          securityNotice: 'HTTP traffic remains unencrypted on the private network.'
+        },
+        'sensitive-api-key'
+      )
+    ).rejects.toThrow(/explicit unsafe approval/);
+    expect(connectorCalls).toBe(1);
+  });
+
+  it('pins every connection and does not follow authenticated redirects', async () => {
+    let resolutions = 0;
+    const requests: JellyfinConnectorRequest[] = [];
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async (hostname) => {
+          resolutions += 1;
+          expect(hostname).toBe('jellyfin.invalid');
+          return [{ address: '203.0.113.10', family: 4 }];
+        }),
+      requestConnector: async (request) => {
+        requests.push(request);
+        if (request.url.pathname === '/System/Info/Public') {
+          return response(200, JSON.stringify({ ServerName: 'Fixture', Version: '1.0.0' }), {
+            'content-type': 'application/json'
+          });
+        }
+        if (request.url.pathname === '/System/Info') {
+          return response(302, '', { location: 'https://redirect.invalid/credential-target' });
+        }
+        return response(204);
+      }
+    });
+    await expect(
+      provider.authenticate('https://jellyfin.invalid:8920', {
+        apiKey: 'sensitive-api-key'
+      })
     ).rejects.toThrow(/redirects are not allowed/);
-    expect(redirectedRequestSeen).toBe(false);
+
+    expect(resolutions).toBe(2);
+    expect(requests).toHaveLength(2);
+    expect(requests.map(({ url }) => url.pathname)).toEqual([
+      '/System/Info/Public',
+      '/System/Info'
+    ]);
+    for (const request of requests) {
+      expect(request.url.hostname).toBe('jellyfin.invalid');
+      expect(request.options.agent).toBe(false);
+      expect(request.options.headers).toMatchObject({ Host: 'jellyfin.invalid:8920' });
+      expect(request.options.servername).toBe('jellyfin.invalid');
+      const lookup = request.options.lookup;
+      expect(lookup).toBeTypeOf('function');
+      const pinned = await new Promise<{ address: string; family: number }>((resolve, reject) => {
+        lookup!('ignored.invalid', {}, (error, address, family) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          if (typeof address !== 'string') {
+            reject(new Error('Expected a single pinned address'));
+            return;
+          }
+          if (typeof family !== 'number') {
+            reject(new Error('Expected a pinned address family'));
+            return;
+          }
+          resolve({ address, family });
+        });
+      });
+      expect(pinned).toEqual({ address: '203.0.113.10', family: 4 });
+    }
   });
 });

@@ -76,6 +76,34 @@ pinned-runtime repository gate are green.
   repository checks, and the zero-vulnerability npm audit also passed. See
   [Phase 2 evidence](evidence/phase-02.md).
 
+## Phase 3 implementation checkpoint
+
+Phase 3 has a build-first implementation checkpoint. Its final release
+verification is still pending.
+
+- Node enrollment now uses locally generated private keys, CSRs, single-use join
+  tokens, and retry-safe pending CSR reuse after a lost response.
+- Agent transport now uses outbound mTLS with strict versioned envelopes,
+  bounded payloads, replay/timestamp/deadline enforcement, typed responses,
+  connection-scoped cleanup, pending-request limits, and rate limits.
+- Certificate rotation stages a replacement identity and activates it only after
+  the node reconnects and proves possession with a timely hello. Staged proof is
+  matched by certificate fingerprint so Node serial-number representation
+  differences do not reject a valid replacement certificate.
+- Drain intent is durable and controller-authoritative. Offline updates persist
+  with `acknowledged: false`, and reconnect hello reconciles node-local state.
+- Production configuration now fails closed for unsafe public/admin/playback,
+  enrollment, and agent transport URLs; placeholder secrets; and ambiguous proxy
+  trust. Dedicated roles expose only their owned HTTP surfaces.
+- Jellyfin network policy now pins a validated DNS result to the outbound socket,
+  blocks redirects, rejects metadata and private-bypass address forms, and keeps
+  authenticated source access behind loopback grants with expanded redaction.
+- OpenAPI, generated dashboard client, the agent protocol schema, deployment
+  samples, environment docs, architecture docs, testing docs, and the changelog
+  were updated. The local lean guardrails passed: focused agent transport tests,
+  format check, generated-contract and TypeScript checks, lint, and build. See
+  [Phase 3 implementation evidence](evidence/phase-03-implementation.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
@@ -85,15 +113,14 @@ pinned-runtime repository gate are green.
 - A real PostgreSQL `pg_dump`/restore drill has not yet been retained; unit-tested
   backup invocation is not a substitute for the Phase 9–11 recovery and
   deployment evidence.
-- Node enrollment and transport still need Phase 3 hardening around node-local
-  private-key generation, certificate lifecycle/revocation propagation, typed
-  protocol messages, replay/rate enforcement, and public-WSS plus overlay-WSS
-  acceptance evidence. The underlying drain/revocation persistence and
-  role-specific runtime exposure are now Phase 2 foundations, not remaining
-  broad-write/composition gaps.
-- Distributed cancellation, restart recovery, placement, provider failover,
-  and node-secret transport still require their Phase 3/4 end-to-end gates even
-  though the underlying persistence transitions are now atomic.
+- Phase 3 still needs the final high-pass verification bundle: full pinned
+  runtime CI, audit, multi-process destructive cluster evidence, public-WSS and
+  overlay-WSS acceptance evidence, and deployment-target proof. The current
+  Phase 3 record is an implementation checkpoint, not a release claim.
+- Distributed cancellation, restart recovery, placement, provider failover, and
+  provider-binding job flows still require their Phase 4 implementation and
+  end-to-end gates even though the underlying persistence and transport
+  foundations are now in place.
 - Several media-profile fields and experimental delivery modes are incomplete
   or schema-only. Hardware pipelines, subtitles, tone mapping, passthrough,
   fMP4 concurrency, dual PC/Quest outputs, and corrupt-input handling lack the

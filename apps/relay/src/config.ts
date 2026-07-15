@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { resolve } from 'node:path';
+import { isIP } from 'node:net';
 import { z } from 'zod';
 import { APPLICATION_VERSION, SEMANTIC_VERSION_PATTERN } from './version.js';
 
@@ -26,8 +27,63 @@ const optionalSrtPassphrase = z.preprocess(
   z.string().min(10).max(79).optional()
 );
 
+const serviceUrl = z.url().superRefine((value, context) => {
+  const url = new URL(value);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:')
+    context.addIssue({ code: 'custom', message: 'URL must use HTTP or HTTPS' });
+  if (url.username || url.password)
+    context.addIssue({ code: 'custom', message: 'URL must not contain credentials' });
+  if (url.search || url.hash)
+    context.addIssue({ code: 'custom', message: 'URL must not contain a query or fragment' });
+});
+
+const agentUrl = z.url().superRefine((value, context) => {
+  const url = new URL(value);
+  if (url.protocol !== 'ws:' && url.protocol !== 'wss:')
+    context.addIssue({ code: 'custom', message: 'Agent URL must use WS or WSS' });
+  if (url.username || url.password)
+    context.addIssue({ code: 'custom', message: 'Agent URL must not contain credentials' });
+  if (url.search || url.hash)
+    context.addIssue({ code: 'custom', message: 'Agent URL must not contain a query or fragment' });
+});
+
+const trustedProxyCidr = z.string().refine(
+  (value) => {
+    const separator = value.lastIndexOf('/');
+    if (separator <= 0) return false;
+    const address = value.slice(0, separator);
+    const family = isIP(address);
+    const prefix = Number(value.slice(separator + 1));
+    return (
+      (family === 4 && Number.isInteger(prefix) && prefix >= 1 && prefix <= 32) ||
+      (family === 6 && Number.isInteger(prefix) && prefix >= 1 && prefix <= 128)
+    );
+  },
+  { message: 'Trusted proxies must be explicit IPv4 or IPv6 CIDR ranges' }
+);
+
+function isPlaceholderSecret(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === 'secret' ||
+    normalized === 'password' ||
+    normalized === 'token' ||
+    normalized === 'default' ||
+    normalized === 'changeme' ||
+    normalized === 'minioadmin' ||
+    normalized === 'postgres' ||
+    normalized === 'vrrelay' ||
+    normalized.includes('change-me') ||
+    normalized.includes('development-read-token')
+  );
+}
+
 function optionalEnvironmentValue(value: string | undefined): string | undefined {
   return value?.trim() ? value : undefined;
+}
+
+function isFalseEnvironmentValue(value: string): boolean {
+  return ['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
 }
 
 const liveOriginUrl = z
@@ -38,9 +94,12 @@ const liveOriginUrl = z
 
 const ConfigSchema = z
   .object({
+    environment: z.enum(['development', 'production']).default('development'),
     applicationVersion: z.string().regex(SEMANTIC_VERSION_PATTERN).default(APPLICATION_VERSION),
     listenAddr: z.string().default('127.0.0.1:8099'),
-    publicUrl: z.url().default('http://127.0.0.1:8099'),
+    publicUrl: serviceUrl.default('http://127.0.0.1:8099'),
+    adminUrl: serviceUrl.default('http://127.0.0.1:8099'),
+    playbackUrl: serviceUrl.default('http://127.0.0.1:8099'),
     setupToken: z.string().min(32).optional(),
     dataDir: z.string().default('.data'),
     cacheDir: z.string().default('.cache'),
@@ -68,7 +127,7 @@ const ConfigSchema = z
     backupSrtUrl: z.string().optional(),
     mediaMtxAllowInternalRead: environmentBoolean.default(false),
     mediaMtxReadToken: z.string().min(16).default('development-read-token-change-me'),
-    trustProxy: environmentBoolean.default(false),
+    trustedProxyCidrs: z.array(trustedProxyCidr).default([]),
     nodeId: z.string().default('standalone'),
     nodeName: z.string().default('VRRelay node'),
     nodeRegion: z.string().default('local'),
@@ -78,8 +137,8 @@ const ConfigSchema = z
     metricsToken: z.string().min(32).optional(),
     agentListenAddr: z.string().default('127.0.0.1:8100'),
     agentTlsNames: z.array(z.string().min(1)).default(['localhost']),
-    controllerAgentUrl: z.url().optional(),
-    controllerEnrollmentUrl: z.url().optional(),
+    controllerAgentUrl: agentUrl.optional(),
+    controllerEnrollmentUrl: serviceUrl.optional(),
     nodeJoinToken: z.string().min(32).optional(),
     repositoryDriver: z.enum(['sqlite', 'postgres']).default('sqlite'),
     postgresUrl: z.string().optional(),
@@ -109,16 +168,124 @@ const ConfigSchema = z
         message:
           'VRRELAY_MEDIAMTX_EXECUTABLE and VRRELAY_MEDIAMTX_CONFIG must be configured together'
       });
+
+    if (value.environment !== 'production') return;
+
+    for (const [field, url] of [
+      ['publicUrl', value.publicUrl],
+      ['adminUrl', value.adminUrl],
+      ['playbackUrl', value.playbackUrl]
+    ] as const) {
+      if (new URL(url).protocol !== 'https:')
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: 'Production public, administration, and playback URLs must use HTTPS'
+        });
+    }
+    if (value.trustedProxyCidrs.length === 0)
+      context.addIssue({
+        code: 'custom',
+        path: ['trustedProxyCidrs'],
+        message: 'Production requires at least one explicit trusted-proxy CIDR'
+      });
+
+    const dedicatedDataPlane = !value.nodeRoles.includes('controller');
+    if (dedicatedDataPlane && !value.controllerEnrollmentUrl)
+      context.addIssue({
+        code: 'custom',
+        path: ['controllerEnrollmentUrl'],
+        message: 'Production data-plane nodes require an HTTPS controller enrollment URL'
+      });
+    if (dedicatedDataPlane && !value.controllerAgentUrl)
+      context.addIssue({
+        code: 'custom',
+        path: ['controllerAgentUrl'],
+        message: 'Production data-plane nodes require a WSS controller agent URL'
+      });
+    if (
+      value.controllerEnrollmentUrl &&
+      new URL(value.controllerEnrollmentUrl).protocol !== 'https:'
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['controllerEnrollmentUrl'],
+        message: 'Production enrollment must use HTTPS'
+      });
+    if (value.controllerAgentUrl && new URL(value.controllerAgentUrl).protocol !== 'wss:')
+      context.addIssue({
+        code: 'custom',
+        path: ['controllerAgentUrl'],
+        message: 'Production agent transport must use WSS'
+      });
+
+    const secrets = [
+      ['setupToken', value.setupToken],
+      ['masterKey', value.masterKey],
+      ['liveOriginSrtPassphrase', value.liveOriginSrtPassphrase],
+      ['mediaMtxReadToken', value.mediaMtxReadToken],
+      ['metricsToken', value.metricsToken],
+      ['nodeJoinToken', value.nodeJoinToken],
+      ['s3AccessKeyId', value.s3AccessKeyId],
+      ['s3SecretAccessKey', value.s3SecretAccessKey],
+      ['azureAccountKey', value.azureAccountKey]
+    ] as const;
+    for (const [field, secret] of secrets) {
+      if (secret && isPlaceholderSecret(secret))
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: 'Production secrets must not use a default or placeholder value'
+        });
+    }
+    for (const [field, connectionUrl] of [
+      ['postgresUrl', value.postgresUrl],
+      ['valkeyUrl', value.valkeyUrl]
+    ] as const) {
+      if (!connectionUrl) continue;
+      try {
+        const password = decodeURIComponent(new URL(connectionUrl).password);
+        if (password && isPlaceholderSecret(password))
+          context.addIssue({
+            code: 'custom',
+            path: [field],
+            message: 'Production connection URLs must not use default or placeholder passwords'
+          });
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: 'Production connection URL is invalid'
+        });
+      }
+    }
+    if (value.mediaMtxReadToken.length < 32)
+      context.addIssue({
+        code: 'custom',
+        path: ['mediaMtxReadToken'],
+        message: 'Production MediaMTX read tokens must contain at least 32 characters'
+      });
   });
 
 export type RelayConfig = z.infer<typeof ConfigSchema>;
 
 export function loadConfig(environment = process.env): RelayConfig {
+  if (
+    environment.VRRELAY_TRUST_PROXY !== undefined &&
+    !isFalseEnvironmentValue(environment.VRRELAY_TRUST_PROXY)
+  )
+    throw new Error(
+      'VRRELAY_TRUST_PROXY no longer enables proxy trust; remove it and configure explicit VRRELAY_TRUSTED_PROXY_CIDRS instead'
+    );
   const root = process.cwd();
+  const publicUrl = environment.VRRELAY_PUBLIC_URL;
   return ConfigSchema.parse({
+    environment: environment.VRRELAY_ENVIRONMENT,
     applicationVersion: environment.VRRELAY_VERSION,
     listenAddr: environment.VRRELAY_LISTEN_ADDR,
-    publicUrl: environment.VRRELAY_PUBLIC_URL,
+    publicUrl,
+    adminUrl: optionalEnvironmentValue(environment.VRRELAY_ADMIN_URL) ?? publicUrl,
+    playbackUrl: optionalEnvironmentValue(environment.VRRELAY_PLAYBACK_URL) ?? publicUrl,
     setupToken: optionalEnvironmentValue(environment.VRRELAY_SETUP_TOKEN),
     dataDir: environment.VRRELAY_DATA_DIR ? resolve(root, environment.VRRELAY_DATA_DIR) : undefined,
     cacheDir: environment.VRRELAY_CACHE_DIR
@@ -144,7 +311,9 @@ export function loadConfig(environment = process.env): RelayConfig {
     backupSrtUrl: optionalEnvironmentValue(environment.VRRELAY_BACKUP_SRT_URL),
     mediaMtxAllowInternalRead: environment.VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ,
     mediaMtxReadToken: optionalEnvironmentValue(environment.VRRELAY_MEDIAMTX_READ_TOKEN),
-    trustProxy: environment.VRRELAY_TRUST_PROXY,
+    trustedProxyCidrs: environment.VRRELAY_TRUSTED_PROXY_CIDRS?.split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
     nodeId: environment.VRRELAY_NODE_ID,
     nodeName: environment.VRRELAY_NODE_NAME,
     nodeRegion: environment.VRRELAY_NODE_REGION,

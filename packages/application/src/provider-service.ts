@@ -6,7 +6,7 @@ import type {
   ProviderConnection,
   PublicProviderConnection
 } from '@vrrelay/domain';
-import { publicProvider } from '@vrrelay/domain';
+import { providerAllowsPublicHttp, publicProvider } from '@vrrelay/domain';
 import type { CatalogQuery, CreateProviderRequest } from '@vrrelay/contracts';
 import type {
   ClusterRepository,
@@ -31,7 +31,8 @@ function providersReferenceSameServer(
   return (
     current.id === candidate.id &&
     current.type === candidate.type &&
-    current.baseUrl.replace(/\/+$/, '') === candidate.baseUrl.replace(/\/+$/, '')
+    current.baseUrl.replace(/\/+$/, '') === candidate.baseUrl.replace(/\/+$/, '') &&
+    providerAllowsPublicHttp(current) === providerAllowsPublicHttp(candidate)
   );
 }
 
@@ -63,11 +64,16 @@ export class ProviderService {
     input: CreateProviderRequest & { normalizedBaseUrl: string; securityNotice?: string }
   ): Promise<PublicProviderConnection> {
     const adapter = this.providers.get(input.type);
-    const identity = await adapter.authenticate(input.normalizedBaseUrl, {
-      ...(input.authMode === 'api_key'
-        ? { apiKey: input.apiKey! }
-        : { username: input.username!, password: input.password! })
-    });
+    const identity = await adapter.authenticate(
+      input.normalizedBaseUrl,
+      {
+        ...(input.authMode === 'api_key'
+          ? { apiKey: input.apiKey! }
+          : { username: input.username!, password: input.password! })
+      },
+      undefined,
+      { allowPublicHttp: input.allowPublicHttp }
+    );
     const id = randomUUID();
     const now = new Date().toISOString();
     const connection: ProviderConnection = {
@@ -83,6 +89,7 @@ export class ProviderService {
       serverVersion: identity.serverVersion,
       capabilities: [...adapter.capabilities],
       healthy: true,
+      allowPublicHttp: input.allowPublicHttp,
       ...(input.securityNotice ? { securityNotice: input.securityNotice } : {}),
       createdAt: now,
       updatedAt: now
@@ -131,7 +138,9 @@ export class ProviderService {
       input.normalizedBaseUrl,
       input.authMode === 'api_key'
         ? { apiKey: input.apiKey! }
-        : { username: input.username!, password: input.password! }
+        : { username: input.username!, password: input.password! },
+      undefined,
+      { allowPublicHttp: input.allowPublicHttp }
     );
     const now = new Date().toISOString();
     const secretRef = `provider-binding:${bindingId}:${randomUUID()}`;
@@ -148,6 +157,7 @@ export class ProviderService {
       serverVersion: identity.serverVersion,
       capabilities: [...adapter.capabilities],
       healthy: true,
+      allowPublicHttp: input.allowPublicHttp,
       ...(input.securityNotice ? { securityNotice: input.securityNotice } : {}),
       createdAt: now,
       updatedAt: now

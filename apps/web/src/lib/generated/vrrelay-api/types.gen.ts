@@ -432,12 +432,31 @@ export type EnrollNodeRequest = {
     capabilities: NodeCapability;
 };
 
+export type SignedCertificate = {
+    /**
+     * PEM-encoded node certificate. No private key is returned.
+     */
+    readonly certificatePem: string;
+    /**
+     * PEM-encoded controller CA certificate.
+     */
+    readonly caCertificatePem: string;
+    expiresAt: string;
+    serialNumber: string;
+    fingerprintSha256: string;
+};
+
+export type EnrolledNode = {
+    node: ClusterNode;
+    certificate: SignedCertificate;
+};
+
 export type DrainNodeRequest = {
     draining: boolean;
 };
 
 export type RotateCertificateRequest = {
-    force?: boolean;
+    [key: string]: never;
 };
 
 export type CreateProviderBindingRequest = CreateProviderRequest & {
@@ -610,6 +629,21 @@ export type EnrollNodeRequestWritable = {
     publicUrl: string;
     internalUrl?: string;
     capabilities: NodeCapability;
+    /**
+     * PEM-encoded PKCS#10 CSR signed by the node's local RSA-2048 to RSA-4096 key.
+     */
+    csrPem: string;
+};
+
+export type SignedCertificateWritable = {
+    expiresAt: string;
+    serialNumber: string;
+    fingerprintSha256: string;
+};
+
+export type EnrolledNodeWritable = {
+    node: ClusterNode;
+    certificate: SignedCertificateWritable;
 };
 
 export type CreateProviderBindingRequestWritable = CreateProviderRequestWritable & {
@@ -1296,18 +1330,20 @@ export type EnrollNodeErrors = {
     /**
      * Request failed
      */
-    401: ApiError;
+    400: ApiError;
+    /**
+     * Request failed
+     */
+    409: ApiError;
 };
 
 export type EnrollNodeError = EnrollNodeErrors[keyof EnrollNodeErrors];
 
 export type EnrollNodeResponses = {
     /**
-     * Node identity; private material is returned only during enrollment
+     * Node identity and signed certificate chain; node private keys never leave the node
      */
-    201: {
-        [key: string]: unknown;
-    };
+    201: EnrolledNode;
 };
 
 export type EnrollNodeResponse = EnrollNodeResponses[keyof EnrollNodeResponses];
@@ -1366,7 +1402,7 @@ export type RotateNodeCertificateData = {
 
 export type RotateNodeCertificateResponses = {
     /**
-     * New certificate expiry; private material travels over the agent channel
+     * New certificate expiry; replacement private keys remain on the node and only signed public certificate material travels over the agent channel
      */
     200: {
         certificateExpiresAt: string;

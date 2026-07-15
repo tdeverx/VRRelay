@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
-import { EnrollNodeRequestSchema } from './index.js';
+import { EnrollNodeRequestSchema, RotateNodeCertificateRequestSchema } from './index.js';
 
 const capabilities = {
   encoders: [],
@@ -19,7 +19,8 @@ describe('node enrollment contract', () => {
     const base = {
       token: 'x'.repeat(32),
       name: 'Edge',
-      capabilities
+      capabilities,
+      csrPem: '-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----'
     };
     expect(
       EnrollNodeRequestSchema.safeParse({ ...base, publicUrl: 'https://edge.example' }).success
@@ -44,5 +45,26 @@ describe('node enrollment contract', () => {
       EnrollNodeRequestSchema.safeParse({ ...base, publicUrl: 'https://edge.example#fragment' })
         .success
     ).toBe(false);
+  });
+
+  it('requires a bounded certificate signing request', () => {
+    const base = {
+      token: 'x'.repeat(32),
+      name: 'Edge',
+      publicUrl: 'https://edge.example',
+      capabilities
+    };
+    expect(EnrollNodeRequestSchema.safeParse(base).success).toBe(false);
+    expect(EnrollNodeRequestSchema.safeParse({ ...base, csrPem: 'x' }).success).toBe(true);
+    expect(
+      EnrollNodeRequestSchema.safeParse({ ...base, csrPem: 'x'.repeat(16 * 1024 + 1) }).success
+    ).toBe(false);
+  });
+});
+
+describe('node certificate rotation contract', () => {
+  it('does not advertise an unsupported force option', () => {
+    expect(RotateNodeCertificateRequestSchema.safeParse({}).success).toBe(true);
+    expect(RotateNodeCertificateRequestSchema.safeParse({ force: true }).success).toBe(false);
   });
 });

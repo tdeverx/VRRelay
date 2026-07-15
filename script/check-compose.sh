@@ -4,9 +4,9 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-# Compose requires these values during interpolation. They are deterministic,
-# non-production fixtures used only to prove that every checked-in deployment
-# renders without missing variables or invalid merges.
+# Compose requires these deterministic fixture values during interpolation.
+# They render the production-mode manifests without using real deployment
+# credentials or contacting external services.
 export VRRELAY_MASTER_KEY='compose-check-master-key-000000000000'
 export VRRELAY_MEDIAMTX_READ_TOKEN='compose-check-read-token-00000000000'
 export POSTGRES_PASSWORD='compose-check-postgres'
@@ -20,7 +20,10 @@ export MINIO_EDGE_USER='compose-check-edge'
 export MINIO_EDGE_PASSWORD='compose-check-edge-password'
 export MINIO_INGEST_USER='compose-check-ingest'
 export MINIO_INGEST_PASSWORD='compose-check-ingest-password'
+export VRRELAY_ENVIRONMENT='production'
+export VRRELAY_TRUSTED_PROXY_CIDRS='10.20.0.0/16'
 export VRRELAY_PUBLIC_URL='https://relay.example.test'
+export VRRELAY_CONTROLLER_ENROLLMENT_URL='https://relay.example.test'
 export VRRELAY_EDGE_PUBLIC_URL='https://edge.example.test'
 export VRRELAY_SETUP_TOKEN='compose-check-setup-token-000000000'
 export VRRELAY_RTMP_URL='rtmp://ingest.example.test/live'

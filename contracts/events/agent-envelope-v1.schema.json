@@ -1,44 +1,803 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vrrelay.local/contracts/events/agent-envelope-v1.schema.json",
-  "title": "AgentEnvelopeV1",
-  "type": "object",
-  "required": ["version", "id", "sequence", "kind", "sentAt", "payload"],
-  "properties": {
-    "version": { "const": 1 },
-    "id": { "type": "string", "minLength": 1 },
-    "sequence": { "type": "integer", "minimum": 1 },
-    "kind": {
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "hello" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "nodeId": { "$ref": "#/$defs/__schema1" },
+            "capabilities": { "$ref": "#/$defs/__schema6" },
+            "draining": { "type": "boolean" }
+          },
+          "required": ["nodeId", "capabilities", "draining"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "heartbeat" },
+        "payload": { "$ref": "#/$defs/__schema7" }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "capabilities" },
+        "payload": { "$ref": "#/$defs/__schema7" }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.offer" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "jobId": { "$ref": "#/$defs/__schema8" },
+            "sessionId": { "$ref": "#/$defs/__schema1" },
+            "contentKey": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "segmentIndex": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+          },
+          "required": ["jobId", "sessionId", "contentKey", "segmentIndex"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.accept" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": true },
+            "jobId": { "$ref": "#/$defs/__schema8" }
+          },
+          "required": ["ok", "jobId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.reject" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": false },
+            "jobId": { "$ref": "#/$defs/__schema8" },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "retryable": { "default": false, "type": "boolean" }
+              },
+              "required": ["code", "message", "retryable"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["ok", "error"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.progress" },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "ensure" },
+                "token": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "segmentIndex": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+              },
+              "required": ["action", "token", "segmentIndex"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": { "type": "boolean", "const": true },
+                "jobId": { "$ref": "#/$defs/__schema8" },
+                "state": { "type": "string", "const": "running" }
+              },
+              "required": ["ok", "jobId", "state"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.complete" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": true },
+            "jobId": { "$ref": "#/$defs/__schema8" }
+          },
+          "required": ["ok", "jobId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.fail" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": false },
+            "jobId": { "$ref": "#/$defs/__schema8" },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "retryable": { "default": false, "type": "boolean" }
+              },
+              "required": ["code", "message", "retryable"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["ok", "jobId", "error"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "job.cancel" },
+        "payload": {
+          "type": "object",
+          "properties": { "jobId": { "$ref": "#/$defs/__schema8" } },
+          "required": ["jobId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "drain" },
+        "payload": {
+          "type": "object",
+          "properties": { "draining": { "type": "boolean" } },
+          "required": ["draining"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "certificate.rotate" },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "enum": ["administrative", "scheduled"] }
+              },
+              "required": ["reason"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": { "csrPem": { "type": "string", "minLength": 1, "maxLength": 16384 } },
+              "required": ["csrPem"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "certificate.rotated" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": true },
+            "certificate": {
+              "type": "object",
+              "properties": {
+                "certificatePem": { "type": "string", "minLength": 1, "maxLength": 65536 },
+                "caCertificatePem": { "type": "string", "minLength": 1, "maxLength": 65536 },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                },
+                "serialNumber": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "fingerprintSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              },
+              "required": [
+                "certificatePem",
+                "caCertificatePem",
+                "expiresAt",
+                "serialNumber",
+                "fingerprintSha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["ok", "certificate"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "log" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+            "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "context": { "$ref": "#/$defs/__schema9" }
+          },
+          "required": ["level", "message", "context"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "response" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": true },
+            "result": { "$ref": "#/$defs/__schema9" }
+          },
+          "required": ["ok"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "error" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean", "const": false },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "retryable": { "default": false, "type": "boolean" }
+              },
+              "required": ["code", "message", "retryable"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["ok", "error"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "provider.bind" },
+        "payload": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "nodeId": { "$ref": "#/$defs/__schema1" },
+                "providerId": { "$ref": "#/$defs/__schema1" },
+                "bindingId": { "$ref": "#/$defs/__schema1" },
+                "input": { "$ref": "#/$defs/__schema15" },
+                "creationMode": { "type": "string", "const": "new" },
+                "expectedProviderRevision": { "type": "null" }
+              },
+              "required": [
+                "nodeId",
+                "providerId",
+                "bindingId",
+                "input",
+                "creationMode",
+                "expectedProviderRevision"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "nodeId": { "$ref": "#/$defs/__schema1" },
+                "providerId": { "$ref": "#/$defs/__schema1" },
+                "bindingId": { "$ref": "#/$defs/__schema1" },
+                "input": { "$ref": "#/$defs/__schema15" },
+                "creationMode": { "type": "string", "const": "existing" },
+                "expectedProviderRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "nodeId",
+                "providerId",
+                "bindingId",
+                "input",
+                "creationMode",
+                "expectedProviderRevision"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "provider.unbind" },
+        "payload": {
+          "type": "object",
+          "properties": { "bindingId": { "$ref": "#/$defs/__schema1" } },
+          "required": ["bindingId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "provider.browse" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "providerId": { "$ref": "#/$defs/__schema1" },
+            "query": {
+              "type": "object",
+              "properties": {
+                "parentId": { "$ref": "#/$defs/__schema1" },
+                "search": { "type": "string", "maxLength": 200 },
+                "kinds": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/__schema21" }
+                },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "offset": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+              },
+              "required": ["kinds", "limit", "offset"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["providerId", "query"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "provider.item" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "providerId": { "$ref": "#/$defs/__schema1" },
+            "itemId": { "$ref": "#/$defs/__schema1" }
+          },
+          "required": ["providerId", "itemId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "provider.validate" },
+        "payload": {
+          "type": "object",
+          "properties": { "providerId": { "$ref": "#/$defs/__schema1" } },
+          "required": ["providerId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/__schema0" },
+        "id": { "$ref": "#/$defs/__schema1" },
+        "sequence": { "$ref": "#/$defs/__schema2" },
+        "sentAt": { "$ref": "#/$defs/__schema3" },
+        "replyTo": { "$ref": "#/$defs/__schema4" },
+        "deadlineAt": { "$ref": "#/$defs/__schema5" },
+        "kind": { "type": "string", "const": "provider.activity" },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "providerId": { "$ref": "#/$defs/__schema1" },
+            "sessionId": { "$ref": "#/$defs/__schema1" },
+            "itemId": { "$ref": "#/$defs/__schema1" },
+            "positionTicks": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            "paused": { "type": "boolean" },
+            "event": { "type": "string", "enum": ["start", "progress", "stop"] }
+          },
+          "required": ["providerId", "sessionId", "itemId", "positionTicks", "paused", "event"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["version", "id", "sequence", "sentAt", "kind", "payload"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "__schema0": { "type": "number", "const": 1 },
+    "__schema1": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "__schema2": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+    "__schema3": {
       "type": "string",
-      "enum": [
-        "hello",
-        "heartbeat",
-        "capabilities",
-        "job.offer",
-        "job.accept",
-        "job.reject",
-        "job.progress",
-        "job.complete",
-        "job.fail",
-        "job.cancel",
-        "drain",
-        "certificate.rotate",
-        "certificate.rotated",
-        "log",
-        "response",
-        "error",
-        "provider.bind",
-        "provider.unbind",
-        "provider.browse",
-        "provider.item",
-        "provider.validate",
-        "provider.activity"
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    },
+    "__schema4": { "$ref": "#/$defs/__schema1" },
+    "__schema5": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    },
+    "__schema6": {
+      "type": "object",
+      "properties": {
+        "encoders": { "type": "array", "items": { "type": "string" } },
+        "hardwareDevices": { "type": "array", "items": { "type": "string" } },
+        "maxWorkers": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "activeWorkers": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "queuedWorkers": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "cacheBytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "cacheLimitBytes": {
+          "anyOf": [
+            { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            { "type": "null" }
+          ]
+        },
+        "egressMbps": { "type": "number", "minimum": 0 },
+        "providerIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": [
+        "encoders",
+        "hardwareDevices",
+        "maxWorkers",
+        "activeWorkers",
+        "queuedWorkers",
+        "cacheBytes",
+        "cacheLimitBytes",
+        "egressMbps",
+        "providerIds"
+      ],
+      "additionalProperties": false
+    },
+    "__schema7": {
+      "type": "object",
+      "properties": {
+        "capabilities": { "$ref": "#/$defs/__schema6" },
+        "draining": { "type": "boolean" }
+      },
+      "required": ["capabilities", "draining"],
+      "additionalProperties": false
+    },
+    "__schema8": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "__schema9": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1, "maxLength": 200 },
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/__schema10" },
+          { "maxItems": 100, "type": "array", "items": { "$ref": "#/$defs/__schema11" } },
+          {
+            "type": "object",
+            "propertyNames": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "additionalProperties": { "$ref": "#/$defs/__schema11" }
+          }
+        ]
+      }
+    },
+    "__schema10": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string", "maxLength": 16384 }
       ]
     },
-    "sentAt": { "type": "string", "format": "date-time" },
-    "replyTo": { "type": "string" },
-    "deadlineAt": { "type": "string", "format": "date-time" },
-    "payload": { "type": "object", "additionalProperties": true }
+    "__schema11": {
+      "anyOf": [
+        { "$ref": "#/$defs/__schema10" },
+        { "maxItems": 100, "type": "array", "items": { "$ref": "#/$defs/__schema12" } },
+        {
+          "type": "object",
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "additionalProperties": { "$ref": "#/$defs/__schema12" }
+        }
+      ]
+    },
+    "__schema12": {
+      "anyOf": [
+        { "$ref": "#/$defs/__schema10" },
+        { "maxItems": 100, "type": "array", "items": { "$ref": "#/$defs/__schema13" } },
+        {
+          "type": "object",
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "additionalProperties": { "$ref": "#/$defs/__schema13" }
+        }
+      ]
+    },
+    "__schema13": {
+      "anyOf": [
+        { "$ref": "#/$defs/__schema10" },
+        { "maxItems": 100, "type": "array", "items": { "$ref": "#/$defs/__schema14" } },
+        {
+          "type": "object",
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "additionalProperties": { "$ref": "#/$defs/__schema14" }
+        }
+      ]
+    },
+    "__schema14": {
+      "anyOf": [
+        { "$ref": "#/$defs/__schema10" },
+        { "maxItems": 100, "type": "array", "items": { "$ref": "#/$defs/__schema10" } },
+        {
+          "type": "object",
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "additionalProperties": { "$ref": "#/$defs/__schema10" }
+        }
+      ]
+    },
+    "__schema15": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "nodeId": { "$ref": "#/$defs/__schema1" },
+            "providerId": { "$ref": "#/$defs/__schema16" },
+            "type": { "$ref": "#/$defs/__schema17" },
+            "name": { "$ref": "#/$defs/__schema18" },
+            "baseUrl": { "$ref": "#/$defs/__schema19" },
+            "allowPublicHttp": { "$ref": "#/$defs/__schema20" },
+            "authMode": { "type": "string", "const": "user_token" },
+            "username": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "password": { "type": "string", "minLength": 1, "maxLength": 2000 }
+          },
+          "required": [
+            "nodeId",
+            "type",
+            "name",
+            "baseUrl",
+            "allowPublicHttp",
+            "authMode",
+            "username",
+            "password"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "nodeId": { "$ref": "#/$defs/__schema1" },
+            "providerId": { "$ref": "#/$defs/__schema16" },
+            "type": { "$ref": "#/$defs/__schema17" },
+            "name": { "$ref": "#/$defs/__schema18" },
+            "baseUrl": { "$ref": "#/$defs/__schema19" },
+            "allowPublicHttp": { "$ref": "#/$defs/__schema20" },
+            "authMode": { "type": "string", "const": "api_key" },
+            "apiKey": { "type": "string", "minLength": 1, "maxLength": 2000 }
+          },
+          "required": [
+            "nodeId",
+            "type",
+            "name",
+            "baseUrl",
+            "allowPublicHttp",
+            "authMode",
+            "apiKey"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "__schema16": { "$ref": "#/$defs/__schema1" },
+    "__schema17": { "type": "string", "const": "jellyfin" },
+    "__schema18": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "__schema19": { "type": "string", "format": "uri" },
+    "__schema20": { "type": "boolean" },
+    "__schema21": { "type": "string", "minLength": 1, "maxLength": 100 }
   },
-  "additionalProperties": false
+  "$id": "https://vrrelay.local/contracts/events/agent-envelope-v1.schema.json",
+  "title": "AgentEnvelopeV1"
 }

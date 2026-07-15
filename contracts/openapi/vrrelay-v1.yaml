@@ -254,7 +254,8 @@ paths:
       requestBody: { $ref: '#/components/requestBodies/EnrollNode' }
       responses:
         '201': { $ref: '#/components/responses/EnrolledNode' }
-        '401': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /nodes/connect:
     get:
       operationId: connectNodeAgent
@@ -400,7 +401,7 @@ components:
     personalToken: { type: http, scheme: bearer }
     clusterNode:
       type: mutualTLS
-      description: Seven-day rotating node certificate issued through a single-use enrollment token.
+      description: Seven-day rotating node certificate signed from a node-generated private key and CSR.
   parameters:
     ProviderId: { name: providerId, in: path, required: true, schema: { type: string } }
     ItemId: { name: itemId, in: path, required: true, schema: { type: string } }
@@ -650,12 +651,12 @@ components:
       }
     EnrolledNode:
       {
-        description: Node identity; private material is returned only during enrollment,
-        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+        description: Node identity and signed certificate chain; node private keys never leave the node,
+        content: { application/json: { schema: { $ref: '#/components/schemas/EnrolledNode' } } }
       }
     RotatedCertificate:
       {
-        description: New certificate expiry; private material travels over the agent channel,
+        description: New certificate expiry; replacement private keys remain on the node and only signed public certificate material travels over the agent channel,
         content:
           {
             application/json:
@@ -1345,13 +1346,43 @@ components:
       }
     EnrollNodeRequest:
       type: object
-      required: [token, name, publicUrl, capabilities]
+      additionalProperties: false
+      required: [token, name, publicUrl, capabilities, csrPem]
       properties:
         token: { type: string, minLength: 32, writeOnly: true }
         name: { type: string, minLength: 1, maxLength: 120 }
         publicUrl: { type: string, format: uri, pattern: '^https?://' }
         internalUrl: { type: string, format: uri, pattern: '^https?://' }
         capabilities: { $ref: '#/components/schemas/NodeCapability' }
+        csrPem:
+          type: string
+          minLength: 1
+          maxLength: 16384
+          writeOnly: true
+          description: PEM-encoded PKCS#10 CSR signed by the node's local RSA-2048 to RSA-4096 key.
+    SignedCertificate:
+      type: object
+      additionalProperties: false
+      required: [certificatePem, caCertificatePem, expiresAt, serialNumber, fingerprintSha256]
+      properties:
+        certificatePem:
+          type: string
+          readOnly: true
+          description: PEM-encoded node certificate. No private key is returned.
+        caCertificatePem:
+          type: string
+          readOnly: true
+          description: PEM-encoded controller CA certificate.
+        expiresAt: { type: string, format: date-time }
+        serialNumber: { type: string }
+        fingerprintSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    EnrolledNode:
+      type: object
+      additionalProperties: false
+      required: [node, certificate]
+      properties:
+        node: { $ref: '#/components/schemas/ClusterNode' }
+        certificate: { $ref: '#/components/schemas/SignedCertificate' }
     DrainNodeRequest:
       {
         type: object,
@@ -1359,12 +1390,7 @@ components:
         required: [draining],
         properties: { draining: { type: boolean } }
       }
-    RotateCertificateRequest:
-      {
-        type: object,
-        additionalProperties: false,
-        properties: { force: { type: boolean, default: false } }
-      }
+    RotateCertificateRequest: { type: object, additionalProperties: false }
     CreateProviderBindingRequest:
       allOf:
         - { $ref: '#/components/schemas/CreateProviderRequest' }

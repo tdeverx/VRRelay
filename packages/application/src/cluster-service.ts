@@ -13,23 +13,33 @@ import type {
 } from '@vrrelay/domain';
 import type {
   CertificateAuthority,
-  CertificateBundle,
   ClusterRepository,
   CoordinationStore,
   EventBus,
+  SignedCertificate,
   TrafficDirector
 } from './index.js';
 import { ConflictError, NotFoundError } from './errors.js';
 import { opaqueToken } from './services.js';
 
 const JOIN_PREFIX = 'cluster:join:';
+const JOIN_CONSUME_LEASE_MS = 60_000;
+const JOIN_ENROLLMENT_RETRY_MS = 5 * 60_000;
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
+
+interface JoinEnrollmentClaim {
+  csrSha256: string;
+  node: ClusterNode;
+  certificate: SignedCertificate;
+  status: 'pending' | 'completed';
+}
 
 interface JoinClaim {
   name: string;
   roles: NodeRole[];
   region: string;
   expiresAt: string;
+  enrollment?: JoinEnrollmentClaim;
 }
 
 export interface EnrollNodeInput {
@@ -38,6 +48,7 @@ export interface EnrollNodeInput {
   publicUrl: string;
   internalUrl?: string;
   capabilities: NodeCapability;
+  csrPem: string;
 }
 
 export class BuiltinTrafficDirector implements TrafficDirector {
@@ -142,60 +153,113 @@ export class ClusterService {
   }
 
   async enroll(input: EnrollNodeInput) {
+    if (!this.certificates)
+      throw new ConflictError('Cluster certificate authority is not configured');
     const key = `${JOIN_PREFIX}${this.#hash(input.token)}`;
     const consumeLease = `${key}:consume`;
     const consumeOwner = randomUUID();
-    if (!(await this.coordination.acquire(consumeLease, consumeOwner, 30_000)))
+    if (!(await this.coordination.acquire(consumeLease, consumeOwner, JOIN_CONSUME_LEASE_MS)))
       throw new ConflictError('Join token is invalid, expired, or already used');
-    let serialized: string | undefined;
     try {
-      serialized = await this.coordination.get(key);
+      const serialized = await this.coordination.get(key);
       if (!serialized) throw new ConflictError('Join token is invalid, expired, or already used');
-      await this.coordination.delete(key);
+      const claim = JSON.parse(serialized) as JoinClaim;
+      const csrSha256 = this.#hash(input.csrPem);
+      let enrollment = claim.enrollment;
+
+      if (enrollment) {
+        if (enrollment.csrSha256 !== csrSha256)
+          throw new ConflictError('Join token is invalid, expired, or already used');
+      } else {
+        if (Date.parse(claim.expiresAt) <= Date.now())
+          throw new ConflictError('Join token has expired');
+        const id = randomUUID();
+        const now = new Date().toISOString();
+        const certificate = await this.certificates.signCsr(
+          `node:${id}`,
+          input.csrPem,
+          7 * 24 * 60 * 60_000
+        );
+        const node: ClusterNode = {
+          id,
+          name: input.name || claim.name,
+          roles: claim.roles,
+          region: claim.region,
+          publicUrl: input.publicUrl,
+          ...(input.internalUrl ? { internalUrl: input.internalUrl } : {}),
+          state: 'online',
+          capabilities: input.capabilities,
+          weight: 100,
+          certificateExpiresAt: certificate.expiresAt,
+          lastHeartbeatAt: now,
+          createdAt: now,
+          updatedAt: now
+        };
+        enrollment = {
+          csrSha256,
+          node,
+          certificate,
+          status: 'pending'
+        };
+        await this.#storeJoinClaim(
+          key,
+          { ...claim, enrollment },
+          Math.max(JOIN_ENROLLMENT_RETRY_MS, Date.parse(claim.expiresAt) - Date.now())
+        );
+      }
+
+      let created = await this.#reconcileEnrollment(enrollment);
+      if (!created) {
+        if (enrollment.status === 'completed')
+          throw new ConflictError('Join token is invalid, expired, or already used');
+        try {
+          created = (
+            await this.repository.createNode(
+              enrollment.node,
+              this.#certificateState(
+                enrollment.node.id,
+                enrollment.certificate,
+                enrollment.node.createdAt
+              )
+            )
+          ).value;
+        } catch (error) {
+          created = await this.#reconcileEnrollment(enrollment);
+          if (!created) throw error;
+        }
+      }
+
+      if (enrollment.status === 'pending') {
+        enrollment = { ...enrollment, status: 'completed' };
+        await this.#storeJoinClaim(key, { ...claim, enrollment }, JOIN_ENROLLMENT_RETRY_MS);
+        this.events.publish({
+          version: 1,
+          id: randomUUID(),
+          type: 'node.joined',
+          timestamp: enrollment.node.createdAt,
+          payload: { nodeId: created.id, name: created.name, roles: created.roles }
+        });
+      }
+
+      return { node: created, certificate: enrollment.certificate };
     } finally {
       await this.coordination.release(consumeLease, consumeOwner);
     }
-    const claim = JSON.parse(serialized) as JoinClaim;
-    if (Date.parse(claim.expiresAt) <= Date.now())
-      throw new ConflictError('Join token has expired');
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    const certificate = await this.#issueCertificate(id);
-    const node: ClusterNode = {
-      id,
-      name: input.name || claim.name,
-      roles: claim.roles,
-      region: claim.region,
-      publicUrl: input.publicUrl,
-      ...(input.internalUrl ? { internalUrl: input.internalUrl } : {}),
-      state: 'online',
-      capabilities: input.capabilities,
-      weight: 100,
-      ...(certificate ? { certificateExpiresAt: certificate.expiresAt } : {}),
-      lastHeartbeatAt: now,
-      createdAt: now,
-      updatedAt: now
-    };
-    const created = await this.repository.createNode(
-      node,
-      certificate ? this.#certificateState(id, certificate, now) : undefined
-    );
-    this.events.publish({
-      version: 1,
-      id: randomUUID(),
-      type: 'node.joined',
-      timestamp: now,
-      payload: { nodeId: id, name: created.value.name, roles: created.value.roles }
-    });
-    return { node: created.value, certificate };
   }
 
-  async rotateCertificate(id: string) {
+  async signNodeCertificate(id: string, csrPem: string): Promise<SignedCertificate> {
     const initial = await this.repository.getVersionedNode(id);
     if (!initial || initial.value.state === 'revoked')
       throw new NotFoundError('Active cluster node was not found');
-    const certificate = await this.#issueCertificate(id);
-    if (!certificate) throw new ConflictError('Cluster certificate authority is not configured');
+    if (!this.certificates)
+      throw new ConflictError('Cluster certificate authority is not configured');
+    return this.certificates.signCsr(`node:${id}`, csrPem, 7 * 24 * 60 * 60_000);
+  }
+
+  async activateNodeCertificate(
+    id: string,
+    certificate: SignedCertificate
+  ): Promise<SignedCertificate> {
     const rotatedAt = new Date().toISOString();
     const certificateState = this.#certificateState(id, certificate, rotatedAt);
     for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
@@ -465,6 +529,10 @@ export class ClusterService {
     );
   }
 
+  async get(id: string): Promise<ClusterNode | undefined> {
+    return this.repository.getNode(id);
+  }
+
   async selectEdge(sessionId: string, preferredRegion?: string): Promise<EdgeRoute | undefined> {
     const node = await this.director.selectEdge(sessionId, await this.list(), preferredRegion);
     if (!node) return undefined;
@@ -523,6 +591,38 @@ export class ClusterService {
       : { reason: 'no-compatible-source-worker' };
   }
 
+  async #storeJoinClaim(key: string, claim: JoinClaim, ttlMs: number): Promise<void> {
+    const serialized = JSON.stringify(claim);
+    try {
+      await this.coordination.set(key, serialized, Math.max(1, ttlMs));
+    } catch (error) {
+      // A coordination write may commit and still report a transport failure.
+      // Re-read before surfacing the error so a retry never generates a second
+      // identity for an enrollment state that was already published.
+      const current = await this.coordination.get(key).catch(() => undefined);
+      if (current !== serialized) throw error;
+    }
+  }
+
+  async #reconcileEnrollment(enrollment: JoinEnrollmentClaim): Promise<ClusterNode | undefined> {
+    const current = await this.repository.getVersionedNode(enrollment.node.id);
+    if (!current) return undefined;
+    const certificate = (await this.repository.listNodeCertificates(enrollment.node.id)).find(
+      (candidate) =>
+        candidate.serialNumber === enrollment.certificate.serialNumber &&
+        candidate.fingerprintSha256.toLowerCase() ===
+          enrollment.certificate.fingerprintSha256.toLowerCase()
+    );
+    if (
+      !certificate ||
+      certificate.revokedAt ||
+      certificate.expiresAt !== enrollment.certificate.expiresAt ||
+      current.value.createdAt !== enrollment.node.createdAt
+    )
+      throw new ConflictError('Join token is invalid, expired, or already used');
+    return current.value;
+  }
+
   #hash(value: string): string {
     return createHash('sha256').update(value).digest('hex');
   }
@@ -549,14 +649,9 @@ export class ClusterService {
     throw new ConflictError('Cluster node maintenance conflicted with repeated concurrent updates');
   }
 
-  async #issueCertificate(nodeId: string) {
-    if (!this.certificates) return undefined;
-    return this.certificates.issue(`node:${nodeId}`, 7 * 24 * 60 * 60_000);
-  }
-
   #certificateState(
     nodeId: string,
-    certificate: CertificateBundle,
+    certificate: SignedCertificate,
     createdAt: string
   ): NodeCertificateState {
     return {

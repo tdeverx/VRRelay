@@ -194,6 +194,31 @@ function providerAgentHandler(providers: ProviderService): NodeAgentOptions['onP
   };
 }
 
+export function nodeRoutingPublicUrl(config: Pick<RelayConfig, 'playbackUrl'>): string {
+  return config.playbackUrl;
+}
+
+export function configuredNodeAgentOptions(
+  config: RelayConfig,
+  secrets: NodeAgentOptions['secretStore'],
+  capabilities: () => Promise<NodeCapability>,
+  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider'>,
+  internalUrl?: string
+): NodeAgentOptions | undefined {
+  if (!config.controllerAgentUrl || !config.controllerEnrollmentUrl) return undefined;
+  return {
+    controllerUrl: config.controllerAgentUrl,
+    enrollmentUrl: config.controllerEnrollmentUrl,
+    ...(config.nodeJoinToken ? { joinToken: config.nodeJoinToken } : {}),
+    nodeName: config.nodeName,
+    publicUrl: nodeRoutingPublicUrl(config),
+    ...(internalUrl ? { internalUrl } : {}),
+    secretStore: secrets,
+    capabilities,
+    ...handlers
+  };
+}
+
 function configuredNodeAgent(
   config: RelayConfig,
   secrets: NodeAgentOptions['secretStore'],
@@ -201,18 +226,8 @@ function configuredNodeAgent(
   handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider'>,
   internalUrl?: string
 ): NodeAgent | undefined {
-  if (!config.controllerAgentUrl || !config.controllerEnrollmentUrl) return undefined;
-  return new NodeAgent({
-    controllerUrl: config.controllerAgentUrl,
-    enrollmentUrl: config.controllerEnrollmentUrl,
-    ...(config.nodeJoinToken ? { joinToken: config.nodeJoinToken } : {}),
-    nodeName: config.nodeName,
-    publicUrl: config.publicUrl,
-    ...(internalUrl ? { internalUrl } : {}),
-    secretStore: secrets,
-    capabilities,
-    ...handlers
-  });
+  const options = configuredNodeAgentOptions(config, secrets, capabilities, handlers, internalUrl);
+  return options ? new NodeAgent(options) : undefined;
 }
 
 function bindShutdown(shutdown: () => Promise<void>): void {
@@ -287,7 +302,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     transcoder,
     events,
     {
-      publicUrl: config.publicUrl,
+      publicUrl: config.playbackUrl,
       internalUrl: `http://127.0.0.1:${listen.port}`,
       cacheDir: config.cacheDir,
       cacheTtlMs: config.cacheTtlMs,
@@ -320,23 +335,27 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
 
   const auth = new AuthService(repository);
   const audit = new AuditService(repository);
-  const app = await createServer(config, {
-    repository,
-    auth,
-    audit,
-    providers,
-    profiles,
-    sessions,
-    live,
-    events,
-    capabilities,
-    cluster,
-    objectStore,
-    coordination,
-    metrics,
-    backends,
-    ...(agentController ? { agentController } : {})
-  });
+  const app = await createServer(
+    config,
+    {
+      repository,
+      auth,
+      audit,
+      providers,
+      profiles,
+      sessions,
+      live,
+      events,
+      capabilities,
+      cluster,
+      objectStore,
+      coordination,
+      metrics,
+      backends,
+      ...(agentController ? { agentController } : {})
+    },
+    plan.kind === 'controller' ? 'controller' : 'standalone'
+  );
   const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, async () =>
     (
       await Promise.all(
@@ -358,7 +377,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       name: config.nodeName,
       roles: config.nodeRoles,
       region: config.nodeRegion,
-      publicUrl: config.publicUrl,
+      publicUrl: nodeRoutingPublicUrl(config),
       state: 'online',
       capabilities: await currentNodeCapabilities(),
       weight: 100
@@ -489,7 +508,7 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     transcoder,
     events,
     {
-      publicUrl: config.publicUrl,
+      publicUrl: config.playbackUrl,
       internalUrl: `http://127.0.0.1:${listen.port}`,
       cacheDir: config.cacheDir,
       cacheTtlMs: config.cacheTtlMs,
@@ -661,7 +680,7 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
     EDGE_TRANSCODER,
     events,
     {
-      publicUrl: config.publicUrl,
+      publicUrl: config.playbackUrl,
       internalUrl: `http://127.0.0.1:${listen.port}`,
       cacheDir: config.cacheDir,
       cacheTtlMs: config.cacheTtlMs,

@@ -473,6 +473,42 @@ describe('VOD relay service', () => {
 });
 
 describe('provider lifecycle', () => {
+  it('persists explicit public HTTP approval without exposing the internal policy field', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-http-policy-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const secrets = new MemorySecretStore();
+    const registry = new DefaultProviderRegistry();
+    let observedApproval: boolean | undefined;
+    registry.register({
+      ...provider,
+      authenticate: async (_baseUrl, _credentials, _signal, transportPolicy) => {
+        observedApproval = transportPolicy?.allowPublicHttp;
+        return {
+          accessToken: 'fixture-access-token',
+          serverName: 'Fixture',
+          serverVersion: '1.0.0'
+        };
+      }
+    });
+    const service = new ProviderService(repo, secrets, registry);
+
+    const created = await service.create({
+      type: 'jellyfin',
+      name: 'Unsafe HTTP fixture',
+      baseUrl: 'http://media.example.test',
+      normalizedBaseUrl: 'http://media.example.test',
+      authMode: 'api_key',
+      apiKey: 'fixture-api-key',
+      allowPublicHttp: true
+    });
+
+    expect(observedApproval).toBe(true);
+    expect(created).not.toHaveProperty('allowPublicHttp');
+    await expect(repo.getProvider(created.id)).resolves.toMatchObject({ allowPublicHttp: true });
+  });
+
   it('removes the local credential and rejects deletion while a session depends on it', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-delete-'));
     dirs.push(dir);
@@ -748,6 +784,48 @@ describe('Live relay service', () => {
       internalRtspUrl: 'rtsp://mediamtx:8554',
       allowUnauthenticatedInternalRead: true
     });
+    await expect(
+      internalService.authorizeMediaMtx(
+        { action: 'read', path: stored!.ingestPath!, protocol: 'rtsp' },
+        'read-token'
+      )
+    ).resolves.toBe(true);
+    await expect(
+      internalService.authorizeMediaMtx(
+        { action: 'playback', path: stored!.ingestPath!, protocol: 'rtsp' },
+        'read-token'
+      )
+    ).resolves.toBe(true);
+    await expect(
+      internalService.authorizeMediaMtx(
+        { action: 'read', path: stored!.ingestPath!, protocol: 'hls' },
+        'read-token'
+      )
+    ).resolves.toBe(false);
+    await expect(
+      internalService.authorizeMediaMtx(
+        { action: 'playback', path: stored!.ingestPath!, protocol: 'rtmp' },
+        'read-token'
+      )
+    ).resolves.toBe(false);
+    await expect(
+      internalService.authorizeMediaMtx(
+        { action: 'read', path: stored!.ingestPath!, protocol: 'RTSP' },
+        'read-token'
+      )
+    ).resolves.toBe(false);
+    await expect(
+      internalService.authorizeMediaMtx(
+        {
+          action: 'read',
+          path: stored!.ingestPath!,
+          protocol: 'hls',
+          user: 'vrrelay-read',
+          password: 'read-token'
+        },
+        'read-token'
+      )
+    ).resolves.toBe(true);
     await expect(
       internalService.authorizeMediaMtx(
         { action: 'publish', path: created.channel.path, protocol: 'rtsp' },

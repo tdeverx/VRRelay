@@ -24,4 +24,10 @@ Node capability responses report cache usage in bytes, the configured cache limi
 5. Use the generated transport and shared domain/contract types in `apps/web/src/lib/api.ts`.
 6. Add route/use-case tests and update documentation or the changelog.
 
-The WebSocket event and agent-envelope shapes are versioned separately in `contracts/events`. The node-agent protocol is an internal cluster protocol even though its enrollment and connection endpoints appear in OpenAPI; protocol envelopes are defined in `packages/domain` and validated by `packages/contracts`.
+The WebSocket event and agent-envelope shapes are versioned separately in
+`contracts/events`. The node-agent protocol is an internal cluster protocol even
+though its enrollment and connection endpoints appear in OpenAPI. Its strict
+runtime envelope and payload schemas live in
+`packages/contracts/src/agent-protocol.ts`; run
+`npm run generate:agent-protocol-schema` after changing them, and commit the
+reproducible JSON Schema update with the TypeScript contract.

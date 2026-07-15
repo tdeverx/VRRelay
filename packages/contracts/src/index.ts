@@ -13,9 +13,11 @@ import {
   NodeRoleSchema,
   NodeCapabilitySchema,
   HttpUrlSchema,
-  PlacementPolicySchema,
-  AgentEnvelopeSchema
+  PlacementPolicySchema
 } from '@vrrelay/domain';
+import { AgentEnvelopeSchema } from './agent-protocol.js';
+
+export * from './agent-protocol.js';
 
 export const ApiErrorSchema = z.object({
   error: z.object({
@@ -149,7 +151,11 @@ export const EnrollNodeRequestSchema = z.object({
   name: z.string().min(1).max(120),
   publicUrl: HttpUrlSchema,
   internalUrl: HttpUrlSchema.optional(),
-  capabilities: NodeCapabilitySchema
+  capabilities: NodeCapabilitySchema,
+  csrPem: z
+    .string()
+    .min(1)
+    .max(16 * 1024)
 });
 export type EnrollNodeRequest = z.infer<typeof EnrollNodeRequestSchema>;
 
@@ -185,7 +191,7 @@ export const DeleteProviderBindingQuerySchema = z.object({
 });
 export type DeleteProviderBindingQuery = z.infer<typeof DeleteProviderBindingQuerySchema>;
 
-export const RotateNodeCertificateRequestSchema = z.object({ force: z.boolean().default(false) });
+export const RotateNodeCertificateRequestSchema = z.object({}).strict();
 export type RotateNodeCertificateRequest = z.infer<typeof RotateNodeCertificateRequestSchema>;
 export const CacheEvictionRequestSchema = z
   .object({

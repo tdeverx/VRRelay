@@ -18,6 +18,8 @@ import type { RelayConfig } from '../config.js';
 import {
   liveHlsUpstreamUrl,
   liveOriginSourceUrl,
+  isInternalPeer,
+  isLoopbackPeer,
   meteredReadable,
   redactRequestUrl
 } from '../server.js';
@@ -42,6 +44,27 @@ type RoleServerServices =
       metrics: MetricsSink;
     };
 
+const mediaMtxAuthRequestSchema = z.object({
+  action: z.string(),
+  path: z.string(),
+  protocol: z.string().optional(),
+  user: z.string().optional(),
+  password: z.string().optional(),
+  token: z.string().optional()
+});
+
+function authorizeEdgeMediaMtxRead(
+  input: z.infer<typeof mediaMtxAuthRequestSchema>,
+  readToken: string
+): boolean {
+  if ((input.action !== 'read' && input.action !== 'playback') || input.user !== 'vrrelay-read')
+    return false;
+  const supplied = input.password ?? input.token ?? '';
+  const actual = Buffer.from(supplied);
+  const expected = Buffer.from(readToken);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
 function viewerIdentity(request: FastifyRequest): string {
   return `${request.ip}|${String(request.headers['user-agent'] ?? 'unknown').slice(0, 256)}`;
 }
@@ -62,7 +85,12 @@ export async function createRoleServer(
     logger: {
       level: process.env.VRRELAY_LOG_LEVEL ?? 'info',
       redact: {
-        paths: ['req.headers.authorization'],
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.token'
+        ],
         censor: '[REDACTED]'
       },
       serializers: {
@@ -76,7 +104,7 @@ export async function createRoleServer(
         }
       }
     },
-    trustProxy: config.trustProxy,
+    trustProxy: config.trustedProxyCidrs,
     bodyLimit: 1_048_576,
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID()
@@ -128,8 +156,7 @@ export async function createRoleServer(
 
   if (services.kind === 'source-worker') {
     app.get('/internal/source/:token', async (request, reply) => {
-      const peer = request.raw.socket.remoteAddress;
-      if (peer !== '127.0.0.1' && peer !== '::1' && peer !== '::ffff:127.0.0.1')
+      if (!isLoopbackPeer(request.raw.socket.remoteAddress))
         return reply.status(403).send({
           error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
         });
@@ -150,16 +177,14 @@ export async function createRoleServer(
 
   if (services.kind === 'ingest-origin') {
     app.post('/internal/mediamtx/auth', async (request, reply) => {
-      const body = z
-        .object({
-          action: z.string(),
-          path: z.string(),
-          protocol: z.string().optional(),
-          user: z.string().optional(),
-          password: z.string().optional(),
-          token: z.string().optional()
-        })
-        .parse(request.body);
+      if (!isInternalPeer(request.raw.socket.remoteAddress))
+        return reply.status(403).send({
+          error: {
+            code: 'forbidden',
+            message: 'Internal MediaMTX auth is private-network or loopback-only'
+          }
+        });
+      const body = mediaMtxAuthRequestSchema.parse(request.body);
       return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
         ? reply.status(204).send()
         : reply.status(401).send();
@@ -167,6 +192,20 @@ export async function createRoleServer(
   }
 
   if (services.kind === 'edge') {
+    app.post('/internal/mediamtx/auth', async (request, reply) => {
+      if (!isInternalPeer(request.raw.socket.remoteAddress))
+        return reply.status(403).send({
+          error: {
+            code: 'forbidden',
+            message: 'Internal MediaMTX auth is private-network or loopback-only'
+          }
+        });
+      const body = mediaMtxAuthRequestSchema.parse(request.body);
+      return authorizeEdgeMediaMtxRead(body, config.mediaMtxReadToken)
+        ? reply.status(204).send()
+        : reply.status(401).send();
+    });
+
     const configuredLivePaths = new Map<string, Promise<void>>();
     const ensureLiveEdgePath = async (path: string): Promise<void> => {
       if (!config.liveOriginUrl) return;
@@ -211,7 +250,7 @@ export async function createRoleServer(
       reply.header('Cache-Control', 'no-store');
       const token = (request.params as { token: string }).token;
       const session = await services.sessions.touchViewer(token, viewerIdentity(request));
-      const base = `${config.publicUrl.replace(/\/$/, '')}/play/${token}/segment`;
+      const base = `${config.playbackUrl.replace(/\/$/, '')}/play/${token}/segment`;
       const manifest = await services.sessions.manifest(token, base);
       services.sessions.recordEgress(Buffer.byteLength(manifest), session.id);
       return reply.type('application/vnd.apple.mpegurl').send(manifest);
