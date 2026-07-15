@@ -5,6 +5,7 @@ import type {
   CachedObject,
   ClusterNode,
   CompatibilityResult,
+  JobLogEntry,
   LiveChannel,
   MediaItem,
   MediaSourceRef,
@@ -204,6 +205,8 @@ export interface ClusterRepository {
   revokeNode(update: NodeRevocation): Promise<AtomicWriteResult<ClusterNode>>;
   putAgentLog(entry: AgentLogEntry, retentionRows?: number): Promise<void>;
   listAgentLogs(nodeId: string, limit?: number): Promise<AgentLogEntry[]>;
+  putJobLog(entry: JobLogEntry, retentionRows?: number): Promise<void>;
+  listJobLogs(jobId: string, limit?: number): Promise<JobLogEntry[]>;
   getVersionedNode(id: string): Promise<VersionedRecord<ClusterNode> | undefined>;
   recordNodeHeartbeat(update: NodeHeartbeatUpdate): Promise<AtomicWriteResult<ClusterNode>>;
   setNodeDrain(update: NodeDrainUpdate): Promise<AtomicWriteResult<ClusterNode>>;

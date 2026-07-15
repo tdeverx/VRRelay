@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AuditEvent,
   ClusterNode,
+  JobLogEntry,
   NodeCertificateState,
   PersonalAccessToken,
   PlaybackGrant,
@@ -97,6 +98,19 @@ function job(id: string, state: SegmentJob['state'], updatedAt: string): Segment
   };
 }
 
+function jobLog(id: string, jobId: string, timestamp: string): JobLogEntry {
+  return {
+    id,
+    jobId,
+    sessionId: 'session-a',
+    nodeId: 'node-a',
+    level: 'info',
+    message: `Log ${id}`,
+    context: {},
+    timestamp
+  };
+}
+
 function certificate(
   nodeId: string,
   serialNumber: string,
@@ -157,7 +171,8 @@ describe('SQLite repository migrations', () => {
       { version: 3, name: 'atomic revisions and audit log' },
       { version: 4, name: 'atomic live channels' },
       { version: 5, name: 'atomic provider lifecycle' },
-      { version: 6, name: 'crash-safe provider binding deletion' }
+      { version: 6, name: 'crash-safe provider binding deletion' },
+      { version: 7, name: 'bounded job logs' }
     ]);
     expect(SQLITE_MIGRATIONS[2]?.statements.join('\n')).toContain(
       'ALTER TABLE sessions ADD COLUMN revision'
@@ -365,7 +380,7 @@ describe('SQLite repository migrations', () => {
     runSqliteMigrations(legacy, SQLITE_MIGRATIONS.slice(0, 2));
     legacy.close();
     const worker = new SqliteRepository(path);
-    await expect(worker.assertSchemaCurrent()).rejects.toThrow('version 2; version 6 is required');
+    await expect(worker.assertSchemaCurrent()).rejects.toThrow('version 2; version 7 is required');
     expect(worker.lastMigrationBackupPath).toBeUndefined();
     const unchanged = new Database(path, { readonly: true, fileMustExist: true });
     expect(
@@ -403,7 +418,7 @@ describe('SQLite repository migrations', () => {
     const future = new Database(path);
     future
       .prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)')
-      .run(7, new Date().toISOString());
+      .run(8, new Date().toISOString());
     future.close();
 
     const reopened = new SqliteRepository(path);
@@ -1384,6 +1399,25 @@ describe('SQLite repository atomic state', () => {
     await expect(repository.listAuditEvents({ before: secondAt })).resolves.toMatchObject([
       { id: 'audit-1' }
     ]);
+    repository.close();
+  });
+
+  it('retains bounded job logs per segment job', async () => {
+    const { path } = await temporaryDatabase();
+    const repository = new SqliteRepository(path);
+    await repository.migrate();
+    const base = Date.now();
+    await repository.putJobLog(jobLog('log-1', 'job-a', new Date(base).toISOString()), 2);
+    await repository.putJobLog(jobLog('log-2', 'job-a', new Date(base + 1).toISOString()), 2);
+    await repository.putJobLog(jobLog('log-3', 'job-a', new Date(base + 2).toISOString()), 2);
+    await repository.putJobLog(jobLog('other-job', 'job-b', new Date(base + 3).toISOString()), 2);
+
+    await expect(repository.listJobLogs('job-a', 10)).resolves.toMatchObject([
+      { id: 'log-3' },
+      { id: 'log-2' }
+    ]);
+    await expect(repository.listJobLogs('job-a', 1)).resolves.toMatchObject([{ id: 'log-3' }]);
+    await expect(repository.listJobLogs('job-b', 10)).resolves.toMatchObject([{ id: 'other-job' }]);
     repository.close();
   });
 });

@@ -411,6 +411,18 @@ export const SegmentJobSchema = z.object({
 });
 export type SegmentJob = z.infer<typeof SegmentJobSchema>;
 
+export const JobLogEntrySchema = z.object({
+  id: z.string(),
+  jobId: z.string(),
+  sessionId: z.string().optional(),
+  nodeId: z.string().optional(),
+  level: z.enum(['debug', 'info', 'warn', 'error']),
+  message: z.string().max(2_000),
+  context: z.record(z.string(), z.unknown()).default({}),
+  timestamp: z.iso.datetime()
+});
+export type JobLogEntry = z.infer<typeof JobLogEntrySchema>;
+
 export const AgentLogEntrySchema = z.object({
   id: z.string(),
   nodeId: z.string(),

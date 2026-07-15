@@ -29,12 +29,14 @@
         "node.draining",
         "node.offline",
         "node.log",
+        "job.log",
         "job.queued",
         "job.leased",
         "job.completed",
         "job.failed",
         "route.selected",
-        "storage.uploaded"
+        "storage.uploaded",
+        "storage.invalidated"
       ]
     },
     "timestamp": { "type": "string", "format": "date-time" },

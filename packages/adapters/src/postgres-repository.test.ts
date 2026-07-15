@@ -104,6 +104,7 @@ class FakeMigrationClient {
     'provider_bindings',
     'node_certificates',
     'agent_logs',
+    'job_logs',
     'audit_events'
   ];
   requiredColumns: FakePostgresColumn[] = [
@@ -166,6 +167,11 @@ class FakeMigrationClient {
     column('agent_logs', 'node_id', 'text'),
     column('agent_logs', 'document', 'jsonb'),
     column('agent_logs', 'timestamp', 'timestamptz'),
+    column('job_logs', 'id', 'text'),
+    column('job_logs', 'job_id', 'text'),
+    column('job_logs', 'node_id', 'text', 'YES'),
+    column('job_logs', 'document', 'jsonb'),
+    column('job_logs', 'timestamp', 'timestamptz'),
     column('audit_events', 'id', 'text'),
     column('audit_events', 'category', 'text'),
     column('audit_events', 'action', 'text'),
@@ -190,6 +196,7 @@ class FakeMigrationClient {
     ['provider_bindings', 'PRIMARY KEY', ['id']],
     ['node_certificates', 'PRIMARY KEY', ['serial_number']],
     ['agent_logs', 'PRIMARY KEY', ['id']],
+    ['job_logs', 'PRIMARY KEY', ['id']],
     ['audit_events', 'PRIMARY KEY', ['id']]
   ] as Array<[string, string, string[]]>;
   indexes = [
@@ -198,6 +205,7 @@ class FakeMigrationClient {
     ['provider_bindings', 'provider_bindings_node', ['node_id']],
     ['node_certificates', 'node_certificates_node', ['node_id']],
     ['agent_logs', 'agent_logs_node_time', ['node_id', 'timestamp']],
+    ['job_logs', 'job_logs_job_time', ['job_id', 'timestamp']],
     ['audit_events', 'audit_events_time', ['occurred_at']],
     ['audit_events', 'audit_events_category_time', ['category', 'occurred_at']],
     ['audit_events', 'audit_events_actor_time', ['actor_id', 'occurred_at']],
@@ -299,7 +307,8 @@ describe('PostgreSQL repository migrations', () => {
       { version: 3, name: 'atomic revisions and audit log' },
       { version: 4, name: 'atomic live channels' },
       { version: 5, name: 'atomic providers and guarded deletion' },
-      { version: 6, name: 'crash-safe provider binding deletion' }
+      { version: 6, name: 'crash-safe provider binding deletion' },
+      { version: 7, name: 'bounded job logs' }
     ]);
     expect(POSTGRES_MIGRATIONS[2]?.statements.join('\n')).toContain(
       'ALTER TABLE sessions ADD COLUMN revision'
@@ -325,7 +334,7 @@ describe('PostgreSQL repository migrations', () => {
         expect(context).toEqual({
           driver: 'postgres',
           currentVersion: 2,
-          targetVersion: 6,
+          targetVersion: 7,
           existingSchema: true
         });
         events.push('BACKUP HOOK');
@@ -381,7 +390,7 @@ describe('PostgreSQL repository migrations', () => {
 
   it('rejects migration history from a newer build before backup or mutation', async () => {
     const client = new FakeMigrationClient();
-    client.applied = [1, 2, 3, 4, 5, 6, 7];
+    client.applied = [1, 2, 3, 4, 5, 6, 7, 8];
     let backupCalled = false;
     await expect(
       runPostgresMigrations(client, {
@@ -408,7 +417,7 @@ describe('PostgreSQL repository migrations', () => {
 
     const incomplete = new FakeMigrationClient();
     await expect(assertPostgresSchemaCurrent(incomplete)).rejects.toThrow(
-      'version 2; version 6 is required'
+      'version 2; version 7 is required'
     );
     expect(incomplete.events.every((event) => event.startsWith('SELECT'))).toBe(true);
 

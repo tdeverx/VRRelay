@@ -11,6 +11,7 @@ import type {
   ProviderBinding,
   NodeCertificateState,
   AgentLogEntry,
+  JobLogEntry,
   ProfileRevision,
   ProviderConnection,
   RelaySession,
@@ -139,6 +140,15 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
     statements: [
       'ALTER TABLE provider_bindings ADD COLUMN deletion_pending BOOLEAN NOT NULL DEFAULT FALSE'
     ]
+  },
+  {
+    version: 7,
+    name: 'bounded job logs',
+    checksum: 'a6be0b5c739e2061a3a82531d31c3f898e78df9ff4d10bb36d7c29e8013521ea',
+    statements: [
+      'CREATE TABLE IF NOT EXISTS job_logs(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, node_id TEXT, document JSONB NOT NULL, timestamp TIMESTAMPTZ NOT NULL)',
+      'CREATE INDEX IF NOT EXISTS job_logs_job_time ON job_logs(job_id, timestamp DESC)'
+    ]
   }
 ] as const;
 
@@ -156,6 +166,7 @@ const POSTGRES_APPLICATION_TABLES = [
   'provider_bindings',
   'node_certificates',
   'agent_logs',
+  'job_logs',
   'audit_events'
 ] as const;
 
@@ -265,6 +276,13 @@ const POSTGRES_REQUIRED_COLUMNS: Readonly<
     document: requiredPostgresColumn('jsonb'),
     timestamp: requiredPostgresColumn('timestamptz')
   },
+  job_logs: {
+    id: requiredPostgresColumn('text'),
+    job_id: requiredPostgresColumn('text'),
+    node_id: requiredPostgresColumn('text', true),
+    document: requiredPostgresColumn('jsonb'),
+    timestamp: requiredPostgresColumn('timestamptz')
+  },
   audit_events: {
     id: requiredPostgresColumn('text'),
     category: requiredPostgresColumn('text'),
@@ -292,6 +310,7 @@ const POSTGRES_REQUIRED_CONSTRAINTS = [
   { table: 'provider_bindings', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'node_certificates', type: 'PRIMARY KEY', columns: ['serial_number'] },
   { table: 'agent_logs', type: 'PRIMARY KEY', columns: ['id'] },
+  { table: 'job_logs', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'audit_events', type: 'PRIMARY KEY', columns: ['id'] }
 ] as const;
 
@@ -303,6 +322,7 @@ const POSTGRES_REQUIRED_INDEXES: Readonly<
   provider_bindings_node: { table: 'provider_bindings', columns: ['node_id'] },
   node_certificates_node: { table: 'node_certificates', columns: ['node_id'] },
   agent_logs_node_time: { table: 'agent_logs', columns: ['node_id', 'timestamp'] },
+  job_logs_job_time: { table: 'job_logs', columns: ['job_id', 'timestamp'] },
   audit_events_time: { table: 'audit_events', columns: ['occurred_at'] },
   audit_events_category_time: {
     table: 'audit_events',
@@ -2064,6 +2084,25 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
         [nodeId, limit]
       )
     ).rows.map((row) => row.document as AgentLogEntry);
+  }
+  async putJobLog(value: JobLogEntry, retentionRows = 1000): Promise<void> {
+    await this.#pool.query(
+      'INSERT INTO job_logs(id,job_id,node_id,document,timestamp) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET job_id=EXCLUDED.job_id, node_id=EXCLUDED.node_id, document=EXCLUDED.document, timestamp=EXCLUDED.timestamp',
+      [value.id, value.jobId, value.nodeId ?? null, value, value.timestamp]
+    );
+    await this.#pool.query(
+      `DELETE FROM job_logs WHERE job_id=$1 AND id NOT IN
+      (SELECT id FROM job_logs WHERE job_id=$1 ORDER BY timestamp DESC LIMIT $2)`,
+      [value.jobId, retentionRows]
+    );
+  }
+  async listJobLogs(jobId: string, limit = 200): Promise<JobLogEntry[]> {
+    return (
+      await this.#pool.query(
+        'SELECT document FROM job_logs WHERE job_id=$1 ORDER BY timestamp DESC LIMIT $2',
+        [jobId, limit]
+      )
+    ).rows.map((row) => row.document as JobLogEntry);
   }
 
   async appendAuditEvent(event: AuditEvent): Promise<void> {

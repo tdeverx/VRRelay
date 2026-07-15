@@ -2,7 +2,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { NodeRole, ProfileRevision, RelaySession, SegmentJob } from '@vrrelay/domain';
+import type {
+  JobLogEntry,
+  NodeRole,
+  ProfileRevision,
+  RelaySession,
+  SegmentJob
+} from '@vrrelay/domain';
 import type {
   ClusterRepository,
   CoordinationStore,
@@ -17,6 +23,8 @@ import { createServiceEvent as event } from './service-helpers.js';
 import { SessionCache } from './session-cache.js';
 
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
+const DEFAULT_JOB_LOG_RETENTION_ROWS = 1000;
+const DEFAULT_JOB_LOG_QUERY_LIMIT = 200;
 
 class SegmentJobCancelledError extends Error {
   constructor() {
@@ -42,10 +50,48 @@ function failureKind(
   return 'error';
 }
 
+function redactJobLogMessage(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+/gi, 'Bearer [REDACTED]')
+    .replace(/\bvrr_(?:join_)?[A-Za-z0-9_-]+/g, '[REDACTED]')
+    .replace(/\/internal\/source\/[A-Za-z0-9._~-]+/gi, '/internal/source/[REDACTED]')
+    .replace(/\/play\/[A-Za-z0-9._~-]+/gi, '/play/[REDACTED]')
+    .replace(/\b(?:https?|wss?|rtsp|rtmp|srt):\/\/[^\s"'<>]+/gi, '[REDACTED_URL]')
+    .replace(
+      /(authorization|password|token|secret|api[-_ ]?key)["']?\s*[:=]\s*["']?[^\s,"'}]+/gi,
+      '$1=[REDACTED]'
+    )
+    .slice(0, 2_000);
+}
+
+function redactJobLogValue(value: unknown, depth = 0): unknown {
+  if (depth >= 6) return '[REDACTED:DEPTH]';
+  if (typeof value === 'string') return redactJobLogMessage(value);
+  if (Array.isArray(value))
+    return value.slice(0, 100).map((item) => redactJobLogValue(item, depth + 1));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        /authorization|password|token|secret|private.?key|api.?key/i.test(key)
+          ? '[REDACTED]'
+          : redactJobLogValue(item, depth + 1)
+      ])
+    );
+  }
+  return value;
+}
+
+function redactJobLogContext(context: Record<string, unknown>): Record<string, unknown> {
+  return redactJobLogValue(context) as Record<string, unknown>;
+}
+
 export interface SessionJobOptions {
   cacheDir: string;
   nodeId?: string;
   roles?: NodeRole[];
+  jobLogRetentionRows?: number;
+  jobLogQueryLimit?: number;
 }
 
 export interface SessionJobInfrastructure {
@@ -100,6 +146,15 @@ export class SessionJobCoordinator {
     return jobs.map((job) => ({ ...job, workerHistory: job.workerHistory ?? [] }));
   }
 
+  async listLogs(jobId: string, limit = this.#jobLogQueryLimit()): Promise<JobLogEntry[]> {
+    return (
+      (await this.infrastructure.clusterRepository?.listJobLogs(
+        jobId,
+        Math.min(this.#jobLogQueryLimit(), Math.max(1, Math.floor(limit)))
+      )) ?? []
+    );
+  }
+
   async recoverExpiredJobs(now = Date.now()): Promise<number> {
     const repository = this.infrastructure.clusterRepository;
     if (!repository) return 0;
@@ -138,6 +193,9 @@ export class SessionJobCoordinator {
           this.infrastructure.metrics?.increment('segment_jobs_recovered_total', {
             reason: 'expired_lease'
           });
+          await this.#recordJobLog(queued, 'warn', 'Segment job lease expired; requeued', {
+            reason: 'expired_lease'
+          });
           settled = true;
           break;
         }
@@ -167,6 +225,9 @@ export class SessionJobCoordinator {
       const result = await repository.cancelSegmentJob(cancelled, current.revision);
       if (result.applied) {
         this.infrastructure.metrics?.increment('segment_job_cancellations_total', {
+          source: 'admin'
+        });
+        await this.#recordJobLog(cancelled, 'warn', 'Segment job cancelled by administrator', {
           source: 'admin'
         });
         this.#jobControllers.get(id)?.abort(new Error('Job cancelled'));
@@ -205,7 +266,10 @@ export class SessionJobCoordinator {
       `${job.segmentIndex}.${extension}`
     );
     await rm(destination, { force: true });
-    await this.#retryJobTransition(id);
+    const queued = await this.#retryJobTransition(id);
+    await this.#recordJobLog(queued, 'info', 'Segment job queued for manual retry', {
+      source: 'manual'
+    });
     await this.generateDistributedSegment(
       session,
       profile,
@@ -301,6 +365,11 @@ export class SessionJobCoordinator {
       createdAt: previousJob?.createdAt ?? now,
       updatedAt: now
     });
+    await this.#recordJobLog(job, 'info', 'Segment job leased for generation', {
+      segmentIndex: index,
+      ownerNodeId: job.ownerNodeId,
+      attempts: job.attempts
+    });
     this.events.publish(
       event('job.leased', { jobId: job.id, contentKey, nodeId: this.options.nodeId }, session.id)
     );
@@ -348,6 +417,12 @@ export class SessionJobCoordinator {
             updatedAt: new Date().toISOString()
           }));
           this.#recordJobAttempt('remote', 'started');
+          await this.#recordJobLog(job, 'info', 'Remote segment attempt started', {
+            mode: 'remote',
+            attempt,
+            nodeId: remoteNode,
+            segmentIndex: index
+          });
           if (attempt > 1)
             this.infrastructure.metrics?.increment('segment_job_retries_total', {
               mode: 'remote',
@@ -366,6 +441,12 @@ export class SessionJobCoordinator {
               updatedAt: new Date().toISOString()
             }));
             this.#recordJobAttempt('remote', 'complete');
+            await this.#recordJobLog(job, 'info', 'Remote segment attempt completed', {
+              mode: 'remote',
+              attempt,
+              nodeId: remoteNode,
+              segmentIndex: index
+            });
             failure = undefined;
             break;
           } catch (error) {
@@ -379,6 +460,13 @@ export class SessionJobCoordinator {
               ),
               updatedAt: new Date().toISOString()
             }));
+            await this.#recordJobLog(job, 'warn', 'Remote segment attempt failed', {
+              mode: 'remote',
+              attempt,
+              nodeId: remoteNode,
+              segmentIndex: index,
+              error: error instanceof Error ? error.message : String(error)
+            });
           }
         }
         if (failure)
@@ -409,6 +497,12 @@ export class SessionJobCoordinator {
           updatedAt: new Date().toISOString()
         }));
         this.#recordJobAttempt('local', 'started');
+        await this.#recordJobLog(job, 'info', 'Local segment attempt started', {
+          mode: 'local',
+          attempt,
+          nodeId: this.options.nodeId ?? 'standalone',
+          segmentIndex: index
+        });
         if (attempt > 1)
           this.infrastructure.metrics?.increment('segment_job_retries_total', {
             mode: 'local',
@@ -424,10 +518,21 @@ export class SessionJobCoordinator {
         await this.cache.publishObject(session, profile, index, destination, contentKey);
         this.#recordJobAttempt('local', 'complete');
         job = finishLatestAttempt(job, 'complete');
+        await this.#recordJobLog(job, 'info', 'Local segment attempt completed', {
+          mode: 'local',
+          attempt,
+          nodeId: this.options.nodeId ?? 'standalone',
+          segmentIndex: index
+        });
       }
       const completedAt = new Date().toISOString();
       job = await this.#completeJob(job, completedAt);
       this.#recordJobFinished(jobStartedAt, jobMode, 'complete');
+      await this.#recordJobLog(job, 'info', 'Segment job completed', {
+        mode: jobMode,
+        segmentIndex: index,
+        durationSeconds: secondsSince(jobStartedAt)
+      });
       this.events.publish(event('job.completed', { jobId: job.id }, session.id));
       await coordination?.publish('segments', JSON.stringify({ contentKey, state: 'complete' }));
       return destination;
@@ -449,6 +554,11 @@ export class SessionJobCoordinator {
         throw new SegmentJobCancelledError();
       }
       this.#recordJobFinished(jobStartedAt, jobMode, 'failed');
+      await this.#recordJobLog(failed, 'error', 'Segment job failed', {
+        mode: jobMode,
+        segmentIndex: index,
+        error: error instanceof Error ? error.message : String(error)
+      });
       this.events.publish(
         event(
           'job.failed',
@@ -654,6 +764,63 @@ export class SessionJobCoordinator {
         );
       })
       .map((node) => node.id);
+  }
+
+  #jobLogRetentionRows(): number {
+    const configured = Math.floor(
+      this.options.jobLogRetentionRows ?? DEFAULT_JOB_LOG_RETENTION_ROWS
+    );
+    const rows = Number.isFinite(configured) ? configured : DEFAULT_JOB_LOG_RETENTION_ROWS;
+    return Math.min(50_000, Math.max(100, rows));
+  }
+
+  #jobLogQueryLimit(): number {
+    const configured = Math.floor(this.options.jobLogQueryLimit ?? DEFAULT_JOB_LOG_QUERY_LIMIT);
+    const limit = Number.isFinite(configured) ? configured : DEFAULT_JOB_LOG_QUERY_LIMIT;
+    return Math.min(1000, Math.max(1, limit));
+  }
+
+  async #recordJobLog(
+    job: SegmentJob,
+    level: JobLogEntry['level'],
+    message: string,
+    context: Record<string, unknown> = {}
+  ): Promise<void> {
+    const nodeId =
+      typeof context.nodeId === 'string'
+        ? context.nodeId
+        : job.ownerNodeId
+          ? job.ownerNodeId
+          : this.options.nodeId;
+    const entry: JobLogEntry = {
+      id: randomUUID(),
+      jobId: job.id,
+      sessionId: job.sessionId,
+      ...(nodeId ? { nodeId } : {}),
+      level,
+      message: redactJobLogMessage(message),
+      context: redactJobLogContext(context),
+      timestamp: new Date().toISOString()
+    };
+    try {
+      await this.infrastructure.clusterRepository?.putJobLog(entry, this.#jobLogRetentionRows());
+    } catch {
+      this.infrastructure.metrics?.increment('segment_job_log_write_failures_total');
+    }
+    this.events.publish({
+      version: 1,
+      id: entry.id,
+      type: 'job.log',
+      timestamp: entry.timestamp,
+      ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
+      payload: {
+        jobId: entry.jobId,
+        ...(entry.nodeId ? { nodeId: entry.nodeId } : {}),
+        level: entry.level,
+        message: entry.message,
+        context: entry.context
+      }
+    });
   }
 
   #recordJobAttempt(

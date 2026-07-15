@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import type {
   CachedObject,
+  JobLogEntry,
   LiveChannel,
   MediaItem,
   NodeRole,
@@ -103,6 +104,8 @@ export interface SessionServiceOptions {
   cacheLimitBytes?: number;
   nodeId?: string;
   roles?: NodeRole[];
+  jobLogRetentionRows?: number;
+  jobLogQueryLimit?: number;
 }
 
 export interface SessionServiceInfrastructure {
@@ -564,6 +567,10 @@ export class SessionService {
 
   async listJobs(limit = 100): Promise<SegmentJob[]> {
     return this.#jobs.listJobs(limit);
+  }
+
+  async listJobLogs(jobId: string, limit?: number): Promise<JobLogEntry[]> {
+    return this.#jobs.listLogs(jobId, limit);
   }
 
   async cancelJob(id: string): Promise<void> {

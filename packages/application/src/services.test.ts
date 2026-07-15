@@ -547,10 +547,10 @@ describe('VOD relay service', () => {
     registry.register(provider);
     let generated = 0;
     let blockedIndex: number | undefined;
-    let blockedFailure = false;
+    let blockedFailure: boolean | string = false;
     let blockedStarted = Promise.withResolvers<void>();
     let blockedRelease = Promise.withResolvers<void>();
-    const blockSegment = (index: number, fail: boolean) => {
+    const blockSegment = (index: number, fail: boolean | string) => {
       blockedIndex = index;
       blockedFailure = fail;
       blockedStarted = Promise.withResolvers<void>();
@@ -576,7 +576,10 @@ describe('VOD relay service', () => {
           blockedStarted.resolve();
           await blockedRelease.promise;
           blockedIndex = undefined;
-          if (blockedFailure) throw new Error('Simulated late worker failure');
+          if (blockedFailure)
+            throw new Error(
+              typeof blockedFailure === 'string' ? blockedFailure : 'Simulated late worker failure'
+            );
         }
         await new Promise((r) => setTimeout(r, 20));
         await mkdir(dirname(destination), { recursive: true });
@@ -635,6 +638,15 @@ describe('VOD relay service', () => {
       attempts: 1,
       workerHistory: [{ state: 'complete', nodeId: 'standalone' }]
     });
+    const completedLogs = await service.listJobLogs(completedJob!.id);
+    expect(completedLogs.map((log) => log.message)).toEqual(
+      expect.arrayContaining([
+        'Segment job leased for generation',
+        'Local segment attempt started',
+        'Local segment attempt completed',
+        'Segment job completed'
+      ])
+    );
     const failedAt = new Date().toISOString();
     const completedRecord = (await repo.getVersionedSegmentJob(completedJob!.id))!;
     await expect(
@@ -706,10 +718,7 @@ describe('VOD relay service', () => {
       viewers: 1
     });
 
-    for (const [index, fail] of [
-      [1, false],
-      [2, true]
-    ] as const) {
+    for (const [index, fail] of [[1, false]] as const) {
       const gate = blockSegment(index, fail);
       const lateResult = service.segment(token, index);
       await gate.started;
@@ -719,7 +728,31 @@ describe('VOD relay service', () => {
       gate.release();
       await expect(lateResult).rejects.toThrow(/cancelled/i);
       await expect(repo.getSegmentJob(job!.id)).resolves.toMatchObject({ state: 'cancelled' });
+      await expect(service.listJobLogs(job!.id)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ message: 'Segment job cancelled by administrator' })
+        ])
+      );
     }
+    const sensitiveFailure =
+      'Simulated late worker failure token=vrr_join_reusable-secret https://private.invalid/media /internal/source/source-grant /play/playback-grant password=fixture-password';
+    const failedGate = blockSegment(2, sensitiveFailure);
+    const failedResult = service.segment(token, 2);
+    await failedGate.started;
+    failedGate.release();
+    await expect(failedResult).rejects.toThrow('Simulated late worker failure');
+    const failedJob = (await service.listJobs()).find((candidate) => candidate.segmentIndex === 2);
+    expect(failedJob).toMatchObject({ state: 'failed' });
+    const failedLogs = await service.listJobLogs(failedJob!.id);
+    expect(failedLogs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ message: 'Segment job failed' })])
+    );
+    const serializedFailedLogs = JSON.stringify(failedLogs);
+    expect(serializedFailedLogs).not.toContain('vrr_join_reusable-secret');
+    expect(serializedFailedLogs).not.toContain('private.invalid');
+    expect(serializedFailedLogs).not.toContain('source-grant');
+    expect(serializedFailedLogs).not.toContain('playback-grant');
+    expect(serializedFailedLogs).not.toContain('fixture-password');
     await expect(repo.getSession(session.id)).resolves.toMatchObject({ state: 'stopped' });
   });
 

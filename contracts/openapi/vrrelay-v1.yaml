@@ -387,6 +387,18 @@ paths:
       parameters: [{ $ref: '#/components/parameters/JobId' }]
       responses:
         '200': { $ref: '#/components/responses/SegmentJobResult' }
+  /jobs/{jobId}/logs:
+    get:
+      operationId: listJobLogs
+      tags: [Operations]
+      parameters:
+        - { $ref: '#/components/parameters/JobId' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000 }
+      responses:
+        '200': { $ref: '#/components/responses/JobLogList' }
   /backends:
     get:
       operationId: listBackendHealth
@@ -752,6 +764,11 @@ components:
       {
         description: Retried distributed segment job,
         content: { application/json: { schema: { $ref: '#/components/schemas/SegmentJob' } } }
+      }
+    JobLogList:
+      {
+        description: Bounded redacted job logs,
+        content: { application/json: { schema: { $ref: '#/components/schemas/JobLogList' } } }
       }
     Backend:
       {
@@ -1585,6 +1602,24 @@ components:
         type: object,
         required: [items],
         properties: { items: { type: array, items: { $ref: '#/components/schemas/SegmentJob' } } }
+      }
+    JobLogEntry:
+      type: object
+      required: [id, jobId, level, message, context, timestamp]
+      properties:
+        id: { type: string }
+        jobId: { type: string }
+        sessionId: { type: string }
+        nodeId: { type: string }
+        level: { type: string, enum: [debug, info, warn, error] }
+        message: { type: string }
+        context: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+    JobLogList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/JobLogEntry' } } }
       }
     BackendValidationRequest:
       type: object

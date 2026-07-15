@@ -46,6 +46,7 @@ import {
   DeleteProviderBindingQuerySchema,
   RotateNodeCertificateRequestSchema,
   NodeLogsQuerySchema,
+  JobLogsQuerySchema,
   CacheInventoryQuerySchema,
   CacheEvictionRequestSchema,
   BackendValidationRequestSchema,
@@ -1148,6 +1149,16 @@ export async function createServer(
   app.post('/api/v1/jobs/:jobId/retry', async (request) => {
     await mutate(request, ['sessions:control']);
     return services.sessions.retryJob((request.params as { jobId: string }).jobId);
+  });
+  app.get('/api/v1/jobs/:jobId/logs', async (request) => {
+    await authenticate(request, ['sessions:read']);
+    const query = parse(JobLogsQuerySchema, request.query);
+    return {
+      items: await services.sessions.listJobLogs(
+        (request.params as { jobId: string }).jobId,
+        query.limit
+      )
+    };
   });
   app.get('/api/v1/backends', async (request) => {
     await authenticate(request, ['admin']);

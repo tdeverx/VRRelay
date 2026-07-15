@@ -14,6 +14,7 @@ import type {
   ProviderBinding,
   NodeCertificateState,
   AgentLogEntry,
+  JobLogEntry,
   ProfileRevision,
   ProviderConnection,
   RelaySession,
@@ -221,6 +222,21 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
       `ALTER TABLE provider_bindings ADD COLUMN deletion_pending INTEGER NOT NULL DEFAULT 0
        CHECK (deletion_pending IN (0, 1))`
     ]
+  },
+  {
+    version: 7,
+    name: 'bounded job logs',
+    checksum: 'edb88ed051c621c49bfc7cce6d5972ace7200315c899e5e9a71b811880d45aa6',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS job_logs (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        node_id TEXT,
+        json TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+      )`,
+      'CREATE INDEX IF NOT EXISTS job_logs_job_time ON job_logs(job_id, timestamp DESC)'
+    ]
   }
 ] as const;
 
@@ -406,6 +422,17 @@ const SQLITE_SCHEMA_SHAPE = {
     },
     primaryKey: ['id'],
     indexes: { agent_logs_node_time: ['node_id', 'timestamp'] }
+  },
+  job_logs: {
+    columns: {
+      id: SQLITE_TEXT_KEY,
+      job_id: SQLITE_TEXT_REQUIRED,
+      node_id: SQLITE_TEXT_NULLABLE,
+      json: SQLITE_TEXT_REQUIRED,
+      timestamp: SQLITE_TEXT_REQUIRED
+    },
+    primaryKey: ['id'],
+    indexes: { job_logs_job_time: ['job_id', 'timestamp'] }
   },
   audit_events: {
     columns: {
@@ -1853,6 +1880,25 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
       .prepare('SELECT json FROM agent_logs WHERE node_id=? ORDER BY timestamp DESC LIMIT ?')
       .all(nodeId, limit) as Array<{ json: string }>;
     return rows.map((row) => JSON.parse(row.json) as AgentLogEntry);
+  }
+  async putJobLog(value: JobLogEntry, retentionRows = 1000): Promise<void> {
+    this.#db
+      .prepare(
+        'INSERT OR REPLACE INTO job_logs(id,job_id,node_id,json,timestamp) VALUES(?,?,?,?,?)'
+      )
+      .run(value.id, value.jobId, value.nodeId ?? null, JSON.stringify(value), value.timestamp);
+    this.#db
+      .prepare(
+        `DELETE FROM job_logs WHERE job_id=? AND id NOT IN
+      (SELECT id FROM job_logs WHERE job_id=? ORDER BY timestamp DESC LIMIT ?)`
+      )
+      .run(value.jobId, value.jobId, retentionRows);
+  }
+  async listJobLogs(jobId: string, limit = 200): Promise<JobLogEntry[]> {
+    const rows = this.#db
+      .prepare('SELECT json FROM job_logs WHERE job_id=? ORDER BY timestamp DESC LIMIT ?')
+      .all(jobId, limit) as Array<{ json: string }>;
+    return rows.map((row) => JSON.parse(row.json) as JobLogEntry);
   }
 
   async appendAuditEvent(event: AuditEvent): Promise<void> {

@@ -47,13 +47,16 @@ retained evidence belong in the
   region without depending on an external routing webhook.
 - Configurable bounded agent-log retention, capped node-log list queries, and
   redacted `node.log` events on the authenticated operations stream.
+- Configurable bounded segment job-log retention, capped job-log list queries,
+  redacted `job.log` events on the authenticated operations stream, and a
+  dashboard log viewer for segment job lifecycles.
 - Reproducible playlist, cached-egress, uncached-encode, live-fan-out,
   cache-ratio, and resource-snapshot benchmark scenarios with sanitized target
   metadata and host resource snapshots.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone
   composition roots with explicit runtime dependency graphs, role-owned HTTP
   surfaces, schema-startup policy, and ordered shutdown.
-- Immutable SQLite/PostgreSQL migration metadata through v6, complete physical
+- Immutable SQLite/PostgreSQL migration metadata through v7, complete physical
   schema-shape validation, revisioned create/CAS repository operations,
   transactional compound writes, and a shared two-connection concurrency
   suite.

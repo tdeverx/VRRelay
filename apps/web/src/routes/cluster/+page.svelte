@@ -22,6 +22,7 @@
     BackendStatus,
     CachedObject,
     ClusterNode,
+    JobLogEntry,
     PublicProviderConnection,
     PublicProviderBinding,
     SegmentJob
@@ -65,6 +66,9 @@
   let bindPassword = $state('');
   let nodeLogs = $state<AgentLogEntry[]>([]);
   let logsOpen = $state(false);
+  let jobLogs = $state<JobLogEntry[]>([]);
+  let jobLogsOpen = $state(false);
+  let jobLogsTitle = $state('Segment job logs');
   let backendOpen = $state(false);
   let routingKind = $state<'builtin' | 'static' | 'webhook'>('builtin');
   let routingEndpoint = $state('');
@@ -306,6 +310,16 @@
       logsOpen = true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not load node logs.');
+    }
+  }
+
+  async function showJobLogs(job: SegmentJob) {
+    try {
+      jobLogs = (await api.jobLogs(job.id)).items;
+      jobLogsTitle = `Segment ${job.segmentIndex} logs`;
+      jobLogsOpen = true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load job logs.');
     }
   }
 
@@ -580,6 +594,8 @@
               </div>
               <div class="job-actions">
                 <time>{new Date(job.updatedAt).toLocaleTimeString()}</time>
+                <Button variant="ghost" size="sm" onclick={() => void showJobLogs(job)}>Logs</Button
+                >
                 {#if job.state === 'failed' || job.state === 'cancelled'}<Button
                     variant="ghost"
                     size="sm"
@@ -950,6 +966,25 @@
         </article>{:else}<div class="empty">No agent logs have been recorded.</div>{/each}
     </div>
     <Dialog.Footer><Button onclick={() => (logsOpen = false)}>Done</Button></Dialog.Footer
+    ></Dialog.Content
+  ></Dialog.Root
+>
+
+<Dialog.Root bind:open={jobLogsOpen}
+  ><Dialog.Content class="sm:max-w-2xl"
+    ><Dialog.Header
+      ><Dialog.Title>{jobLogsTitle}</Dialog.Title><Dialog.Description
+        >Bounded, structured, and secret-redacted segment job messages.</Dialog.Description
+      ></Dialog.Header
+    >
+    <div class="log-list">
+      {#each jobLogs as log}<article>
+          <time>{new Date(log.timestamp).toLocaleTimeString()}</time><Badge variant="neutral"
+            >{log.level}</Badge
+          ><span>{log.message}</span>
+        </article>{:else}<div class="empty">No job logs have been recorded.</div>{/each}
+    </div>
+    <Dialog.Footer><Button onclick={() => (jobLogsOpen = false)}>Done</Button></Dialog.Footer
     ></Dialog.Content
   ></Dialog.Root
 >

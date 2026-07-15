@@ -33,13 +33,18 @@ After controller restart, sessions and queued jobs remain in PostgreSQL. Expired
 
 Set a dedicated 32-character-or-longer `VRRELAY_METRICS_TOKEN`. Viewer counts are estimates: VRRelay HMACs IP/user-agent pairs with an installation-local salt and expires activity after 30 seconds. Relay byte counters are exact.
 
-## Node logs and events
+## Node and job logs
 
 Agent log messages are structured, redacted by the controller, stored per node,
 and emitted as `node.log` messages on the authenticated operations event stream.
 `VRRELAY_AGENT_LOG_RETENTION_ROWS` controls how many recent log rows are kept per
 node, and `VRRELAY_AGENT_LOG_QUERY_LIMIT` caps `/api/v1/nodes/{nodeId}/logs`
 responses even when callers request a larger `limit`.
+
+Segment job messages use the same redaction rules, are stored per job, and are
+emitted as `job.log` messages on the authenticated operations event stream.
+`VRRELAY_JOB_LOG_RETENTION_ROWS` controls how many recent rows are kept per job,
+and `VRRELAY_JOB_LOG_QUERY_LIMIT` caps `/api/v1/jobs/{jobId}/logs` responses.
 
 ## Benchmark runs
 

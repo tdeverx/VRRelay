@@ -320,7 +320,9 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       cacheLimitBytes: config.cacheLimitBytes,
       maxWorkers: config.maxWorkers,
       nodeId: config.nodeId,
-      roles: config.nodeRoles
+      roles: config.nodeRoles,
+      jobLogRetentionRows: config.jobLogRetentionRows,
+      jobLogQueryLimit: config.jobLogQueryLimit
     },
     {
       objectStore,
@@ -526,7 +528,9 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
       cacheLimitBytes: config.cacheLimitBytes,
       maxWorkers: config.maxWorkers,
       nodeId: config.nodeId,
-      roles: ['source-worker']
+      roles: ['source-worker'],
+      jobLogRetentionRows: config.jobLogRetentionRows,
+      jobLogQueryLimit: config.jobLogQueryLimit
     },
     { objectStore, coordination, clusterRepository: repository, metrics }
   );
@@ -702,7 +706,9 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
       cacheLimitBytes: config.cacheLimitBytes,
       maxWorkers: config.maxWorkers,
       nodeId: config.nodeId,
-      roles: ['edge']
+      roles: ['edge'],
+      jobLogRetentionRows: config.jobLogRetentionRows,
+      jobLogQueryLimit: config.jobLogQueryLimit
     },
     {
       objectStore,

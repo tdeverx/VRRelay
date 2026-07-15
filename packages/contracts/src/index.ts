@@ -197,6 +197,8 @@ export const NodeLogsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).optional()
 });
 export type NodeLogsQuery = z.infer<typeof NodeLogsQuerySchema>;
+export const JobLogsQuerySchema = NodeLogsQuerySchema;
+export type JobLogsQuery = z.infer<typeof JobLogsQuerySchema>;
 export const CacheInventoryQuerySchema = z.object({
   nodeId: z.string().min(1).optional()
 });
@@ -300,6 +302,7 @@ export const RelayEventSchema = z.object({
     'node.draining',
     'node.offline',
     'node.log',
+    'job.log',
     'job.queued',
     'job.leased',
     'job.completed',

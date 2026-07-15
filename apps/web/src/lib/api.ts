@@ -2,6 +2,7 @@ import type {
   CompatibilityResult,
   BackendStatus,
   ClusterNode,
+  JobLogEntry,
   PublicLiveChannel,
   MediaItem,
   ProfileRevision,
@@ -249,6 +250,10 @@ export const api = {
   cancelSegmentJob: (jobId: string) => request<void>(`/api/v1/jobs/${jobId}`, json('DELETE')),
   retrySegmentJob: (jobId: string) =>
     request<SegmentJob>(`/api/v1/jobs/${jobId}/retry`, json('POST', {})),
+  jobLogs: (jobId: string, limit?: number) =>
+    request<{ items: JobLogEntry[] }>(
+      `/api/v1/jobs/${jobId}/logs${limit ? `?limit=${encodeURIComponent(String(limit))}` : ''}`
+    ),
   providerBindings: (providerId?: string) =>
     request<{ items: PublicProviderBinding[] }>(
       `/api/v1/provider-bindings${providerId ? `?providerId=${encodeURIComponent(providerId)}` : ''}`

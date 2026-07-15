@@ -44,8 +44,9 @@ pinned-runtime repository gate are green.
   through distinct composition roots with explicit dependency graphs,
   role-owned HTTP surfaces, schema-startup policy, and ordered shutdown tests.
 - SQLite and PostgreSQL migrations now have immutable version/name/SHA-256
-  metadata through v6. V4 adds live-channel revisions, v5 adds provider
-  revisions/deletion state, and v6 adds crash-safe binding deletion. Startup
+  metadata through v7. V4 adds live-channel revisions, v5 adds provider
+  revisions/deletion state, v6 adds crash-safe binding deletion, and v7 adds
+  bounded segment job logs. Startup
   validates exact columns, storage types, JSON/JSONB and timestamp shape,
   nullability, runtime-critical defaults, boolean checks, keys, unique
   constraints, and named indexes rather than trusting the migration number.
@@ -278,7 +279,7 @@ pending.
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
-- Per-node egress metrics, job-log streaming, adapter contracts, browser
+- Per-node egress metrics, adapter contracts, browser
   coverage, destructive cluster scenarios, and retained target-environment
   benchmark evidence remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM

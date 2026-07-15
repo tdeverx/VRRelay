@@ -157,19 +157,27 @@ describe('relay configuration', () => {
   it('parses bounded agent log retention controls', () => {
     expect(loadConfig({})).toMatchObject({
       agentLogRetentionRows: 1000,
-      agentLogQueryLimit: 200
+      agentLogQueryLimit: 200,
+      jobLogRetentionRows: 1000,
+      jobLogQueryLimit: 200
     });
     expect(
       loadConfig({
         VRRELAY_AGENT_LOG_RETENTION_ROWS: '2500',
-        VRRELAY_AGENT_LOG_QUERY_LIMIT: '500'
+        VRRELAY_AGENT_LOG_QUERY_LIMIT: '500',
+        VRRELAY_JOB_LOG_RETENTION_ROWS: '3000',
+        VRRELAY_JOB_LOG_QUERY_LIMIT: '400'
       })
     ).toMatchObject({
       agentLogRetentionRows: 2500,
-      agentLogQueryLimit: 500
+      agentLogQueryLimit: 500,
+      jobLogRetentionRows: 3000,
+      jobLogQueryLimit: 400
     });
     expect(() => loadConfig({ VRRELAY_AGENT_LOG_RETENTION_ROWS: '99' })).toThrow();
     expect(() => loadConfig({ VRRELAY_AGENT_LOG_QUERY_LIMIT: '1001' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_JOB_LOG_RETENTION_ROWS: '99' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_JOB_LOG_QUERY_LIMIT: '1001' })).toThrow();
   });
 
   it('treats blank optional environment values as unset', () => {

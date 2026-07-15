@@ -553,6 +553,23 @@ export type JobList = {
     items: Array<SegmentJob>;
 };
 
+export type JobLogEntry = {
+    id: string;
+    jobId: string;
+    sessionId?: string;
+    nodeId?: string;
+    level: 'debug' | 'info' | 'warn' | 'error';
+    message: string;
+    context: {
+        [key: string]: unknown;
+    };
+    timestamp: string;
+};
+
+export type JobLogList = {
+    items: Array<JobLogEntry>;
+};
+
 export type BackendValidationRequest = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
     kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
@@ -1653,6 +1670,26 @@ export type RetrySegmentJobResponses = {
 };
 
 export type RetrySegmentJobResponse = RetrySegmentJobResponses[keyof RetrySegmentJobResponses];
+
+export type ListJobLogsData = {
+    body?: never;
+    path: {
+        jobId: string;
+    };
+    query?: {
+        limit?: number;
+    };
+    url: '/jobs/{jobId}/logs';
+};
+
+export type ListJobLogsResponses = {
+    /**
+     * Bounded redacted job logs
+     */
+    200: JobLogList;
+};
+
+export type ListJobLogsResponse = ListJobLogsResponses[keyof ListJobLogsResponses];
 
 export type ListBackendHealthData = {
     body?: never;
