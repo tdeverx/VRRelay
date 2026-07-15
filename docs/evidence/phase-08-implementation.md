@@ -21,9 +21,10 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   `getReadiness`.
 - Prometheus egress and viewer metrics no longer use unbounded `session`
   labels. Egress is emitted as a total counter, `viewers_active` is emitted as
-  an aggregate gauge during cleanup, and exact per-session viewer/egress state
-  remains in repository state, events, and playback accounting rather than
-  long-lived metric labels.
+  an aggregate gauge during cleanup, and the controller now emits
+  `cluster_node_egress_mbps` from bounded node heartbeat labels. Exact
+  per-session viewer/egress state remains in repository state, events, and
+  playback accounting rather than long-lived metric labels.
 - Segment generation, queue pressure, worker utilization, segment job
   attempts/retries/failures/duration, disk/object cache requests, object-store
   operation latency/errors, and object restore outcomes are now emitted through
@@ -72,6 +73,7 @@ npx vitest run apps/relay/src/server.test.ts -t "readiness"
 npx vitest run apps/relay/src/backend-service.test.ts -t "static routing"
 npx vitest run packages/application/src/cluster-service.test.ts -t "static edge"
 npx vitest run packages/application/src/cluster-service.test.ts -t "agent log retention"
+npx vitest run packages/application/src/cluster-service.test.ts -t "per-node egress"
 npx vitest run apps/relay/src/config.test.ts -t "agent log retention"
 npx vitest run packages/application/src/services.test.ts -t "finite manifest"
 npx vitest run packages/adapters/src/sqlite-repository.test.ts -t "job logs"
@@ -89,14 +91,11 @@ npm run check --workspace @vrrelay/web
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 372 tests with 23
+Result: all commands passed. The local full CI gate passed 373 tests with 23
 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
 
-- Per-node egress metrics beyond the current aggregate viewer/egress, queue,
-  job, cache, object, worker, ingest-state, publisher reconnect, and
-  normalizer counters.
 - Retained benchmark runs against target environments, using the scenario
   runner and metadata now checked in.
 - Destructive operations evidence under real repository, coordination, object

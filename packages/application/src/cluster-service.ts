@@ -16,6 +16,7 @@ import type {
   ClusterRepository,
   CoordinationStore,
   EventBus,
+  MetricsSink,
   SignedCertificate,
   TrafficDirector
 } from './index.js';
@@ -56,6 +57,7 @@ export interface EnrollNodeInput {
 export interface ClusterServiceOptions {
   agentLogRetentionRows?: number;
   agentLogQueryLimit?: number;
+  metrics?: MetricsSink;
 }
 
 export class BuiltinTrafficDirector implements TrafficDirector {
@@ -497,7 +499,9 @@ export class ClusterService {
       lastHeartbeatAt: now,
       updatedAt: now
     };
-    return (await this.repository.ensureLocalNode(node)).value;
+    const stored = (await this.repository.ensureLocalNode(node)).value;
+    this.#recordNodeCapabilityMetrics(stored);
+    return stored;
   }
 
   async heartbeat(
@@ -518,7 +522,10 @@ export class ClusterService {
         lastHeartbeatAt: now,
         updatedAt: now
       });
-      if (result.applied) return result.record.value;
+      if (result.applied) {
+        this.#recordNodeCapabilityMetrics(result.record.value);
+        return result.record.value;
+      }
       if (result.reason === 'not-found') throw new NotFoundError('Cluster node was not found');
       if (result.reason === 'invalid-state') return result.current?.value ?? current.value;
     }
@@ -719,6 +726,13 @@ export class ClusterService {
       1,
       Math.floor(this.options.agentLogQueryLimit ?? DEFAULT_AGENT_LOG_QUERY_LIMIT)
     );
+  }
+
+  #recordNodeCapabilityMetrics(node: ClusterNode): void {
+    this.options.metrics?.gauge('cluster_node_egress_mbps', node.capabilities.egressMbps, {
+      node_id: node.id,
+      node_region: node.region
+    });
   }
 
   #hash(value: string): string {

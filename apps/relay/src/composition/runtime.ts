@@ -293,7 +293,8 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     certificateAuthority,
     {
       agentLogRetentionRows: config.agentLogRetentionRows,
-      agentLogQueryLimit: config.agentLogQueryLimit
+      agentLogQueryLimit: config.agentLogQueryLimit,
+      metrics
     }
   );
   const agentController = plan.hostsController

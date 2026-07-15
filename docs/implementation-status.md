@@ -228,6 +228,7 @@ pending.
   [Phase 8 implementation evidence](evidence/phase-08-implementation.md).
 - Prometheus viewer and egress metrics no longer use unbounded session labels:
   egress is a total counter, viewer activity is an aggregate gauge, and
+  `cluster_node_egress_mbps` exposes bounded per-node heartbeat egress while
   per-session truth remains in repository state/events instead of long-lived
   metric labels.
 - Worker queue/pressure, segment job attempts/retries/failures/duration, disk
@@ -279,9 +280,8 @@ pending.
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
-- Per-node egress metrics, adapter contracts, browser
-  coverage, destructive cluster scenarios, and retained target-environment
-  benchmark evidence remain release work.
+- Adapter contracts, browser coverage, destructive cluster scenarios, and
+  retained target-environment benchmark evidence remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM
   provisioning, native installers, signing/notarization, supply-chain evidence,
   upgrade/rollback, and clean-target installation have not passed their release

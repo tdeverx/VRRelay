@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentLogEntry, ClusterNode } from '@vrrelay/domain';
+import { PrometheusMetricsSink } from '../../adapters/src/metrics.js';
 import { SqliteRepository } from '../../adapters/src/sqlite-repository.js';
 import { MemoryCoordinationStore } from '../../adapters/src/local-infrastructure.js';
 import {
@@ -191,6 +192,42 @@ describe('cluster service', () => {
         payload: { nodeId: 'node-b', level: 'info', message: 'log other-node' }
       }
     ]);
+  });
+
+  it('records bounded per-node egress metrics from local registration and heartbeat', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-node-egress-metrics-'));
+    dirs.push(dir);
+    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const metrics = new PrometheusMetricsSink();
+    const cluster = new ClusterService(
+      repository,
+      new MemoryCoordinationStore(),
+      new BuiltinTrafficDirector(),
+      new InMemoryEventBus(),
+      undefined,
+      { metrics }
+    );
+    await cluster.registerLocal({
+      id: 'edge-a',
+      name: 'Edge A',
+      roles: ['edge'],
+      region: 'eu-west',
+      publicUrl: 'https://edge-a.example',
+      state: 'online',
+      capabilities: { ...capabilities, egressMbps: 1.25 },
+      weight: 100
+    });
+    expect(await metrics.render()).toContain(
+      'vrrelay_cluster_node_egress_mbps{node_id="edge-a",node_region="eu-west"} 1.25'
+    );
+
+    await cluster.heartbeat('edge-a', { ...capabilities, egressMbps: 4.5 }, 'online');
+    const rendered = await metrics.render();
+    expect(rendered).toContain(
+      'vrrelay_cluster_node_egress_mbps{node_id="edge-a",node_region="eu-west"} 4.5'
+    );
+    expect(rendered).not.toContain('session=');
   });
 
   it('consumes join tokens once and honors draining edges', async () => {

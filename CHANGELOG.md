@@ -37,6 +37,8 @@ retained evidence belong in the
   dependency-aware readiness distinct from `/api/v1/health` liveness.
 - Low-cardinality aggregate viewer and egress metrics that avoid per-session
   Prometheus labels while keeping exact per-session state in the repository.
+- Bounded cluster-node egress gauges from node heartbeat capability reports for
+  controller-side per-node operations visibility.
 - Low-cardinality worker queue, segment job, cache request, and object-store
   operation metrics for operational debugging without session/object-key labels.
 - Low-cardinality live publisher state, publisher authentication/replacement,
