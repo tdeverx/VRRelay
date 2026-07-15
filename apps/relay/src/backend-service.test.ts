@@ -19,9 +19,9 @@ import {
 import type { ClusterNode } from '@vrrelay/domain';
 import {
   BackendService,
-  OBJECT_STORE_APPLIED_SETTING,
   OBJECT_STORE_SETTING,
   createConfiguredObjectStore,
+  objectStoreAppliedSetting,
   resolveConfiguredObjectStore
 } from './backend-service.js';
 
@@ -305,7 +305,8 @@ describe('backend service', () => {
         repositoryKind: 'sqlite',
         secretKind: 'encrypted-file',
         localObjectStore: local,
-        metrics: new PrometheusMetricsSink()
+        metrics: new PrometheusMetricsSink(),
+        nodeId: 'node-a'
       }
     );
 
@@ -317,12 +318,35 @@ describe('backend service', () => {
     );
     await expect(service.list()).resolves.toMatchObject({ restartRequired: true });
 
-    const resolved = await resolveConfiguredObjectStore(repository, secrets, local, local);
+    const resolved = await resolveConfiguredObjectStore(
+      repository,
+      secrets,
+      local,
+      local,
+      'node-a'
+    );
     expect(resolved).toBe(local);
-    expect(await repository.getSetting(OBJECT_STORE_APPLIED_SETTING)).toBe(
+    expect(await repository.getSetting(objectStoreAppliedSetting('node-a'))).toBe(
       await repository.getSetting(OBJECT_STORE_SETTING)
     );
     await expect(service.list()).resolves.toMatchObject({ restartRequired: false });
+
+    const secondNode = new BackendService(
+      repository,
+      secrets,
+      local,
+      new MemoryCoordinationStore(),
+      new SwitchableTrafficDirector(new BuiltinTrafficDirector()),
+      new SwitchableMetricsExporter(),
+      {
+        repositoryKind: 'sqlite',
+        secretKind: 'encrypted-file',
+        localObjectStore: local,
+        metrics: new PrometheusMetricsSink(),
+        nodeId: 'node-b'
+      }
+    );
+    await expect(secondNode.list()).resolves.toMatchObject({ restartRequired: true });
   });
 
   it('rejects incomplete or malformed cloud object-store credentials before use', async () => {

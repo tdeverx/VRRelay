@@ -155,7 +155,10 @@ edge-delivery and live-fan-out verification is still pending.
   coordination keeps rolling in-memory maps, Valkey coordination keeps
   30-second sorted sets by edge and session, session totals are updated from the
   aggregate, and exact egress byte counters remain separate.
-- Focused application, adapter, and HTTP-boundary tests, format check,
+- Object-store backend application is now recorded per node, so one restarted
+  node no longer clears restart-required state for other roles that have not
+  applied the staged backend configuration.
+- Focused application, adapter, backend, and HTTP-boundary tests, format check,
   generated-contract and TypeScript checks, lint, package builds, and relay
   build passed. See
   [Phase 6 implementation evidence](evidence/phase-06-implementation.md).
@@ -183,10 +186,9 @@ edge-delivery and live-fan-out verification is still pending.
   tone mapping, fMP4 concurrency, dual PC/Quest outputs, and corrupt-input
   handling still lack the required matrix evidence.
 - Edge grants and coordination-backed viewer aggregation now have an
-  implementation checkpoint, but targeted cache administration, per-node backend
-  activation acknowledgement, live backup/replacement behavior, origin recovery,
-  and one-pull-per-edge guarantees remain Phase 6 work. Backend configuration
-  must not be inferred from the current controller-level activation record.
+  implementation checkpoint, and object-store backend application is tracked per
+  node, but targeted cache administration, live backup/replacement behavior,
+  origin recovery, and one-pull-per-edge guarantees remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

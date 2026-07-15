@@ -257,7 +257,8 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     repository,
     secrets,
     bootstrapObjectStores.local,
-    bootstrapObjectStores.configured
+    bootstrapObjectStores.configured,
+    config.nodeId
   );
   const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
   const metricsExporter = new SwitchableMetricsExporter();
@@ -273,7 +274,8 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       repositoryKind: config.repositoryDriver,
       secretKind: secretBackend,
       localObjectStore: bootstrapObjectStores.local,
-      metrics
+      metrics,
+      nodeId: config.nodeId
     }
   );
   await backends.load();
@@ -492,7 +494,8 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     repository,
     secrets,
     bootstrapObjectStores.local,
-    bootstrapObjectStores.configured
+    bootstrapObjectStores.configured,
+    config.nodeId
   );
   const registry = new DefaultProviderRegistry();
   registry.register(new JellyfinProvider(config.applicationVersion));
@@ -668,7 +671,8 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
     repository,
     secrets,
     bootstrapObjectStores.local,
-    bootstrapObjectStores.configured
+    bootstrapObjectStores.configured,
+    config.nodeId
   );
   // Assigned after the edge session service exists; its requester closes over the agent.
   // eslint-disable-next-line prefer-const

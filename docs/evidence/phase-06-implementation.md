@@ -25,6 +25,10 @@ evidence.
   30-second salted fingerprints by edge and by session total.
 - Egress bytes remain exact counters separate from viewer estimation; viewer
   counts update the session total and expose per-edge active-viewer gauges.
+- Object-store backend application is now acknowledged per node. A restarted
+  node records `backend.object-store.applied.<nodeId>`, and backend health no
+  longer treats one node's restart as cluster-wide application of a staged
+  object-store change.
 
 ## Lean guardrails run
 
@@ -42,6 +46,7 @@ Commands:
 npx vitest run packages/application/src/services.test.ts -t "edge-scoped playback grants"
 npx vitest run apps/relay/src/server.test.ts -t "signed edge grants"
 npx vitest run packages/adapters/src/local-infrastructure.test.ts -t "viewer fingerprints"
+npx vitest run apps/relay/src/backend-service.test.ts -t "object store"
 npm run format:check
 npm run check
 npm run lint
@@ -55,7 +60,6 @@ Result: all commands passed.
 
 - Node-targeted cache inventory, restore validation, eviction, disk-pressure
   handling, and object-store lifecycle reconciliation.
-- Per-node backend activation acknowledgement.
 - Live ingest-origin/region selection, immutable-profile-driven normalization,
   primary/backup publisher states, origin recovery, and one upstream pull per
   active edge evidence.

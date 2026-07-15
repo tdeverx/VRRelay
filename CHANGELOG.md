@@ -87,6 +87,8 @@ retained evidence belong in the
 - Aggregate salted viewer fingerprints through the coordination backend when
   available, including Valkey-backed 30-second edge/session counts while keeping
   egress bytes as exact counters.
+- Track staged object-store backend application per node so one restarted role
+  cannot clear restart-required status for the rest of the cluster.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

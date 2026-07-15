@@ -46,6 +46,11 @@ export interface BackendServiceOptions {
   secretKind: 'keychain' | 'dpapi' | 'encrypted-file';
   localObjectStore?: ObjectStore;
   metrics: MetricsSink;
+  nodeId?: string;
+}
+
+export function objectStoreAppliedSetting(nodeId: string): string {
+  return `${OBJECT_STORE_APPLIED_SETTING}.${nodeId}`;
 }
 
 async function secretJson<T>(
@@ -132,7 +137,8 @@ export async function resolveConfiguredObjectStore(
   repository: Repository,
   secrets: SecretStore,
   localObjectStore: ObjectStore,
-  bootstrapObjectStore: ObjectStore
+  bootstrapObjectStore: ObjectStore,
+  nodeId = 'local'
 ): Promise<ObjectStore> {
   const serialized = await repository.getSetting(OBJECT_STORE_SETTING);
   if (!serialized) return bootstrapObjectStore;
@@ -141,7 +147,7 @@ export async function resolveConfiguredObjectStore(
   const status = await objectStore.health();
   if (!status.healthy)
     throw new Error(status.message ?? `Configured ${configuration.kind} object store is unhealthy`);
-  await repository.putSetting(OBJECT_STORE_APPLIED_SETTING, JSON.stringify(configuration));
+  await repository.putSetting(objectStoreAppliedSetting(nodeId), JSON.stringify(configuration));
   return objectStore;
 }
 
@@ -180,6 +186,7 @@ export class BackendService {
   }
 
   async list(): Promise<{ items: BackendStatus[]; restartRequired: boolean }> {
+    const nodeId = this.options.nodeId ?? 'local';
     const [objectStore, coordination, routing, metrics, pendingObjectStore, appliedObjectStore] =
       await Promise.all([
         this.objectStore.health(),
@@ -187,7 +194,7 @@ export class BackendService {
         this.routing.health(),
         this.metricsExporter.health(),
         this.repository.getSetting(OBJECT_STORE_SETTING),
-        this.repository.getSetting(OBJECT_STORE_APPLIED_SETTING)
+        this.repository.getSetting(objectStoreAppliedSetting(nodeId))
       ]);
     const restartRequired = Boolean(
       pendingObjectStore && pendingObjectStore !== appliedObjectStore
