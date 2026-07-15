@@ -39,6 +39,8 @@ retained evidence belong in the
   Prometheus labels while keeping exact per-session state in the repository.
 - Low-cardinality worker queue, segment job, cache request, and object-store
   operation metrics for operational debugging without session/object-key labels.
+- Low-cardinality live publisher state, publisher authentication/replacement,
+  reconnect, and normalizer transition metrics without channel/path labels.
 - Configurable object-store activation and an authenticated metrics webhook
   exporter with lifecycle, persistence-order, and delivery-health tests.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone

@@ -8,7 +8,13 @@ import type {
 } from '@vrrelay/domain';
 import { publicLiveChannel } from '@vrrelay/domain';
 import type { CreateLiveChannelRequest } from '@vrrelay/contracts';
-import type { ClusterRepository, EventBus, LiveNormalizer, Repository } from './index.js';
+import type {
+  ClusterRepository,
+  EventBus,
+  LiveNormalizer,
+  MetricsSink,
+  Repository
+} from './index.js';
 import { ConflictError, NotFoundError } from './errors.js';
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 
@@ -75,7 +81,8 @@ export class LiveService {
     private readonly options: LiveServiceOptions,
     private readonly normalizer?: LiveNormalizer,
     private readonly events?: EventBus,
-    private readonly clusterRepository?: ClusterRepository
+    private readonly clusterRepository?: ClusterRepository,
+    private readonly metrics?: MetricsSink
   ) {}
 
   async create(
@@ -113,6 +120,11 @@ export class LiveService {
       createdAt: new Date().toISOString()
     };
     await this.repository.createLiveChannel(channel);
+    this.metrics?.increment('live_channels_total', {
+      outcome: 'created',
+      normalize: String(input.normalize)
+    });
+    await this.#recordPublisherStates();
     return { channel: publicLiveChannel(channel), publisher };
   }
 
@@ -134,11 +146,14 @@ export class LiveService {
         },
         stored.revision
       );
-      if (result.applied)
+      if (result.applied) {
+        this.metrics?.increment('live_publisher_replacements_total', { outcome: 'requested' });
+        await this.#recordPublisherStates();
         return {
           channel: publicLiveChannel(sanitizeLiveChannel(result.record.value)),
           publisher
         };
+      }
       if (result.reason === 'not-found') throw new NotFoundError('Live channel was not found');
       stored = result.current ?? (await this.repository.getVersionedLiveChannel(channelId));
     }
@@ -150,13 +165,23 @@ export class LiveService {
     for (let attempt = 0; stored && attempt < MAX_LIVE_CHANNEL_WRITE_ATTEMPTS; attempt += 1) {
       const replacementMatches = suppliedTokenHash === stored.value.replacementPublishTokenHash;
       const primaryMatches = suppliedTokenHash === stored.value.publishTokenHash;
-      if (!replacementMatches && !primaryMatches) return false;
-      if (primaryMatches && stored.value.replacementPublishTokenHash) return false;
+      const credential = replacementMatches ? 'replacement' : 'primary';
+      if (!replacementMatches && !primaryMatches) {
+        this.#recordPublisherAuth('rejected', 'unknown', 'token');
+        return false;
+      }
+      if (primaryMatches && stored.value.replacementPublishTokenHash) {
+        this.#recordPublisherAuth('rejected', 'primary', 'replacement_pending');
+        return false;
+      }
       if (
         !replacementMatches &&
         (stored.value.publisherState === 'online' || stored.value.publisherState === 'reconnecting')
-      )
+      ) {
+        this.#recordPublisherAuth('rejected', 'primary', 'active_publisher');
         return false;
+      }
+      const previousState = stored.value.publisherState;
       const next = replacementMatches
         ? this.#promoteReplacementPublisher(stored.value, suppliedTokenHash)
         : stored.value;
@@ -168,10 +193,22 @@ export class LiveService {
         },
         stored.revision
       );
-      if (result.applied) return true;
-      if (result.reason === 'not-found') return false;
+      if (result.applied) {
+        this.#recordPublisherAuth('accepted', credential, 'none');
+        if (previousState !== 'offline')
+          this.metrics?.increment('live_publisher_reconnects_total', { credential });
+        if (replacementMatches)
+          this.metrics?.increment('live_publisher_replacements_total', { outcome: 'promoted' });
+        await this.#recordPublisherStates();
+        return true;
+      }
+      if (result.reason === 'not-found') {
+        this.#recordPublisherAuth('rejected', credential, 'missing_channel');
+        return false;
+      }
       stored = result.current ?? (await this.repository.getVersionedLiveChannel(channelId));
     }
+    this.#recordPublisherAuth('rejected', 'unknown', 'conflict');
     return false;
   }
 
@@ -295,6 +332,9 @@ export class LiveService {
             path: channel.path
           })
         );
+        this.metrics?.increment('live_publisher_state_transitions_total', {
+          state
+        });
       }
       if (!channel.normalize || !this.normalizer) continue;
       const profile = await this.#normalizationProfile(channel);
@@ -309,10 +349,13 @@ export class LiveService {
           `${this.options.internalRtspUrl}/${channel.path}`,
           profile
         );
+        this.metrics?.increment('live_normalizer_transitions_total', { state: 'running' });
       } else if (!online && this.normalizer.running(channel.id)) {
         await this.normalizer.stop(channel.id);
+        this.metrics?.increment('live_normalizer_transitions_total', { state: 'stopped' });
       }
     }
+    await this.#recordPublisherStates();
   }
 
   async #normalizationProfile(channel: LiveChannel): Promise<ProfileRevision | undefined> {
@@ -388,5 +431,29 @@ export class LiveService {
     )
       return false;
     return this.#claimPublisherSlot(channel.id, suppliedTokenHash);
+  }
+
+  #recordPublisherAuth(
+    outcome: 'accepted' | 'rejected',
+    credential: 'primary' | 'replacement' | 'unknown',
+    reason:
+      'none' | 'token' | 'replacement_pending' | 'active_publisher' | 'missing_channel' | 'conflict'
+  ): void {
+    this.metrics?.increment('live_publisher_auth_total', { outcome, credential, reason });
+  }
+
+  async #recordPublisherStates(): Promise<void> {
+    if (!this.metrics) return;
+    const counts: Record<LiveChannel['publisherState'], number> = {
+      offline: 0,
+      online: 0,
+      reconnecting: 0,
+      error: 0
+    };
+    for (const channel of await this.repository.listLiveChannels())
+      counts[channel.publisherState] += 1;
+    for (const [state, count] of Object.entries(counts)) {
+      this.metrics.gauge('live_publishers', count, { state });
+    }
   }
 }

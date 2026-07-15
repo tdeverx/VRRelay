@@ -1534,14 +1534,22 @@ describe('Live relay service', () => {
     dirs.push(dir);
     const repo = new SqliteRepository(join(dir, 'db.sqlite'));
     await repo.migrate();
-    const service = new LiveService(repo, {
-      publicUrl: 'https://relay.example',
-      rtmpUrl: 'rtmp://ingest.example/live',
-      srtUrl: 'srt://ingest.example:8890',
-      whipUrl: 'https://ingest.example',
-      hlsUrl: 'https://edge.example',
-      internalRtspUrl: 'rtsp://mediamtx:8554'
-    });
+    const metrics = new PrometheusMetricsSink();
+    const service = new LiveService(
+      repo,
+      {
+        publicUrl: 'https://relay.example',
+        rtmpUrl: 'rtmp://ingest.example/live',
+        srtUrl: 'srt://ingest.example:8890',
+        whipUrl: 'https://ingest.example',
+        hlsUrl: 'https://edge.example',
+        internalRtspUrl: 'rtsp://mediamtx:8554'
+      },
+      undefined,
+      undefined,
+      undefined,
+      metrics
+    );
     const created = await service.create({ name: 'OBS replacement', normalize: true });
     const stored = (await repo.getLiveChannel(created.channel.id))!;
     const ingestPath = stored.ingestPath ?? stored.path;
@@ -1606,6 +1614,22 @@ describe('Live relay service', () => {
         'read-token'
       )
     ).resolves.toBe(false);
+    const renderedMetrics = await metrics.render();
+    expect(renderedMetrics).toContain(
+      'vrrelay_live_publisher_replacements_total{outcome="requested"} 1'
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_live_publisher_replacements_total{outcome="promoted"} 1'
+    );
+    expect(renderedMetrics).toMatch(
+      /vrrelay_live_publisher_auth_total\{[^}]*outcome="accepted"[^}]*credential="replacement"[^}]*reason="none"[^}]*\} 1/
+    );
+    expect(renderedMetrics).toMatch(
+      /vrrelay_live_publisher_auth_total\{[^}]*outcome="rejected"[^}]*credential="primary"[^}]*reason="replacement_pending"[^}]*\} 1/
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_live_publisher_reconnects_total{credential="replacement"} 1'
+    );
   });
 
   it('records the selected ingest origin and region when creating a live channel', async () => {
@@ -1700,6 +1724,7 @@ describe('Live relay service', () => {
       })
     );
     const normalizer = new CapturingLiveNormalizer();
+    const metrics = new PrometheusMetricsSink();
     const live = new LiveService(
       repo,
       {
@@ -1710,7 +1735,10 @@ describe('Live relay service', () => {
         hlsUrl: 'https://edge.example',
         internalRtspUrl: 'rtsp://mediamtx:8554'
       },
-      normalizer
+      normalizer,
+      undefined,
+      undefined,
+      metrics
     );
     const created = await live.create({ name: 'Profiled OBS', normalize: true });
     const sessions = new SessionService(
@@ -1769,6 +1797,14 @@ describe('Live relay service', () => {
       video: { width: 1280, height: 720, frameRate: 60, gop: 120 },
       audio: { channels: 1, sampleRate: 44_100, bitrateKbps: 128 }
     });
+    const renderedMetrics = await metrics.render();
+    expect(renderedMetrics).toContain('vrrelay_live_publishers{state="online"} 1');
+    expect(renderedMetrics).toContain(
+      'vrrelay_live_publisher_state_transitions_total{state="online"} 1'
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_live_normalizer_transitions_total{state="running"} 1'
+    );
   });
 
   it('rejects conflicting normalization profiles for the same live channel', async () => {

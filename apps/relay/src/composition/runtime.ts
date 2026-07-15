@@ -86,7 +86,8 @@ function liveService(
   config: RelayConfig,
   repository: ReturnType<typeof createRepository>,
   events: InMemoryEventBus,
-  normalizer?: FFmpegLiveNormalizer
+  normalizer: FFmpegLiveNormalizer | undefined,
+  metrics: PrometheusMetricsSink
 ): LiveService {
   return new LiveService(
     repository,
@@ -103,7 +104,8 @@ function liveService(
     },
     normalizer,
     events,
-    repository
+    repository,
+    metrics
   );
 }
 
@@ -333,7 +335,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
         ffmpegPath: config.ffmpegPath
       })
     : undefined;
-  const live = liveService(config, repository, events, liveNormalizer);
+  const live = liveService(config, repository, events, liveNormalizer, metrics);
   await live.scrubPersistedPublisherCredentials();
   await sessions.recover();
 
@@ -588,7 +590,7 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
   const normalizer = new FFmpegLiveNormalizer({
     ffmpegPath: config.ffmpegPath
   });
-  const live = liveService(config, repository, events, normalizer);
+  const live = liveService(config, repository, events, normalizer, metrics);
   await live.scrubPersistedPublisherCredentials();
   const currentNodeCapabilities = nodeCapabilities(config, capabilities);
   const app = await createRoleServer(config, {

@@ -30,6 +30,10 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   bounded Prometheus labels such as `mode`, `outcome`, `operation`, `kind`,
   `delivery`, and `encoder`. Session IDs, object keys, URLs, and node IDs are
   intentionally excluded from these long-lived series.
+- Live publisher state, publisher authentication/replacement, reconnect, and
+  normalizer transition metrics now use bounded labels such as `state`,
+  `credential`, `outcome`, and `reason`. Channel IDs, ingest paths, tokens, and
+  URLs are intentionally excluded.
 
 ## Lean guardrails run
 
@@ -58,9 +62,9 @@ intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
 
-- Ingest-state, publisher reconnect, and per-node egress metrics beyond the
-  current aggregate viewer/egress, queue, job, cache, object, and worker
-  counters.
+- Per-node egress metrics beyond the current aggregate viewer/egress, queue,
+  job, cache, object, worker, ingest-state, publisher reconnect, and
+  normalizer counters.
 - Bounded structured node/job log streaming and retention controls.
 - Static routing adapter, benchmark scenarios, and retained benchmark metadata.
 - Destructive operations evidence under real repository, coordination, object
