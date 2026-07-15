@@ -31,6 +31,33 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+function edgeNode(id: string, region: string, state: ClusterNode['state'] = 'online'): ClusterNode {
+  const now = new Date().toISOString();
+  return {
+    id,
+    name: id,
+    roles: ['edge'],
+    region,
+    publicUrl: `https://${id}.example`,
+    state,
+    weight: 100,
+    capabilities: {
+      encoders: [],
+      hardwareDevices: [],
+      maxWorkers: 2,
+      activeWorkers: 0,
+      queuedWorkers: 0,
+      cacheBytes: 0,
+      cacheLimitBytes: 1024,
+      egressMbps: 0,
+      providerIds: []
+    },
+    lastHeartbeatAt: now,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 describe('backend service', () => {
   it('validates, activates, and reloads an authenticated routing webhook', async () => {
     const authorization: string[] = [];
@@ -151,6 +178,73 @@ describe('backend service', () => {
       'Bearer test-routing-secret',
       'Bearer test-routing-secret'
     ]);
+    await service.close();
+    await reloadedService.close();
+  });
+
+  it('validates, activates, and reloads a static routing adapter', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-static-routing-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const repository = new SqliteRepository(join(dir, 'state.sqlite3'));
+    await repository.migrate();
+    cleanups.push(async () => repository.close());
+    const secrets: SecretStore = {
+      put: async () => undefined,
+      get: async () => '',
+      delete: async () => undefined
+    };
+    const objectStore = new LocalObjectStore(join(dir, 'objects'));
+    const coordination = new MemoryCoordinationStore();
+    const routing = new SwitchableTrafficDirector(new BuiltinTrafficDirector());
+    const metrics = new PrometheusMetricsSink();
+    const service = new BackendService(
+      repository,
+      secrets,
+      objectStore,
+      coordination,
+      routing,
+      new SwitchableMetricsExporter(),
+      {
+        repositoryKind: 'sqlite',
+        secretKind: 'encrypted-file',
+        metrics
+      }
+    );
+    const configuration = {
+      category: 'routing' as const,
+      kind: 'static' as const,
+      nodeId: 'edge-west'
+    };
+    const nodes = [edgeNode('edge-west', 'eu-west'), edgeNode('edge-east', 'us-east')];
+
+    await expect(service.validate(configuration)).resolves.toMatchObject({
+      healthy: true,
+      kind: 'static'
+    });
+    await expect(service.activate(configuration)).resolves.toMatchObject({
+      healthy: true,
+      kind: 'static'
+    });
+    expect(await repository.getSetting('backend.routing')).toBe(JSON.stringify(configuration));
+    await expect(routing.selectEdge('session-a', nodes, 'eu-west')).resolves.toMatchObject({
+      id: 'edge-west'
+    });
+    await expect(routing.selectEdge('session-a', nodes, 'us-east')).resolves.toBeUndefined();
+
+    const reloaded = new SwitchableTrafficDirector(new BuiltinTrafficDirector());
+    const reloadedService = new BackendService(
+      repository,
+      secrets,
+      objectStore,
+      coordination,
+      reloaded,
+      new SwitchableMetricsExporter(),
+      { repositoryKind: 'sqlite', secretKind: 'encrypted-file', metrics }
+    );
+    await reloadedService.load();
+    await expect(reloaded.selectEdge('session-a', nodes, 'eu-west')).resolves.toMatchObject({
+      id: 'edge-west'
+    });
     await service.close();
     await reloadedService.close();
   });

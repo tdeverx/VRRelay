@@ -831,6 +831,7 @@ components:
                 postgres,
                 valkey,
                 builtin,
+                static,
                 webhook,
                 sqlite,
                 keychain,
@@ -1601,6 +1602,7 @@ components:
                 postgres,
                 valkey,
                 builtin,
+                static,
                 webhook,
                 sqlite,
                 keychain,
@@ -1611,6 +1613,7 @@ components:
           }
         endpoint: { type: string, format: uri }
         secretRef: { type: string, writeOnly: true }
+        nodeId: { type: string, minLength: 1, maxLength: 200 }
         bucket: { type: string, minLength: 1, maxLength: 255 }
         container: { type: string, minLength: 1, maxLength: 255 }
         region: { type: string, minLength: 1, maxLength: 100 }
@@ -1641,6 +1644,7 @@ components:
                 postgres,
                 valkey,
                 builtin,
+                static,
                 webhook,
                 sqlite,
                 keychain,

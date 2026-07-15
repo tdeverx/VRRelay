@@ -34,6 +34,10 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   normalizer transition metrics now use bounded labels such as `state`,
   `credential`, `outcome`, and `reason`. Channel IDs, ingest paths, tokens, and
   URLs are intentionally excluded.
+- Static routing can now be validated, activated, persisted, and reloaded
+  alongside the built-in and webhook traffic directors. It can pin playback to
+  an exact online edge or to a configured region without storing webhook
+  endpoints or secrets, and pinned-node region mismatches fail closed.
 
 ## Lean guardrails run
 
@@ -50,14 +54,18 @@ Commands:
 ```text
 npm run generate:api
 npx vitest run apps/relay/src/server.test.ts -t "readiness"
+npx vitest run apps/relay/src/backend-service.test.ts -t "static routing"
+npx vitest run packages/application/src/cluster-service.test.ts -t "static edge"
 npx vitest run packages/application/src/services.test.ts
 npm run check:api
+npm run check --workspace @vrrelay/contracts
 npm run check --workspace @vrrelay/relay
 npm run check --workspace @vrrelay/application
+npm run check --workspace @vrrelay/web
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 363 tests with 23
+Result: all commands passed. The local full CI gate passed 365 tests with 23
 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
@@ -66,6 +74,6 @@ intentional skips and reported zero npm vulnerabilities.
   job, cache, object, worker, ingest-state, publisher reconnect, and
   normalizer counters.
 - Bounded structured node/job log streaming and retention controls.
-- Static routing adapter, benchmark scenarios, and retained benchmark metadata.
+- Benchmark scenarios and retained benchmark metadata.
 - Destructive operations evidence under real repository, coordination, object
   storage, MediaMTX, and agent-listener failures.

@@ -492,6 +492,7 @@ export const BackendKindSchema = z.enum([
   'postgres',
   'valkey',
   'builtin',
+  'static',
   'webhook',
   'sqlite',
   'keychain',

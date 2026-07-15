@@ -66,9 +66,11 @@
   let nodeLogs = $state<AgentLogEntry[]>([]);
   let logsOpen = $state(false);
   let backendOpen = $state(false);
-  let routingKind = $state<'builtin' | 'webhook'>('builtin');
+  let routingKind = $state<'builtin' | 'static' | 'webhook'>('builtin');
   let routingEndpoint = $state('');
   let routingSecretRef = $state('');
+  let routingNodeId = $state('');
+  let routingRegion = $state('');
   let backendResult = $state<BackendStatus | null>(null);
   let backendBusy = $state(false);
   let storageOpen = $state(false);
@@ -162,9 +164,17 @@
     return {
       category: 'routing' as const,
       kind: routingKind,
+      ...(routingKind === 'static' && routingNodeId ? { nodeId: routingNodeId } : {}),
+      ...(routingKind === 'static' && routingRegion ? { region: routingRegion } : {}),
       ...(routingKind === 'webhook' ? { endpoint: routingEndpoint } : {}),
       ...(routingKind === 'webhook' && routingSecretRef ? { secretRef: routingSecretRef } : {})
     };
+  }
+
+  function routingReady() {
+    if (routingKind === 'webhook') return Boolean(routingEndpoint);
+    if (routingKind === 'static') return Boolean(routingNodeId || routingRegion);
+    return true;
   }
 
   async function validateRouting() {
@@ -714,24 +724,51 @@
   <Dialog.Content>
     <Dialog.Header
       ><Dialog.Title>Configure traffic director</Dialog.Title><Dialog.Description
-        >Choose the built-in capacity-aware director or an authenticated provider-neutral routing
-        webhook. Secret values remain in the configured node-local secret backend.</Dialog.Description
+        >Choose built-in capacity-aware hashing, a static edge or region target, or an authenticated
+        provider-neutral routing webhook. Secret values remain in the configured node-local secret
+        backend.</Dialog.Description
       ></Dialog.Header
     >
     <label
       ><span>Routing backend</span><Select.Root type="single" bind:value={routingKind}
         ><Select.Trigger class="w-full"
-          >{routingKind === 'builtin' ? 'Built-in director' : 'Routing webhook'}</Select.Trigger
+          >{routingKind === 'builtin'
+            ? 'Built-in director'
+            : routingKind === 'static'
+              ? 'Static edge or region'
+              : 'Routing webhook'}</Select.Trigger
         ><Select.Content
           ><Select.Group
             ><Select.Item value="builtin" label="Built-in director">Built-in director</Select.Item
+            ><Select.Item value="static" label="Static edge or region"
+              >Static edge or region</Select.Item
+            >
             ><Select.Item value="webhook" label="Routing webhook">Routing webhook</Select.Item
             ></Select.Group
           ></Select.Content
         ></Select.Root
       ></label
     >
-    {#if routingKind === 'webhook'}
+    {#if routingKind === 'static'}
+      <label
+        ><span>Static edge node ID</span><Input
+          bind:value={routingNodeId}
+          placeholder={edgeNodes[0]?.id ?? 'edge-node-id'}
+        /><small
+          >When set, only this online edge can receive traffic and preferred-region mismatches fail
+          closed.</small
+        ></label
+      >
+      <label
+        ><span>Optional region</span><Input
+          bind:value={routingRegion}
+          placeholder={edgeNodes[0]?.region ?? 'eu-west'}
+        /><small
+          >Without a node ID, the director chooses an online edge from this region before falling
+          back.</small
+        ></label
+      >
+    {:else if routingKind === 'webhook'}
       <label
         ><span>HTTPS or private-network endpoint</span><Input
           bind:value={routingEndpoint}
@@ -754,9 +791,8 @@
     <Dialog.Footer
       ><Button variant="outline" disabled={backendBusy} onclick={() => void validateRouting()}
         >Validate</Button
-      ><Button
-        disabled={backendBusy || (routingKind === 'webhook' && !routingEndpoint)}
-        onclick={() => void activateRouting()}>Activate</Button
+      ><Button disabled={backendBusy || !routingReady()} onclick={() => void activateRouting()}
+        >Activate</Button
       ></Dialog.Footer
     >
   </Dialog.Content>

@@ -236,6 +236,9 @@ pending.
 - Live publisher state, publisher authentication/replacement, reconnect, and
   normalizer transition metrics use bounded labels and avoid channel IDs,
   ingest paths, tokens, and URLs.
+- The routing backend can now be switched between built-in hashing, static
+  node/region routing, and the authenticated routing webhook through the
+  backend service and cluster dashboard.
 
 ## Known gaps in the audited checkout
 

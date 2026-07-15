@@ -4,6 +4,7 @@ import type { BackendStatus, BackendKind } from '@vrrelay/domain';
 import {
   BuiltinTrafficDirector,
   ConflictError,
+  StaticTrafficDirector,
   SwitchableMetricsExporter,
   SwitchableTrafficDirector,
   type CoordinationStore,
@@ -410,8 +411,16 @@ export class BackendService {
 
   async #routingCandidate(configuration: BackendValidationRequest): Promise<TrafficDirector> {
     if (configuration.kind === 'builtin') return new BuiltinTrafficDirector();
+    if (configuration.kind === 'static') {
+      if (!configuration.nodeId && !configuration.region)
+        throw new ConflictError('Static routing requires a nodeId or region');
+      return new StaticTrafficDirector({
+        ...(configuration.nodeId ? { nodeId: configuration.nodeId } : {}),
+        ...(configuration.region ? { region: configuration.region } : {})
+      });
+    }
     if (configuration.kind !== 'webhook')
-      throw new ConflictError('Routing backend must be builtin or webhook');
+      throw new ConflictError('Routing backend must be builtin, static, or webhook');
     if (!configuration.endpoint) throw new ConflictError('Routing webhook endpoint is required');
     const endpoint = (await validateProviderUrl(configuration.endpoint)).normalizedUrl;
     const token = configuration.secretRef

@@ -33,7 +33,7 @@ export type Readiness = {
 
 export type DependencyReadiness = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
-    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
     healthy: boolean;
     checkedAt: string;
     restartRequired?: boolean;
@@ -555,8 +555,9 @@ export type JobList = {
 
 export type BackendValidationRequest = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
-    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
     endpoint?: string;
+    nodeId?: string;
     bucket?: string;
     container?: string;
     region?: string;
@@ -570,7 +571,7 @@ export type BackendActivationRequest = BackendValidationRequest;
 
 export type BackendStatus = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
-    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
     healthy: boolean;
     message?: string;
     checkedAt: string;
@@ -681,9 +682,10 @@ export type CreateProviderBindingRequestWritable = CreateProviderRequestWritable
 
 export type BackendValidationRequestWritable = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
-    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
     endpoint?: string;
     secretRef?: string;
+    nodeId?: string;
     bucket?: string;
     container?: string;
     region?: string;

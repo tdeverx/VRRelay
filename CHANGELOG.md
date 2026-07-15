@@ -43,6 +43,8 @@ retained evidence belong in the
   reconnect, and normalizer transition metrics without channel/path labels.
 - Configurable object-store activation and an authenticated metrics webhook
   exporter with lifecycle, persistence-order, and delivery-health tests.
+- Static traffic routing that can pin playback to a configured edge node or
+  region without depending on an external routing webhook.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone
   composition roots with explicit runtime dependency graphs, role-owned HTTP
   surfaces, schema-startup policy, and ordered shutdown.

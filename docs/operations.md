@@ -15,7 +15,9 @@ but it only exposes redacted dependency category/kind/status fields.
 
 ## Traffic director
 
-The default director performs capacity-aware, stable session hashing locally. **Cluster → Configure routing** can validate and activate a generic webhook without restarting the controller. Public endpoints must use HTTPS; private-network HTTP is accepted with the same SSRF and credential-in-URL checks as provider connections. An optional `secretRef` names a bearer token already provisioned in the controller's root secret backend—the secret value is never stored in distributed configuration or returned by the API.
+The default director performs capacity-aware, stable session hashing locally. **Cluster → Configure routing** can also validate and activate static routing without restarting the controller. Static routing can pin traffic to one configured edge node or to an online edge in a configured region; a pinned node fails closed if it is offline, no longer has the edge role, or does not match the request's preferred region.
+
+For external policy engines, **Cluster → Configure routing** can validate and activate a generic webhook without restarting the controller. Public endpoints must use HTTPS; private-network HTTP is accepted with the same SSRF and credential-in-URL checks as provider connections. An optional `secretRef` names a bearer token already provisioned in the controller's root secret backend—the secret value is never stored in distributed configuration or returned by the API.
 
 VRRelay sends `{"type":"health"}` for validation. Selection requests contain `type: "select-edge"`, the session and preferred region, and only eligible edges with public routing/capacity fields. Return `{"nodeId":"…"}` for one supplied candidate. Unknown, offline, or otherwise ineligible IDs are rejected.
 

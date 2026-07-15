@@ -97,6 +97,67 @@ export class BuiltinTrafficDirector implements TrafficDirector {
   }
 }
 
+export interface StaticTrafficDirectorOptions {
+  nodeId?: string;
+  region?: string;
+}
+
+export class StaticTrafficDirector implements TrafficDirector {
+  readonly kind = 'static';
+
+  constructor(private readonly options: StaticTrafficDirectorOptions = {}) {}
+
+  async selectEdge(
+    _sessionId: string,
+    nodes: readonly ClusterNode[],
+    preferredRegion?: string
+  ): Promise<ClusterNode | undefined> {
+    const eligible = nodes.filter((node) => node.roles.includes('edge') && node.state === 'online');
+    if (!eligible.length) return undefined;
+
+    if (this.options.nodeId) {
+      const selected = eligible.find((node) => node.id === this.options.nodeId);
+      if (!selected) return undefined;
+      if (this.options.region && selected.region !== this.options.region) return undefined;
+      if (preferredRegion && selected.region !== preferredRegion) return undefined;
+      return selected;
+    }
+
+    const configuredRegion = this.options.region
+      ? eligible.filter((node) => node.region === this.options.region)
+      : [];
+    const requestedRegion = preferredRegion
+      ? eligible.filter((node) => node.region === preferredRegion)
+      : [];
+    const pool = configuredRegion.length
+      ? configuredRegion
+      : requestedRegion.length
+        ? requestedRegion
+        : eligible;
+    return [...pool].sort(
+      (left, right) => right.weight - left.weight || left.id.localeCompare(right.id)
+    )[0];
+  }
+
+  async health() {
+    const target =
+      this.options.nodeId && this.options.region
+        ? `node ${this.options.nodeId} in ${this.options.region}`
+        : this.options.nodeId
+          ? `node ${this.options.nodeId}`
+          : this.options.region
+            ? `region ${this.options.region}`
+            : 'the first eligible edge';
+    return {
+      category: 'routing' as const,
+      kind: 'static' as const,
+      healthy: true,
+      message: `Static routing targets ${target}`,
+      checkedAt: new Date().toISOString()
+    };
+  }
+}
+
 export class SwitchableTrafficDirector implements TrafficDirector {
   constructor(private delegate: TrafficDirector) {}
 

@@ -2,9 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ClusterNode } from '@vrrelay/domain';
 import { SqliteRepository } from '../../adapters/src/sqlite-repository.js';
 import { MemoryCoordinationStore } from '../../adapters/src/local-infrastructure.js';
-import { BuiltinTrafficDirector, ClusterService } from './cluster-service.js';
+import {
+  BuiltinTrafficDirector,
+  ClusterService,
+  StaticTrafficDirector
+} from './cluster-service.js';
 import { InMemoryEventBus, type CertificateAuthority } from './index.js';
 
 const dirs: string[] = [];
@@ -23,6 +28,28 @@ const capabilities = {
   egressMbps: 0,
   providerIds: ['provider-1']
 };
+
+function edgeNode(
+  id: string,
+  region: string,
+  state: ClusterNode['state'] = 'online',
+  weight = 100
+): ClusterNode {
+  const now = new Date().toISOString();
+  return {
+    id,
+    name: id,
+    roles: ['edge'],
+    region,
+    publicUrl: `https://${id}.example`,
+    state,
+    capabilities,
+    weight,
+    lastHeartbeatAt: now,
+    createdAt: now,
+    updatedAt: now
+  };
+}
 
 class FakeCertificateAuthority implements CertificateAuthority {
   issued = 0;
@@ -94,6 +121,27 @@ describe('cluster service', () => {
     ]);
 
     expect(selected?.id).toBe('available');
+  });
+
+  it('routes through a static edge or region without falling through to ineligible nodes', async () => {
+    const nodes = [
+      edgeNode('edge-west', 'eu-west'),
+      edgeNode('edge-east', 'us-east'),
+      edgeNode('edge-draining', 'eu-west', 'draining', 1_000)
+    ];
+
+    await expect(
+      new StaticTrafficDirector({ nodeId: 'edge-west' }).selectEdge('session-a', nodes, 'eu-west')
+    ).resolves.toMatchObject({ id: 'edge-west' });
+    await expect(
+      new StaticTrafficDirector({ nodeId: 'edge-west' }).selectEdge('session-a', nodes, 'us-east')
+    ).resolves.toBeUndefined();
+    await expect(
+      new StaticTrafficDirector({ nodeId: 'edge-draining' }).selectEdge('session-a', nodes)
+    ).resolves.toBeUndefined();
+    await expect(
+      new StaticTrafficDirector({ region: 'eu-west' }).selectEdge('session-a', nodes)
+    ).resolves.toMatchObject({ id: 'edge-west' });
   });
 
   it('consumes join tokens once and honors draining edges', async () => {
