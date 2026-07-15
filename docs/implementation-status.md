@@ -177,6 +177,19 @@ edge-delivery and live-fan-out verification is still pending.
   and relay build passed. See
   [Phase 6 implementation evidence](evidence/phase-06-implementation.md).
 
+## Phase 7 implementation checkpoint
+
+Phase 7 has a first build-first implementation checkpoint. Its broader
+administrator workflow, browser, accessibility, and realtime verification is
+still pending.
+
+- The cluster dashboard node cache panel can target the local cache or a
+  connected source-worker/edge node for inventory and bulk eviction.
+- The dashboard sends `nodeId` only for selected remote cache targets, falls
+  back to local cache when the selected node disconnects or stops owning cache,
+  and now labels the workflow as node cache instead of edge-only cache. See
+  [Phase 7 implementation evidence](evidence/phase-07-implementation.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
@@ -208,7 +221,7 @@ edge-delivery and live-fan-out verification is still pending.
   one-pull-per-edge guarantees remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
-  session, placement, catalog, live, binding, job, cache, metrics, realtime,
+  session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
 - Readiness, low-cardinality operational metrics, bounded structured logs,
   adapter contracts, browser coverage, destructive cluster scenarios, and

@@ -94,6 +94,8 @@ retained evidence belong in the
 - Allow cache inventory and eviction requests to target a connected cluster
   node through strict agent envelopes, while failing closed for disconnected
   node targets.
+- Let the cluster dashboard target local or connected source/edge node caches
+  for inventory refreshes and bulk temporary-object eviction.
 - Invalidate corrupt object-store segment restores and refill them through the
   normal generation/origin path instead of failing playback on stale completed
   job state.

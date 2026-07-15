@@ -54,6 +54,8 @@
   let bindings = $state<PublicProviderBinding[]>([]);
   let providers = $state<PublicProviderConnection[]>([]);
   let cache = $state<CachedObject[]>([]);
+  let cacheLoading = $state(false);
+  let cacheTargetId = $state('__local__');
   let bindOpen = $state(false);
   let bindNodeId = $state('');
   let bindProviderId = $state('new');
@@ -84,6 +86,19 @@
 
   const onlineNodes = $derived(nodes.filter((node) => node.state === 'online'));
   const edgeNodes = $derived(nodes.filter((node) => node.roles.includes('edge')));
+  const cacheNodes = $derived(
+    nodes.filter(
+      (node) =>
+        node.agent?.connected &&
+        (node.roles.includes('edge') || node.roles.includes('source-worker'))
+    )
+  );
+  const cacheTotalBytes = $derived(cache.reduce((sum, item) => sum + item.size, 0));
+  const cacheTargetLabel = $derived(
+    cacheTargetId === '__local__'
+      ? 'Local cache'
+      : (nodes.find((node) => node.id === cacheTargetId)?.name ?? cacheTargetId)
+  );
   const activeWorkers = $derived(
     nodes.reduce((sum, node) => sum + node.capabilities.activeWorkers, 0)
   );
@@ -97,35 +112,49 @@
   async function load() {
     loading = true;
     try {
-      const [
-        nodeResult,
-        backendResult,
-        jobResult,
-        eventResult,
-        bindingResult,
-        cacheResult,
-        providerResult
-      ] = await Promise.all([
-        api.clusterNodes(),
-        api.clusterBackends(),
-        api.segmentJobs(),
-        api.recentEvents(),
-        api.providerBindings(),
-        api.cacheInventory(),
-        api.providers()
-      ]);
+      const [nodeResult, backendResult, jobResult, eventResult, bindingResult, providerResult] =
+        await Promise.all([
+          api.clusterNodes(),
+          api.clusterBackends(),
+          api.segmentJobs(),
+          api.recentEvents(),
+          api.providerBindings(),
+          api.providers()
+        ]);
       nodes = nodeResult.items;
+      if (
+        cacheTargetId !== '__local__' &&
+        !nodeResult.items.some(
+          (node) =>
+            node.id === cacheTargetId &&
+            node.agent?.connected &&
+            (node.roles.includes('edge') || node.roles.includes('source-worker'))
+        )
+      )
+        cacheTargetId = '__local__';
       backends = backendResult.items;
       jobs = jobResult.items;
       events = eventResult.items;
       bindings = bindingResult.items;
-      cache = cacheResult.items;
       providers = providerResult.items;
+      await loadCache(cacheTargetId);
     } catch (error) {
       if (isAuthenticatedError(error)) return goto('/login');
       toast.error(error instanceof Error ? error.message : 'Could not load cluster state.');
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadCache(targetId = cacheTargetId) {
+    cacheLoading = true;
+    try {
+      cache = (await api.cacheInventory(targetId === '__local__' ? undefined : targetId)).items;
+    } catch (error) {
+      if (isAuthenticatedError(error)) return goto('/login');
+      toast.error(error instanceof Error ? error.message : 'Could not load cache inventory.');
+    } finally {
+      cacheLoading = false;
     }
   }
 
@@ -293,12 +322,18 @@
   }
 
   async function evictAll() {
+    const target = cacheTargetLabel;
     if (
-      !confirm('Evict every temporary edge cache object? Sessions and playback links are retained.')
+      !confirm(
+        `Evict every temporary cache object on ${target}? Sessions and playback links are retained.`
+      )
     )
       return;
     try {
-      const result = await api.evictCache({ all: true });
+      const result = await api.evictCache({
+        all: true,
+        ...(cacheTargetId === '__local__' ? {} : { nodeId: cacheTargetId })
+      });
       toast.success(`Evicted ${result.removed} objects.`);
       await load();
     } catch (error) {
@@ -577,23 +612,53 @@
       <section>
         <div class="section-heading">
           <div>
-            <h2>Edge cache</h2>
-            <p>Temporary objects only; sessions and links are retained.</p>
+            <h2>Node cache</h2>
+            <p>Temporary source and edge objects only; sessions and links are retained.</p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!cache.length}
-            onclick={() => void evictAll()}><Trash2 />Evict all</Button
-          >
+          <div class="cache-actions">
+            <div class="cache-select">
+              <Select.Root
+                type="single"
+                bind:value={cacheTargetId}
+                onValueChange={(value) => {
+                  cacheTargetId = value ?? '__local__';
+                  void loadCache(cacheTargetId);
+                }}
+              >
+                <Select.Trigger>{cacheTargetLabel}</Select.Trigger>
+                <Select.Content>
+                  <Select.Group>
+                    <Select.Item value="__local__" label="Local cache">Local cache</Select.Item>
+                    {#each cacheNodes as node}
+                      <Select.Item value={node.id} label={node.name}
+                        >{node.name} · {node.roles.join(', ')}</Select.Item
+                      >
+                    {/each}
+                  </Select.Group>
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={cacheLoading}
+              onclick={() => void loadCache()}
+              ><span class:spin={cacheLoading}><RefreshCw /></span>Refresh</Button
+            >
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!cache.length || cacheLoading}
+              onclick={() => void evictAll()}><Trash2 />Evict all</Button
+            >
+          </div>
         </div>
         <div class="backend-list">
           <article>
             <Database />
             <div>
               <strong>{cache.length} cached objects</strong><span
-                >{(cache.reduce((sum, item) => sum + item.size, 0) / 1_073_741_824).toFixed(2)} GB on
-                this node</span
+                >{(cacheTotalBytes / 1_073_741_824).toFixed(2)} GB on {cacheTargetLabel}</span
               >
             </div>
             <Badge variant="neutral">LRU + TTL</Badge>
@@ -907,11 +972,15 @@
     color: var(--muted-foreground);
     font-size: 11px;
   }
-  .backend-actions {
+  .backend-actions,
+  .cache-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 6px;
+  }
+  .cache-select {
+    min-width: 180px;
   }
   .table-frame {
     overflow: auto;
