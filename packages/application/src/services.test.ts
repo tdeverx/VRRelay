@@ -6,6 +6,7 @@ import {
   DefaultProviderRegistry,
   InMemoryEventBus,
   type MediaProvider,
+  type RemoteProviderGateway,
   type SecretStore,
   type SegmentRequest,
   type Transcoder
@@ -1160,6 +1161,68 @@ describe('provider failover bindings', () => {
     await expect(workerBSecrets.get(bindingA.secretRef)).rejects.toThrow();
   });
 
+  it('routes provider activity over the bound remote worker without local credential access', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-activity-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    await repo.createNode(sourceWorkerNode('worker-a'));
+    const registry = providerBindingRegistry();
+    const workerSecrets = new TrackingSecretStore();
+    const worker = new ProviderService(repo, workerSecrets, registry, { nodeId: 'worker-a' });
+    await worker.createBinding(
+      providerBindingInput('activity'),
+      'worker-a',
+      'provider-activity',
+      'binding-activity',
+      { mode: 'new', expectedProviderRevision: null }
+    );
+
+    const calls: Array<{
+      nodeId: string;
+      operation: string;
+      payload: Record<string, unknown>;
+    }> = [];
+    const remote: RemoteProviderGateway = {
+      connected: (nodeId: string) => nodeId === 'worker-a',
+      async call<T>(
+        nodeId: string,
+        operation: Parameters<RemoteProviderGateway['call']>[1],
+        payload: Record<string, unknown>
+      ): Promise<T> {
+        calls.push({ nodeId, operation, payload });
+        return {} as T;
+      }
+    };
+    const controller = new ProviderService(repo, new TrackingSecretStore(), registry, {
+      nodeId: 'controller',
+      remote
+    });
+
+    await controller.reportActivity('provider-activity', {
+      sessionId: 'session-activity',
+      itemId: 'movie-activity',
+      positionTicks: 42,
+      paused: false,
+      event: 'progress'
+    });
+
+    expect(calls).toEqual([
+      {
+        nodeId: 'worker-a',
+        operation: 'provider.activity',
+        payload: {
+          providerId: 'provider-activity',
+          sessionId: 'session-activity',
+          itemId: 'movie-activity',
+          positionTicks: 42,
+          paused: false,
+          event: 'progress'
+        }
+      }
+    ]);
+  });
+
   it('reconciles concurrent and replayed creation of the same binding without deleting the winner', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-race-'));
     dirs.push(dir);
@@ -1298,7 +1361,14 @@ describe('crash recovery', () => {
       segmentIndex: 0,
       state: 'running',
       attempts: 1,
-      workerHistory: [],
+      workerHistory: [
+        {
+          attempt: 1,
+          nodeId: 'lost-worker',
+          state: 'running',
+          startedAt: now
+        }
+      ],
       ownerNodeId: 'lost-worker',
       leaseExpiresAt: new Date(Date.now() - 1_000).toISOString(),
       createdAt: now,
@@ -1356,6 +1426,15 @@ describe('crash recovery', () => {
     expect(recovered?.state).toBe('queued');
     expect(recovered).not.toHaveProperty('ownerNodeId');
     expect(recovered).not.toHaveProperty('leaseExpiresAt');
+    expect(recovered?.workerHistory).toEqual([
+      expect.objectContaining({
+        attempt: 1,
+        nodeId: 'lost-worker',
+        state: 'failed',
+        errorMessage: 'Recovered expired segment job lease',
+        completedAt: expect.any(String)
+      })
+    ]);
     expect(await repo.getSegmentJob('active')).toMatchObject({
       state: 'running',
       ownerNodeId: 'active-worker'

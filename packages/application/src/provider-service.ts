@@ -290,6 +290,14 @@ export class ProviderService {
 
   async reportActivity(providerId: string, event: PlaybackEvent): Promise<void> {
     const connection = await this.#connection(providerId);
+    const remote = await this.#remoteBinding(providerId);
+    if (remote) {
+      await this.options.remote!.call(remote.nodeId, 'provider.activity', {
+        providerId,
+        ...event
+      });
+      return;
+    }
     const secret = await this.secrets.get(await this.#localSecretRef(connection));
     await this.providers.get(connection.type).reportPlayback(connection, secret, event);
   }

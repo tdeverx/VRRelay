@@ -74,6 +74,9 @@ retained evidence belong in the
   operation, exclude pending bindings from scheduling, and require explicit
   acknowledgement before finalizing an orphaned credential on a revoked or
   removed node.
+- Route provider playback activity through the healthy connected remote binding
+  when the credential belongs to a source worker, and mark expired distributed
+  segment-job attempts as failed before requeueing them for recovery.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

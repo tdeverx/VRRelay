@@ -104,6 +104,22 @@ verification is still pending.
   format check, generated-contract and TypeScript checks, lint, and build. See
   [Phase 3 implementation evidence](evidence/phase-03-implementation.md).
 
+## Phase 4 implementation checkpoint
+
+Phase 4 has a first build-first implementation checkpoint. Its broader
+multi-node verification is still pending.
+
+- Provider activity reporting now respects remote provider bindings. A
+  controller-side service routes activity through the connected source worker
+  that owns the node-local credential instead of trying to read that credential
+  locally.
+- Expired distributed segment jobs now close the latest running worker-history
+  entry as failed before the job is requeued, preserving an auditable restart
+  and retry trail.
+- Focused provider-binding and crash-recovery tests, format check,
+  generated-contract and TypeScript checks, lint, and package builds passed. See
+  [Phase 4 implementation evidence](evidence/phase-04-implementation.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
@@ -117,10 +133,9 @@ verification is still pending.
   runtime CI, audit, multi-process destructive cluster evidence, public-WSS and
   overlay-WSS acceptance evidence, and deployment-target proof. The current
   Phase 3 record is an implementation checkpoint, not a release claim.
-- Distributed cancellation, restart recovery, placement, provider failover, and
-  provider-binding job flows still require their Phase 4 implementation and
-  end-to-end gates even though the underlying persistence and transport
-  foundations are now in place.
+- Phase 4 still needs broader implementation and end-to-end gates for multi-node
+  placement, distributed cancellation, restart recovery, provider failover, and
+  provider-binding job flows across real controller/source-worker processes.
 - Several media-profile fields and experimental delivery modes are incomplete
   or schema-only. Hardware pipelines, subtitles, tone mapping, passthrough,
   fMP4 concurrency, dual PC/Quest outputs, and corrupt-input handling lack the

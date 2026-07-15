@@ -105,7 +105,7 @@ export class SessionJobCoordinator {
           break;
         }
         const queued: SegmentJob = {
-          ...current.value,
+          ...finishLatestAttempt(current.value, 'failed', 'Recovered expired segment job lease'),
           state: 'queued',
           ownerNodeId: undefined,
           leaseExpiresAt: undefined,
