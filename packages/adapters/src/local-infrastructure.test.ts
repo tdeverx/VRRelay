@@ -77,4 +77,51 @@ describe('local cloud-neutral infrastructure', () => {
     expect(messages).toEqual(['grant-1']);
     await unsubscribe();
   });
+
+  it('aggregates rolling viewer fingerprints by edge and session', async () => {
+    const coordination = new MemoryCoordinationStore();
+    await expect(
+      coordination.recordViewer({
+        sessionId: 'session-1',
+        edgeNodeId: 'edge-a',
+        viewerHash: 'viewer-a',
+        observedAtMs: 30_000,
+        windowMs: 30_000
+      })
+    ).resolves.toEqual({ edgeViewers: 1, totalViewers: 1 });
+    await expect(
+      coordination.recordViewer({
+        sessionId: 'session-1',
+        edgeNodeId: 'edge-b',
+        viewerHash: 'viewer-b',
+        observedAtMs: 31_000,
+        windowMs: 30_000
+      })
+    ).resolves.toEqual({ edgeViewers: 1, totalViewers: 2 });
+    await expect(
+      coordination.recordViewer({
+        sessionId: 'session-1',
+        edgeNodeId: 'edge-b',
+        viewerHash: 'viewer-a',
+        observedAtMs: 32_000,
+        windowMs: 30_000
+      })
+    ).resolves.toEqual({ edgeViewers: 2, totalViewers: 2 });
+    await expect(
+      coordination.recordViewer({
+        sessionId: 'session-1',
+        edgeNodeId: 'edge-b',
+        viewerHash: 'viewer-b',
+        observedAtMs: 62_001,
+        windowMs: 30_000
+      })
+    ).resolves.toEqual({ edgeViewers: 1, totalViewers: 1 });
+    await expect(
+      coordination.countViewers({
+        sessionId: 'session-1',
+        observedAtMs: 92_002,
+        windowMs: 30_000
+      })
+    ).resolves.toEqual({ totalViewers: 0 });
+  });
 });

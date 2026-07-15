@@ -140,6 +140,18 @@ export interface CoordinationStore {
   set(key: string, value: string, ttlMs: number): Promise<void>;
   get(key: string): Promise<string | undefined>;
   delete(key: string): Promise<void>;
+  recordViewer(input: {
+    sessionId: string;
+    edgeNodeId: string;
+    viewerHash: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<{ edgeViewers: number; totalViewers: number }>;
+  countViewers(input: {
+    sessionId: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<{ totalViewers: number }>;
   publish(channel: string, payload: string): Promise<void>;
   subscribe(channel: string, listener: (payload: string) => void): Promise<() => Promise<void>>;
   health(): Promise<BackendStatus>;

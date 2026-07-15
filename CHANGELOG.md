@@ -84,6 +84,9 @@ retained evidence belong in the
   session-scoped edge playback grants, so public edge URLs no longer reuse the
   administrator-facing controller token and session revocation invalidates
   already minted edge links.
+- Aggregate salted viewer fingerprints through the coordination backend when
+  available, including Valkey-backed 30-second edge/session counts while keeping
+  egress bytes as exact counters.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

@@ -151,8 +151,13 @@ edge-delivery and live-fan-out verification is still pending.
   each request. Session deletion or grant revocation therefore invalidates
   already minted edge links instead of leaving edge URLs usable until process
   restart.
-- Focused application and HTTP-boundary tests, format check, generated-contract
-  and TypeScript checks, lint, package builds, and relay build passed. See
+- Viewer aggregation now uses the coordination backend when configured: local
+  coordination keeps rolling in-memory maps, Valkey coordination keeps
+  30-second sorted sets by edge and session, session totals are updated from the
+  aggregate, and exact egress byte counters remain separate.
+- Focused application, adapter, and HTTP-boundary tests, format check,
+  generated-contract and TypeScript checks, lint, package builds, and relay
+  build passed. See
   [Phase 6 implementation evidence](evidence/phase-06-implementation.md).
 
 ## Known gaps in the audited checkout
@@ -177,8 +182,8 @@ edge-delivery and live-fan-out verification is still pending.
   profile creation, but hardware pipelines, H.265, AV1, copy codecs, subtitles,
   tone mapping, fMP4 concurrency, dual PC/Quest outputs, and corrupt-input
   handling still lack the required matrix evidence.
-- Edge grants now have a first signed, session-scoped implementation checkpoint,
-  but Valkey viewer aggregation, targeted cache administration, per-node backend
+- Edge grants and coordination-backed viewer aggregation now have an
+  implementation checkpoint, but targeted cache administration, per-node backend
   activation acknowledgement, live backup/replacement behavior, origin recovery,
   and one-pull-per-edge guarantees remain Phase 6 work. Backend configuration
   must not be inferred from the current controller-level activation record.

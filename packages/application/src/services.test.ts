@@ -12,7 +12,12 @@ import {
   type SegmentRequest,
   type Transcoder
 } from './index.js';
-import { MemorySecretStore, PrometheusMetricsSink, SqliteRepository } from '@vrrelay/adapters';
+import {
+  MemoryCoordinationStore,
+  MemorySecretStore,
+  PrometheusMetricsSink,
+  SqliteRepository
+} from '@vrrelay/adapters';
 import type { ClusterNode } from '@vrrelay/domain';
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
@@ -648,6 +653,7 @@ describe('VOD relay service', () => {
       pixelFormats: ['yuv420p']
     });
     const events = new InMemoryEventBus();
+    const coordination = new MemoryCoordinationStore();
     const controller = new SessionService(
       repo,
       secrets,
@@ -663,7 +669,7 @@ describe('VOD relay service', () => {
         nodeId: 'controller',
         roles: ['controller']
       },
-      { clusterRepository: repo }
+      { clusterRepository: repo, coordination }
     );
     const edgeA = new SessionService(
       repo,
@@ -680,7 +686,7 @@ describe('VOD relay service', () => {
         nodeId: 'edge-a',
         roles: ['edge']
       },
-      { clusterRepository: repo }
+      { clusterRepository: repo, coordination }
     );
     const edgeB = new SessionService(
       repo,
@@ -719,6 +725,10 @@ describe('VOD relay service', () => {
     await expect(edgeA.touchViewer(edgeToken, 'viewer-a')).resolves.toMatchObject({
       id: session.id
     });
+    await edgeA.touchViewer(edgeToken, 'viewer-a');
+    await expect(repo.getSession(session.id)).resolves.toMatchObject({ viewers: 1 });
+    await edgeA.touchViewer(edgeToken, 'viewer-b');
+    await expect(repo.getSession(session.id)).resolves.toMatchObject({ viewers: 2 });
     await expect(edgeB.touchViewer(edgeToken, 'viewer-b')).rejects.toThrow(
       'Edge playback link is not valid for this node'
     );

@@ -39,6 +39,7 @@ import { SessionCache } from './session-cache.js';
 import { SessionJobCoordinator } from './session-jobs.js';
 
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
+const VIEWER_WINDOW_MS = 30_000;
 const EDGE_GRANT_PREFIX = 'eg1';
 const EDGE_GRANT_SIGNING_KEY = 'playback.edge_grant_signing_key';
 
@@ -547,13 +548,30 @@ export class SessionService {
     for (const [token, grant] of this.#sourceGrants) {
       if (grant.expiresAt <= now) this.#sourceGrants.delete(token);
     }
-    for (const [sessionId, viewers] of this.#viewers) {
-      for (const [viewer, seenAt] of viewers) if (now - seenAt > 30_000) viewers.delete(viewer);
-      const session = await this.repository.getSession(sessionId);
-      if (session && session.viewers !== viewers.size) {
-        await this.#setSessionViewers(sessionId, viewers.size, true);
+    if (this.infrastructure.coordination) {
+      for (const session of await this.repository.listSessions()) {
+        const { totalViewers } = await this.infrastructure.coordination.countViewers({
+          sessionId: session.id,
+          observedAtMs: now,
+          windowMs: VIEWER_WINDOW_MS
+        });
+        if (session.viewers !== totalViewers) {
+          await this.#setSessionViewers(session.id, totalViewers, true);
+        }
+        this.infrastructure.metrics?.gauge('viewers_active', totalViewers, {
+          session: session.id
+        });
       }
-      this.infrastructure.metrics?.gauge('viewers_active', viewers.size, { session: sessionId });
+    } else {
+      for (const [sessionId, viewers] of this.#viewers) {
+        for (const [viewer, seenAt] of viewers)
+          if (now - seenAt > VIEWER_WINDOW_MS) viewers.delete(viewer);
+        const session = await this.repository.getSession(sessionId);
+        if (session && session.viewers !== viewers.size) {
+          await this.#setSessionViewers(sessionId, viewers.size, true);
+        }
+        this.infrastructure.metrics?.gauge('viewers_active', viewers.size, { session: sessionId });
+      }
     }
     return this.#cache.cleanupExpired();
   }
@@ -572,11 +590,44 @@ export class SessionService {
 
   async touchViewer(token: string, viewerIdentity: string): Promise<RelaySession> {
     const { session } = await this.#playback(token);
-    const viewers = this.#viewers.get(session.id) ?? new Map<string, number>();
     const viewer = createHmac('sha256', await this.#getViewerSalt())
       .update(viewerIdentity)
       .digest('hex')
       .slice(0, 20);
+    if (this.infrastructure.coordination) {
+      const edgeNodeId = this.options.nodeId ?? 'local';
+      const aggregation = await this.infrastructure.coordination.recordViewer({
+        sessionId: session.id,
+        edgeNodeId,
+        viewerHash: viewer,
+        observedAtMs: Date.now(),
+        windowMs: VIEWER_WINDOW_MS
+      });
+      if (session.viewers !== aggregation.totalViewers) {
+        await this.#setSessionViewers(session.id, aggregation.totalViewers);
+        if (aggregation.totalViewers > session.viewers)
+          this.events.publish(
+            event(
+              'viewer.joined',
+              {
+                viewers: aggregation.totalViewers,
+                edgeViewers: aggregation.edgeViewers,
+                edgeNodeId
+              },
+              session.id
+            )
+          );
+      }
+      this.infrastructure.metrics?.gauge('viewers_active', aggregation.totalViewers, {
+        session: session.id
+      });
+      this.infrastructure.metrics?.gauge('viewers_active_by_edge', aggregation.edgeViewers, {
+        session: session.id,
+        edge: edgeNodeId
+      });
+      return session;
+    }
+    const viewers = this.#viewers.get(session.id) ?? new Map<string, number>();
     const joined = !viewers.has(viewer);
     viewers.set(viewer, Date.now());
     this.#viewers.set(session.id, viewers);

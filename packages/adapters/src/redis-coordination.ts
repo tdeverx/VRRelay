@@ -47,6 +47,44 @@ export class RedisCoordinationStore implements CoordinationStore {
   async delete(key: string): Promise<void> {
     await this.#client.del(key);
   }
+  async recordViewer(input: {
+    sessionId: string;
+    edgeNodeId: string;
+    viewerHash: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<{ edgeViewers: number; totalViewers: number }> {
+    const cutoff = input.observedAtMs - input.windowMs;
+    const retentionMs = input.windowMs * 2;
+    const edgeKey = `viewers:${input.sessionId}:edge:${input.edgeNodeId}`;
+    const totalKey = `viewers:${input.sessionId}:total`;
+    await Promise.all([
+      this.#client.zadd(edgeKey, input.observedAtMs, input.viewerHash),
+      this.#client.zadd(totalKey, input.observedAtMs, input.viewerHash)
+    ]);
+    await Promise.all([
+      this.#client.zremrangebyscore(edgeKey, '-inf', cutoff),
+      this.#client.zremrangebyscore(totalKey, '-inf', cutoff),
+      this.#client.pexpire(edgeKey, retentionMs),
+      this.#client.pexpire(totalKey, retentionMs)
+    ]);
+    const [edgeViewers, totalViewers] = await Promise.all([
+      this.#client.zcard(edgeKey),
+      this.#client.zcard(totalKey)
+    ]);
+    return { edgeViewers, totalViewers };
+  }
+  async countViewers(input: {
+    sessionId: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<{ totalViewers: number }> {
+    const totalKey = `viewers:${input.sessionId}:total`;
+    await this.#client.zremrangebyscore(totalKey, '-inf', input.observedAtMs - input.windowMs);
+    const totalViewers = await this.#client.zcard(totalKey);
+    if (totalViewers === 0) await this.#client.del(totalKey);
+    return { totalViewers };
+  }
   async publish(channel: string, payload: string): Promise<void> {
     await this.#client.publish(channel, payload);
   }

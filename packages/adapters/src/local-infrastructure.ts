@@ -139,12 +139,14 @@ interface Lease {
   owner: string;
   expiresAt: number;
 }
+type ViewerSet = Map<string, number>;
 
 export class MemoryCoordinationStore implements CoordinationStore {
   readonly kind = 'local';
   readonly #leases = new Map<string, Lease>();
   readonly #values = new Map<string, StoredValue>();
   readonly #listeners = new Map<string, Set<(payload: string) => void>>();
+  readonly #viewers = new Map<string, ViewerSet>();
 
   async acquire(key: string, owner: string, ttlMs: number): Promise<boolean> {
     const existing = this.#leases.get(key);
@@ -182,6 +184,37 @@ export class MemoryCoordinationStore implements CoordinationStore {
     this.#values.delete(key);
   }
 
+  async recordViewer(input: {
+    sessionId: string;
+    edgeNodeId: string;
+    viewerHash: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<{ edgeViewers: number; totalViewers: number }> {
+    const cutoff = input.observedAtMs - input.windowMs;
+    const edgeKey = `viewers:${input.sessionId}:edge:${input.edgeNodeId}`;
+    const totalKey = `viewers:${input.sessionId}:total`;
+    const edge = this.#viewerSet(edgeKey);
+    const total = this.#viewerSet(totalKey);
+    edge.set(input.viewerHash, input.observedAtMs);
+    total.set(input.viewerHash, input.observedAtMs);
+    this.#pruneViewers(edgeKey, edge, cutoff);
+    this.#pruneViewers(totalKey, total, cutoff);
+    return { edgeViewers: edge.size, totalViewers: total.size };
+  }
+
+  async countViewers(input: {
+    sessionId: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<{ totalViewers: number }> {
+    const totalKey = `viewers:${input.sessionId}:total`;
+    const total = this.#viewers.get(totalKey);
+    if (!total) return { totalViewers: 0 };
+    this.#pruneViewers(totalKey, total, input.observedAtMs - input.windowMs);
+    return { totalViewers: total.size };
+  }
+
   async publish(channel: string, payload: string): Promise<void> {
     for (const listener of this.#listeners.get(channel) ?? []) listener(payload);
   }
@@ -200,5 +233,20 @@ export class MemoryCoordinationStore implements CoordinationStore {
 
   async health(): Promise<BackendStatus> {
     return status('coordination', 'local', true);
+  }
+
+  #viewerSet(key: string): ViewerSet {
+    const existing = this.#viewers.get(key);
+    if (existing) return existing;
+    const created = new Map<string, number>();
+    this.#viewers.set(key, created);
+    return created;
+  }
+
+  #pruneViewers(key: string, viewers: ViewerSet, cutoff: number): void {
+    for (const [viewer, observedAt] of viewers) {
+      if (observedAt <= cutoff) viewers.delete(viewer);
+    }
+    if (!viewers.size) this.#viewers.delete(key);
   }
 }

@@ -1,4 +1,4 @@
-# Phase 6 implementation checkpoint — signed edge playback grants
+# Phase 6 implementation checkpoint — edge grants and viewer aggregation
 
 Date: 2026-07-15
 
@@ -20,6 +20,11 @@ evidence.
   already minted edge links.
 - The original controller playback URL remains the URL an administrator
   distributes; selected edge URLs are an internal playlist-routing detail.
+- Viewer identity aggregation now prefers the coordination backend. Local mode
+  uses in-memory rolling maps, and Valkey mode uses sorted sets to retain
+  30-second salted fingerprints by edge and by session total.
+- Egress bytes remain exact counters separate from viewer estimation; viewer
+  counts update the session total and expose per-edge active-viewer gauges.
 
 ## Lean guardrails run
 
@@ -36,6 +41,7 @@ Commands:
 ```text
 npx vitest run packages/application/src/services.test.ts -t "edge-scoped playback grants"
 npx vitest run apps/relay/src/server.test.ts -t "signed edge grants"
+npx vitest run packages/adapters/src/local-infrastructure.test.ts -t "viewer fingerprints"
 npm run format:check
 npm run check
 npm run lint
@@ -47,8 +53,6 @@ Result: all commands passed.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
-- Valkey-backed 30-second viewer aggregation by edge and exact byte-counter
-  reconciliation.
 - Node-targeted cache inventory, restore validation, eviction, disk-pressure
   handling, and object-store lifecycle reconciliation.
 - Per-node backend activation acknowledgement.
