@@ -298,7 +298,8 @@ export const RelayEventSchema = z.object({
     'job.completed',
     'job.failed',
     'route.selected',
-    'storage.uploaded'
+    'storage.uploaded',
+    'storage.invalidated'
   ]),
   timestamp: z.iso.datetime(),
   sessionId: z.string().optional(),

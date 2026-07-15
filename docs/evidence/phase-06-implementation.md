@@ -38,6 +38,11 @@ evidence.
   `cache.inventory` and `cache.evict` agent envelopes, validates typed node
   responses, and fails closed instead of silently evicting the controller-local
   cache when the requested node is disconnected.
+- Object-store restores now validate size and SHA-256 as before, but corrupt
+  remote objects are invalidated and treated as a cache miss. Completed segment
+  jobs can be re-leased when their cached output has been evicted or rejected,
+  allowing the normal generation/origin path to refill the object instead of
+  failing playback on stale job state.
 
 ## Lean guardrails run
 
@@ -58,9 +63,12 @@ npx vitest run packages/adapters/src/local-infrastructure.test.ts -t "viewer fin
 npx vitest run apps/relay/src/backend-service.test.ts -t "object store"
 npx vitest run packages/application/src/services.test.ts -t "selected ingest origin"
 npx vitest run packages/contracts/src/agent-protocol.test.ts apps/relay/src/agent-transport.test.ts apps/relay/src/server.test.ts apps/relay/src/composition/runtime.test.ts
+npx vitest run packages/application/src/services.test.ts
+npx vitest run packages/application/src/services.test.ts -t "corrupt object-store restores"
 npm run check:agent-protocol-schema
 npm run check:api
 npm run check:tests
+npm run check --workspace @vrrelay/application
 npm run format:check -- --ignore-unknown
 npm run format:check
 npm run check
@@ -73,8 +81,7 @@ Result: all commands passed.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
-- Cache restore validation, disk-pressure handling, and object-store lifecycle
-  reconciliation.
+- Disk-pressure handling and broader object-store lifecycle reconciliation.
 - Immutable-profile-driven normalization, primary/backup publisher states,
   origin recovery, and one upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and

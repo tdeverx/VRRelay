@@ -21,6 +21,13 @@ export interface CacheEvictionFilter {
   all?: boolean;
 }
 
+class CacheRestoreValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CacheRestoreValidationError';
+  }
+}
+
 async function removePartialFiles(directory: string): Promise<void> {
   let entries;
   try {
@@ -110,9 +117,11 @@ export class SessionCache {
   }
 
   async restoreObject(contentKey: string, destination: string): Promise<boolean> {
-    const object = await this.objectStore?.stat(contentKey);
+    const objectStore = this.objectStore;
+    if (!objectStore) return false;
+    const object = await objectStore.stat(contentKey);
     if (!object) return false;
-    const source = await this.objectStore?.open(contentKey);
+    const source = await objectStore.open(contentKey);
     if (!source) return false;
     await mkdir(dirname(destination), { recursive: true });
     const temporary = `${destination}.${process.pid}.${randomUUID()}.part`;
@@ -128,13 +137,23 @@ export class SessionCache {
       await pipeline(source, hasher, createWriteStream(temporary));
       const info = await stat(temporary);
       if (info.size !== object.size)
-        throw new Error(`Cached object size mismatch for ${contentKey}`);
+        throw new CacheRestoreValidationError(`Cached object size mismatch for ${contentKey}`);
       const sha256 = hash.digest('hex');
       if (object.sha256 && sha256 !== object.sha256)
-        throw new Error(`Cached object hash mismatch for ${contentKey}`);
+        throw new CacheRestoreValidationError(`Cached object hash mismatch for ${contentKey}`);
       await rename(temporary, destination);
     } catch (error) {
       await rm(temporary, { force: true });
+      if (error instanceof CacheRestoreValidationError) {
+        await objectStore.delete(contentKey);
+        this.events.publish(
+          event('storage.invalidated', {
+            contentKey,
+            reason: error.message.includes('hash') ? 'hash_mismatch' : 'size_mismatch'
+          })
+        );
+        return false;
+      }
       throw error;
     }
     return true;

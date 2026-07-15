@@ -1,12 +1,15 @@
+import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
   DefaultProviderRegistry,
   InMemoryEventBus,
   type MediaProvider,
+  type ObjectStore,
   type RemoteProviderGateway,
   type SecretStore,
   type SegmentRequest,
@@ -18,7 +21,7 @@ import {
   PrometheusMetricsSink,
   SqliteRepository
 } from '@vrrelay/adapters';
-import type { ClusterNode } from '@vrrelay/domain';
+import type { BackendStatus, CachedObject, ClusterNode } from '@vrrelay/domain';
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
 const dirs: string[] = [];
@@ -73,6 +76,68 @@ class TrackingSecretStore implements SecretStore {
 
   refs(): string[] {
     return [...this.values.keys()];
+  }
+}
+
+class MutableMemoryObjectStore implements ObjectStore {
+  readonly kind = 'local';
+  readonly deleted: string[] = [];
+  readonly #objects = new Map<string, { object: CachedObject; body: Buffer }>();
+
+  keys(): string[] {
+    return [...this.#objects.keys()];
+  }
+
+  corrupt(key: string, replacement: string): void {
+    const stored = this.#objects.get(key);
+    if (!stored) throw new Error(`Missing object ${key}`);
+    stored.body = Buffer.from(replacement);
+  }
+
+  async put(
+    key: string,
+    source: Readable,
+    options: Parameters<ObjectStore['put']>[2]
+  ): Promise<CachedObject> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of source) chunks.push(Buffer.from(chunk));
+    const body = Buffer.concat(chunks);
+    const now = new Date().toISOString();
+    const sha256 = options.sha256 ?? createHash('sha256').update(body).digest('hex');
+    const object: CachedObject = {
+      key,
+      size: body.byteLength,
+      contentType: options.contentType,
+      sha256,
+      expiresAt: options.expiresAt ?? null,
+      createdAt: now,
+      lastAccessedAt: now
+    };
+    this.#objects.set(key, { object, body });
+    return object;
+  }
+
+  async stat(key: string): Promise<CachedObject | undefined> {
+    return this.#objects.get(key)?.object;
+  }
+
+  async open(key: string): Promise<Readable | undefined> {
+    const stored = this.#objects.get(key);
+    return stored ? Readable.from(stored.body) : undefined;
+  }
+
+  async delete(key: string): Promise<void> {
+    this.deleted.push(key);
+    this.#objects.delete(key);
+  }
+
+  async health(): Promise<BackendStatus> {
+    return {
+      category: 'object-store',
+      kind: 'local',
+      healthy: true,
+      checkedAt: new Date().toISOString()
+    };
   }
 }
 
@@ -609,6 +674,99 @@ describe('VOD relay service', () => {
       await expect(repo.getSegmentJob(job!.id)).resolves.toMatchObject({ state: 'cancelled' });
     }
     await expect(repo.getSession(session.id)).resolves.toMatchObject({ state: 'stopped' });
+  });
+
+  it('invalidates corrupt object-store restores and regenerates the segment', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-object-restore-'));
+    dirs.push(dir);
+    const repo = new SessionConflictRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p1',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 's1',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('s1', 'token');
+    const registry = new DefaultProviderRegistry();
+    registry.register(provider);
+    const profiles = new ProfileService(repo);
+    await profiles.seed({
+      ffmpegVersion: 'test',
+      encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
+      muxers: ['mpegts'],
+      filters: [],
+      pixelFormats: ['yuv420p']
+    });
+    let generated = 0;
+    const objectStore = new MutableMemoryObjectStore();
+    const service = new SessionService(
+      repo,
+      secrets,
+      registry,
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async (_request, destination) => {
+          generated += 1;
+          await mkdir(dirname(destination), { recursive: true });
+          await writeFile(destination, 'segment');
+        },
+        streamFragmentedMp4: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 60_000,
+        maxWorkers: 1
+      },
+      { objectStore, clusterRepository: repo }
+    );
+    const session = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p1', itemId: 'm1' },
+      profileId: 'universal-h264-hls-vod',
+      profileRevision: 1,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
+
+    const firstPath = await service.segment(token, 0);
+    expect(await readFile(firstPath, 'utf8')).toBe('segment');
+    expect(generated).toBe(1);
+    const [contentKey] = objectStore.keys();
+    expect(contentKey).toBeDefined();
+    await expect(service.evictCache({ all: true })).resolves.toBe(1);
+    objectStore.corrupt(contentKey!, 'poisons');
+
+    const secondPath = await service.segment(token, 0);
+    expect(secondPath).toBe(firstPath);
+    expect(await readFile(secondPath, 'utf8')).toBe('segment');
+    expect(generated).toBe(2);
+    expect(objectStore.deleted).toEqual([contentKey]);
+    await expect(objectStore.stat(contentKey!)).resolves.toMatchObject({
+      sha256: createHash('sha256').update('segment').digest('hex')
+    });
   });
 
   it('issues edge-scoped playback grants that honor session revocation', async () => {

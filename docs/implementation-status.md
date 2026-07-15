@@ -164,6 +164,9 @@ edge-delivery and live-fan-out verification is still pending.
 - The cache administration API can target a connected node for inventory and
   eviction via strict agent envelopes and fails closed for disconnected targets
   instead of falling back to controller-local cache mutation.
+- Corrupt object-store restores now invalidate the bad remote object and fall
+  back to regeneration/origin refill, including completed segment jobs whose
+  local output was evicted.
 - Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
   format check, generated-contract and TypeScript checks, lint, package builds,
   and relay build passed. See
@@ -192,9 +195,10 @@ edge-delivery and live-fan-out verification is still pending.
   tone mapping, fMP4 concurrency, dual PC/Quest outputs, and corrupt-input
   handling still lack the required matrix evidence.
 - Edge grants, coordination-backed viewer aggregation, selected-origin
-  metadata, node-targeted cache administration, and per-node backend
-  application tracking now have implementation checkpoints. Cache restore and
-  disk-pressure behavior, profile-driven normalization, live backup/replacement
+  metadata, node-targeted cache administration, corrupt object-store restore
+  recovery, and per-node backend application tracking now have implementation
+  checkpoints. Disk-pressure behavior, broader object-store lifecycle
+  reconciliation, profile-driven normalization, live backup/replacement
   behavior, origin recovery, and one-pull-per-edge guarantees remain Phase 6
   work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,

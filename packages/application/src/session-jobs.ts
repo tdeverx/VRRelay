@@ -454,8 +454,6 @@ export class SessionJobCoordinator {
         attempt === 0 ? creation.record : await repository.getVersionedSegmentJob(initial.id);
       if (!current) throw new NotFoundError('Segment job was not found');
       if (current.value.state === 'cancelled') throw new SegmentJobCancelledError();
-      if (current.value.state === 'complete')
-        throw new ConflictError('Completed segment job output is no longer available');
       const running: SegmentJob = {
         ...initial,
         attempts: current.value.attempts,
@@ -466,7 +464,8 @@ export class SessionJobCoordinator {
         'queued',
         'leased',
         'running',
-        'failed'
+        'failed',
+        'complete'
       ]);
       if (result.applied) return result.record.value;
       if (result.reason === 'not-found') continue;
