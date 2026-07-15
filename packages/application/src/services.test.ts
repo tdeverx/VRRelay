@@ -785,7 +785,7 @@ describe('VOD relay service', () => {
     expect(generated).toBe(1);
     const [contentKey] = objectStore.keys();
     expect(contentKey).toBeDefined();
-    await expect(service.evictCache({ all: true })).resolves.toBe(1);
+    await rm(firstPath, { force: true });
     objectStore.corrupt(contentKey!, 'poisons');
 
     const secondPath = await service.segment(token, 0);
@@ -796,6 +796,9 @@ describe('VOD relay service', () => {
     await expect(objectStore.stat(contentKey!)).resolves.toMatchObject({
       sha256: createHash('sha256').update('segment').digest('hex')
     });
+    await expect(service.evictCache({ all: true })).resolves.toBe(1);
+    expect(objectStore.deleted).toEqual([contentKey, contentKey]);
+    await expect(objectStore.stat(contentKey!)).resolves.toBeUndefined();
   });
 
   it('enforces disk cache pressure after segment generation without evicting the requested file', async () => {

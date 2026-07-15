@@ -43,6 +43,10 @@ evidence.
   jobs can be re-leased when their cached output has been evicted or rejected,
   allowing the normal generation/origin path to refill the object instead of
   failing playback on stale job state.
+- Published and restored disk-cache objects now retain local references to their
+  object-store keys. Explicit cache eviction removes the local object and deletes
+  the corresponding remote object-store entry, while ordinary disk-pressure
+  cleanup still leaves the remote tier available for restore.
 - Segment generation and object-store restore now enforce the configured disk
   cache limit immediately instead of waiting for the periodic cleanup loop. The
   segment just requested is protected while older cached objects are evicted to
@@ -110,7 +114,7 @@ intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
-- Broader object-store lifecycle reconciliation.
+- Broader external object-store lifecycle and destructive outage evidence.
 - Administrator-authorized publisher replacement, destructive origin recovery
   evidence, and one upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and

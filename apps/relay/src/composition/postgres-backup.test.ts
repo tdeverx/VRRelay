@@ -79,17 +79,21 @@ describe('PostgreSQL migration backup', () => {
   });
 
   it('waits for a timed-out child to terminate before rejecting', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'vrrelay-pg-backup-timeout-'));
+    directories.push(dataDir);
+    const cleanupMarker = join(dataDir, 'cleanup-complete');
     await expect(
       runPgDump({
         executable: process.execPath,
         arguments: [
           '-e',
-          "process.on('SIGTERM',()=>setTimeout(()=>{process.stderr.write('terminated after cleanup');process.exit(0);},75));setInterval(()=>{},1000)"
+          "process.on('SIGTERM',()=>setTimeout(()=>{require('node:fs').writeFileSync(process.env.VRRELAY_PG_DUMP_TEST_MARKER,'done');process.stderr.write('terminated after cleanup');process.exit(0);},75));setInterval(()=>{},1000)"
         ],
-        environment: { PATH: process.env.PATH },
+        environment: { PATH: process.env.PATH, VRRELAY_PG_DUMP_TEST_MARKER: cleanupMarker },
         timeoutMs: 500
       })
-    ).rejects.toThrow('pg_dump exceeded its 500ms deadline: terminated after cleanup');
+    ).rejects.toThrow('pg_dump exceeded its 500ms deadline');
+    await expect(readFile(cleanupMarker, 'utf8')).resolves.toBe('done');
   });
 
   it('redacts database credentials from pg_dump failures', async () => {

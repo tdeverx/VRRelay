@@ -99,6 +99,8 @@ retained evidence belong in the
 - Invalidate corrupt object-store segment restores and refill them through the
   normal generation/origin path instead of failing playback on stale completed
   job state.
+- Delete referenced object-store entries when an administrator explicitly evicts
+  matching temporary cache objects.
 - Enforce disk cache limits immediately after segment writes and object-store
   restores while protecting the segment currently being served.
 - Reconfigure live edge origin pull paths after failed HLS upstream responses

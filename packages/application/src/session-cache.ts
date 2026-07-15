@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -26,6 +26,12 @@ class CacheRestoreValidationError extends Error {
     super(message);
     this.name = 'CacheRestoreValidationError';
   }
+}
+
+const OBJECT_REFERENCE_SUFFIX = '.vrrelay-object.json';
+
+function objectReferencePath(path: string): string {
+  return `${path}${OBJECT_REFERENCE_SUFFIX}`;
 }
 
 async function removePartialFiles(directory: string): Promise<void> {
@@ -78,25 +84,24 @@ export class SessionCache {
           revision: String(profile.revision)
         }
       });
+      await this.#writeObjectReference(destination, [contentKey]);
       if (profile.delivery.segmentType === 'fmp4') {
         const initPath = join(dirname(destination), 'init.mp4');
         protectedPaths.push(initPath);
         const initSha256 = await this.#fileSha256(initPath);
-        await this.objectStore.put(
-          contentKey.replace(/\.m4s$/, '.init.mp4'),
-          createReadStream(initPath),
-          {
-            contentType: 'video/mp4',
-            expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
-            sha256: initSha256,
-            metadata: {
-              sessionId: session.id,
-              profileId: profile.profileId,
-              revision: String(profile.revision),
-              initialization: 'true'
-            }
+        const initKey = contentKey.replace(/\.m4s$/, '.init.mp4');
+        await this.objectStore.put(initKey, createReadStream(initPath), {
+          contentType: 'video/mp4',
+          expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
+          sha256: initSha256,
+          metadata: {
+            sessionId: session.id,
+            profileId: profile.profileId,
+            revision: String(profile.revision),
+            initialization: 'true'
           }
-        );
+        });
+        await this.#writeObjectReference(initPath, [initKey]);
       }
       this.events.publish(event('storage.uploaded', { contentKey, segment: index }, session.id));
     } finally {
@@ -148,6 +153,7 @@ export class SessionCache {
       if (object.sha256 && sha256 !== object.sha256)
         throw new CacheRestoreValidationError(`Cached object hash mismatch for ${contentKey}`);
       await rename(temporary, destination);
+      await this.#writeObjectReference(destination, [contentKey]);
       await this.cleanupExpired([destination]);
     } catch (error) {
       await rm(temporary, { force: true });
@@ -182,10 +188,16 @@ export class SessionCache {
       for (const entry of entries) {
         const child = join(path, entry.name);
         if (entry.isDirectory()) await visit(child);
-        else {
+        else if (entry.name.endsWith(OBJECT_REFERENCE_SUFFIX)) {
+          try {
+            await stat(child.slice(0, -OBJECT_REFERENCE_SUFFIX.length));
+          } catch {
+            await rm(child, { force: true });
+          }
+        } else {
           const info = await stat(child);
           if (!protectedSet.has(child) && now - info.mtimeMs > this.options.cacheTtlMs) {
-            await rm(child, { force: true });
+            await this.#removeLocalObject(child);
             removed += 1;
           } else files.push({ path: child, size: info.size, mtimeMs: info.mtimeMs });
         }
@@ -198,7 +210,7 @@ export class SessionCache {
       for (const file of files.sort((left, right) => left.mtimeMs - right.mtimeMs)) {
         if (total <= limit) break;
         if (protectedSet.has(file.path)) continue;
-        await rm(file.path, { force: true });
+        await this.#removeLocalObject(file.path);
         total -= file.size;
         removed += 1;
       }
@@ -221,7 +233,7 @@ export class SessionCache {
       for (const entry of entries) {
         const child = join(path, entry.name);
         if (entry.isDirectory()) await visit(child);
-        else if (!entry.name.endsWith('.part')) {
+        else if (!entry.name.endsWith('.part') && !entry.name.endsWith(OBJECT_REFERENCE_SUFFIX)) {
           const info = await stat(child);
           const key = child
             .slice(root.length + 1)
@@ -256,7 +268,10 @@ export class SessionCache {
       if (!filter.all && filter.sessionId && sessionId !== filter.sessionId) continue;
       if (!filter.all && filter.profileId && !profileDirectory?.startsWith(`${filter.profileId}-r`))
         continue;
-      await rm(join(this.options.cacheDir, 'vod', object.key), { force: true });
+      const path = join(this.options.cacheDir, 'vod', object.key);
+      const objectStoreKeys = await this.#readObjectReference(path);
+      await this.#removeLocalObject(path);
+      for (const key of objectStoreKeys) await this.objectStore?.delete(key);
       removed += 1;
     }
     if (removed) this.events.publish(event('cache.evicted', { count: removed, ...filter }));
@@ -274,5 +289,35 @@ export class SessionCache {
       hash.update(bytes);
     }
     return hash.digest('hex');
+  }
+
+  async #writeObjectReference(path: string, keys: readonly string[]): Promise<void> {
+    const reference = objectReferencePath(path);
+    const temporary = `${reference}.${process.pid}.${randomUUID()}.part`;
+    try {
+      await writeFile(temporary, JSON.stringify({ keys: [...new Set(keys)] }), { mode: 0o600 });
+      await rename(temporary, reference);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+  }
+
+  async #readObjectReference(path: string): Promise<string[]> {
+    try {
+      const parsed = JSON.parse(await readFile(objectReferencePath(path), 'utf8')) as {
+        keys?: unknown;
+      };
+      return Array.isArray(parsed.keys)
+        ? parsed.keys.filter((key): key is string => typeof key === 'string')
+        : [];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  async #removeLocalObject(path: string): Promise<void> {
+    await Promise.all([rm(path, { force: true }), rm(objectReferencePath(path), { force: true })]);
   }
 }

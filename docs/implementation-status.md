@@ -174,6 +174,9 @@ edge-delivery and live-fan-out verification is still pending.
 - Corrupt object-store restores now invalidate the bad remote object and fall
   back to regeneration/origin refill, including completed segment jobs whose
   local output was evicted.
+- Explicit cache eviction now removes both the local disk cache object and the
+  referenced object-store entry for newly published or restored cache objects,
+  while disk-pressure cleanup preserves the remote tier for later restore.
 - Segment generation and object-store restore enforce the configured disk cache
   limit immediately while protecting the requested segment from same-request
   eviction.
@@ -222,8 +225,8 @@ still pending.
 - Edge grants, coordination-backed viewer aggregation, selected-origin
   metadata, node-targeted cache administration, corrupt object-store restore
   recovery, immediate disk-pressure enforcement, and per-node backend
-  application tracking now have implementation checkpoints. Broader object-store
-  lifecycle reconciliation, administrator-authorized live replacement,
+  application tracking now have implementation checkpoints. Broader external
+  object-store lifecycle evidence, administrator-authorized live replacement,
   destructive origin recovery evidence, and one-pull-per-edge guarantees remain
   Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
