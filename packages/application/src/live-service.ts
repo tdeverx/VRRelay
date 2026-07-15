@@ -86,23 +86,7 @@ export class LiveService {
     const ingestPath = input.normalize ? `${path}-ingest` : path;
     const origin = await this.#selectOrigin(input.preferredRegion);
     const publishToken = opaqueToken(24);
-    const user = 'vrrelay-publish';
-    const publisher: PublisherConnectionDetails = {
-      publishToken,
-      rtmpUrl: `${this.options.rtmpUrl}/${ingestPath}?user=${user}&pass=${publishToken}`,
-      srtUrl: `${this.options.srtUrl}?streamid=publish:${ingestPath}:${user}:${publishToken}&pkt_size=1316`,
-      whipUrl: `${this.options.whipUrl}/${ingestPath}/whip?token=${publishToken}`,
-      ...(this.options.backupRtmpUrl
-        ? {
-            backupRtmpUrl: `${this.options.backupRtmpUrl}/${ingestPath}?user=${user}&pass=${publishToken}`
-          }
-        : {}),
-      ...(this.options.backupSrtUrl
-        ? {
-            backupSrtUrl: `${this.options.backupSrtUrl}?streamid=publish:${ingestPath}:${user}:${publishToken}&pkt_size=1316`
-          }
-        : {})
-    };
+    const publisher = this.#publisherConnectionDetails(ingestPath, publishToken);
     const channel: LiveChannel = {
       id,
       name: input.name,
@@ -132,17 +116,53 @@ export class LiveService {
     return { channel: publicLiveChannel(channel), publisher };
   }
 
-  async #claimPublisherSlot(channelId: string): Promise<boolean> {
+  async replacePublisher(
+    channelId: string
+  ): Promise<{ channel: PublicLiveChannel; publisher: PublisherConnectionDetails }> {
     let stored = await this.repository.getVersionedLiveChannel(channelId);
+    if (!stored) throw new NotFoundError('Live channel was not found');
+    const publishToken = opaqueToken(24);
+    const replacementHash = hashToken(publishToken);
+    const ingestPath = stored.value.ingestPath ?? stored.value.path;
+    const publisher = this.#publisherConnectionDetails(ingestPath, publishToken);
     for (let attempt = 0; stored && attempt < MAX_LIVE_CHANNEL_WRITE_ATTEMPTS; attempt += 1) {
-      if (
-        stored.value.publisherState === 'online' ||
-        stored.value.publisherState === 'reconnecting'
-      )
-        return false;
       const result = await this.repository.compareAndSetLiveChannel(
         {
           ...stored.value,
+          replacementPublishTokenHash: replacementHash,
+          publisherReplacementRequestedAt: new Date().toISOString()
+        },
+        stored.revision
+      );
+      if (result.applied)
+        return {
+          channel: publicLiveChannel(sanitizeLiveChannel(result.record.value)),
+          publisher
+        };
+      if (result.reason === 'not-found') throw new NotFoundError('Live channel was not found');
+      stored = result.current ?? (await this.repository.getVersionedLiveChannel(channelId));
+    }
+    throw new ConflictError('Live channel changed while replacement credentials were being issued');
+  }
+
+  async #claimPublisherSlot(channelId: string, suppliedTokenHash: string): Promise<boolean> {
+    let stored = await this.repository.getVersionedLiveChannel(channelId);
+    for (let attempt = 0; stored && attempt < MAX_LIVE_CHANNEL_WRITE_ATTEMPTS; attempt += 1) {
+      const replacementMatches = suppliedTokenHash === stored.value.replacementPublishTokenHash;
+      const primaryMatches = suppliedTokenHash === stored.value.publishTokenHash;
+      if (!replacementMatches && !primaryMatches) return false;
+      if (primaryMatches && stored.value.replacementPublishTokenHash) return false;
+      if (
+        !replacementMatches &&
+        (stored.value.publisherState === 'online' || stored.value.publisherState === 'reconnecting')
+      )
+        return false;
+      const next = replacementMatches
+        ? this.#promoteReplacementPublisher(stored.value, suppliedTokenHash)
+        : stored.value;
+      const result = await this.repository.compareAndSetLiveChannel(
+        {
+          ...next,
           publisherState: 'reconnecting',
           publisherUpdatedAt: new Date().toISOString()
         },
@@ -153,6 +173,41 @@ export class LiveService {
       stored = result.current ?? (await this.repository.getVersionedLiveChannel(channelId));
     }
     return false;
+  }
+
+  #publisherConnectionDetails(
+    ingestPath: string,
+    publishToken: string
+  ): PublisherConnectionDetails {
+    const user = 'vrrelay-publish';
+    return {
+      publishToken,
+      rtmpUrl: `${this.options.rtmpUrl}/${ingestPath}?user=${user}&pass=${publishToken}`,
+      srtUrl: `${this.options.srtUrl}?streamid=publish:${ingestPath}:${user}:${publishToken}&pkt_size=1316`,
+      whipUrl: `${this.options.whipUrl}/${ingestPath}/whip?token=${publishToken}`,
+      ...(this.options.backupRtmpUrl
+        ? {
+            backupRtmpUrl: `${this.options.backupRtmpUrl}/${ingestPath}?user=${user}&pass=${publishToken}`
+          }
+        : {}),
+      ...(this.options.backupSrtUrl
+        ? {
+            backupSrtUrl: `${this.options.backupSrtUrl}?streamid=publish:${ingestPath}:${user}:${publishToken}&pkt_size=1316`
+          }
+        : {})
+    };
+  }
+
+  #promoteReplacementPublisher(channel: LiveChannel, replacementHash: string): LiveChannel {
+    const {
+      replacementPublishTokenHash: _replacementPublishTokenHash,
+      publisherReplacementRequestedAt: _publisherReplacementRequestedAt,
+      ...rest
+    } = channel;
+    return {
+      ...rest,
+      publishTokenHash: replacementHash
+    };
   }
 
   async #selectOrigin(
@@ -324,7 +379,14 @@ export class LiveService {
       (candidate) => (candidate.ingestPath ?? candidate.path) === input.path
     );
     const supplied = input.password ?? input.token ?? '';
-    if (!channel || !supplied || hashToken(supplied) !== channel.publishTokenHash) return false;
-    return this.#claimPublisherSlot(channel.id);
+    const suppliedTokenHash = supplied ? hashToken(supplied) : '';
+    if (
+      !channel ||
+      !suppliedTokenHash ||
+      (suppliedTokenHash !== channel.publishTokenHash &&
+        suppliedTokenHash !== channel.replacementPublishTokenHash)
+    )
+      return false;
+    return this.#claimPublisherSlot(channel.id, suppliedTokenHash);
   }
 }

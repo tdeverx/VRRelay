@@ -1499,6 +1499,85 @@ describe('Live relay service', () => {
     await expect(service.delete(created.channel.id)).rejects.toThrow('Live channel was not found');
   });
 
+  it('authorizes administrator-issued publisher replacement credentials without reopening the old token', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-replacement-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const service = new LiveService(repo, {
+      publicUrl: 'https://relay.example',
+      rtmpUrl: 'rtmp://ingest.example/live',
+      srtUrl: 'srt://ingest.example:8890',
+      whipUrl: 'https://ingest.example',
+      hlsUrl: 'https://edge.example',
+      internalRtspUrl: 'rtsp://mediamtx:8554'
+    });
+    const created = await service.create({ name: 'OBS replacement', normalize: true });
+    const stored = (await repo.getLiveChannel(created.channel.id))!;
+    const ingestPath = stored.ingestPath ?? stored.path;
+
+    await expect(
+      service.authorizeMediaMtx(
+        {
+          action: 'publish',
+          path: ingestPath,
+          user: 'vrrelay-publish',
+          password: created.publisher.publishToken
+        },
+        'read-token'
+      )
+    ).resolves.toBe(true);
+
+    const replacement = await service.replacePublisher(created.channel.id);
+    expect(replacement.publisher.publishToken).not.toBe(created.publisher.publishToken);
+    expect(JSON.stringify(await service.list())).not.toContain(replacement.publisher.publishToken);
+    const pendingReplacement = (await repo.getLiveChannel(created.channel.id))!;
+    expect(pendingReplacement).toMatchObject({
+      publisherState: 'reconnecting',
+      publisherReplacementRequestedAt: expect.any(String)
+    });
+    expect(pendingReplacement.replacementPublishTokenHash).toMatch(/^[a-f0-9]{64}$/);
+
+    await expect(
+      service.authorizeMediaMtx(
+        {
+          action: 'publish',
+          path: ingestPath,
+          user: 'vrrelay-publish',
+          password: created.publisher.publishToken
+        },
+        'read-token'
+      )
+    ).resolves.toBe(false);
+    await expect(
+      service.authorizeMediaMtx(
+        {
+          action: 'publish',
+          path: ingestPath,
+          user: 'vrrelay-publish',
+          password: replacement.publisher.publishToken
+        },
+        'read-token'
+      )
+    ).resolves.toBe(true);
+
+    const promoted = (await repo.getLiveChannel(created.channel.id))!;
+    expect(promoted.publishTokenHash).toBe(pendingReplacement.replacementPublishTokenHash);
+    expect(promoted.replacementPublishTokenHash).toBeUndefined();
+    expect(promoted.publisherReplacementRequestedAt).toBeUndefined();
+    await expect(
+      service.authorizeMediaMtx(
+        {
+          action: 'publish',
+          path: ingestPath,
+          user: 'vrrelay-publish',
+          password: replacement.publisher.publishToken
+        },
+        'read-token'
+      )
+    ).resolves.toBe(false);
+  });
+
   it('records the selected ingest origin and region when creating a live channel', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-origin-'));
     dirs.push(dir);

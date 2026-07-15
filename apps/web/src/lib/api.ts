@@ -196,6 +196,18 @@ export const api = {
         backupSrtUrl?: string;
       };
     }>('/api/v1/live-channels', json('POST', { name })),
+  replaceLivePublisher: (channelId: string) =>
+    request<{
+      channel: PublicLiveChannel;
+      publisher: {
+        publishToken: string;
+        rtmpUrl: string;
+        srtUrl: string;
+        whipUrl: string;
+        backupRtmpUrl?: string;
+        backupSrtUrl?: string;
+      };
+    }>(`/api/v1/live-channels/${channelId}/publisher/replacement`, json('POST')),
   deleteLiveChannel: (channelId: string) =>
     request<void>(`/api/v1/live-channels/${channelId}`, json('DELETE')),
   compatibility: () => request<{ items: CompatibilityResult[] }>('/api/v1/compatibility'),

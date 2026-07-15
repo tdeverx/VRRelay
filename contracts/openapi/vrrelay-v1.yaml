@@ -180,6 +180,18 @@ paths:
       requestBody: { $ref: '#/components/requestBodies/CreateLiveChannel' }
       responses:
         '201': { $ref: '#/components/responses/CreatedLiveChannel' }
+  /live-channels/{channelId}/publisher/replacement:
+    post:
+      operationId: replaceLivePublisher
+      tags: [Live]
+      parameters: [{ $ref: '#/components/parameters/ChannelId' }]
+      responses:
+        '201':
+          {
+            description: Replacement publisher credentials authorized,
+            content:
+              { application/json: { schema: { $ref: '#/components/schemas/CreatedLiveChannel' } } }
+          }
   /live-channels/{channelId}:
     delete:
       operationId: deleteLiveChannel
@@ -1136,6 +1148,7 @@ components:
         normalize: { type: boolean }
         publisherState: { type: string, enum: [offline, online, reconnecting, error] }
         publisherUpdatedAt: { type: string, format: date-time }
+        publisherReplacementRequestedAt: { type: string, format: date-time }
         rtmpUrl: { type: string, format: uri }
         srtUrl: { type: string, format: uri }
         whipUrl: { type: string, format: uri }

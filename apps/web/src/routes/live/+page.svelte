@@ -18,7 +18,9 @@
     name = $state('OBS live'),
     creating = $state(false),
     deleting = $state(false),
+    replacing = $state(false),
     pendingDelete = $state<PublicLiveChannel | null>(null),
+    pendingReplace = $state<PublicLiveChannel | null>(null),
     newSecret = $state<Awaited<ReturnType<typeof api.createLiveChannel>> | null>(null);
   onMount(() => {
     void load();
@@ -90,6 +92,22 @@
       deleting = false;
     }
   }
+  async function replacePublisher() {
+    if (!pendingReplace || replacing) return;
+    replacing = true;
+    try {
+      newSecret = await api.replaceLivePublisher(pendingReplace.id);
+      channels = channels.map((channel) =>
+        channel.id === newSecret?.channel.id ? newSecret.channel : channel
+      );
+      pendingReplace = null;
+      toast.success('Replacement OBS credentials issued.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not issue replacement credentials.');
+    } finally {
+      replacing = false;
+    }
+  }
   function stateLabel(state: PublicLiveChannel['publisherState']) {
     return state === 'online'
       ? 'Publisher online'
@@ -150,6 +168,9 @@
             <span><Radio />Credentials hidden after creation · MediaMTX fan-out</span>
             <div class="action-buttons">
               <Button size="sm" onclick={() => void session(c)}>Create playback URL</Button>
+              <Button variant="outline" size="sm" onclick={() => (pendingReplace = c)}
+                >Replace OBS credentials</Button
+              >
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -202,6 +223,29 @@
             />{:else}<Trash2 data-icon="inline-start" />{/if}{deleting
             ? 'Deleting…'
             : 'Delete channel'}</Button
+        ></Dialog.Footer
+      ></Dialog.Content
+    ></Dialog.Root
+  ><Dialog.Root
+    open={Boolean(pendingReplace)}
+    onOpenChange={(next) => !next && !replacing && (pendingReplace = null)}
+    ><Dialog.Content
+      ><Dialog.Header
+        ><Dialog.Title>Replace OBS credentials?</Dialog.Title><Dialog.Description
+          >This issues a new one-time publisher token for “{pendingReplace?.name}”. The current
+          publisher can keep streaming until it disconnects, but old credentials will no longer be
+          accepted for reconnects.</Dialog.Description
+        ></Dialog.Header
+      ><Dialog.Footer
+        ><Button variant="outline" disabled={replacing} onclick={() => (pendingReplace = null)}
+          >Cancel</Button
+        ><Button disabled={replacing} onclick={() => void replacePublisher()}
+          >{#if replacing}<LoaderCircle
+              data-icon="inline-start"
+              class="animate-spin"
+            />{:else}<Shield data-icon="inline-start" />{/if}{replacing
+            ? 'Issuing…'
+            : 'Issue replacement'}</Button
         ></Dialog.Footer
       ></Dialog.Content
     ></Dialog.Root

@@ -1028,6 +1028,14 @@ export async function createServer(
       .status(201)
       .send(await services.live.create(parse(CreateLiveChannelRequestSchema, request.body)));
   });
+  app.post('/api/v1/live-channels/:channelId/publisher/replacement', async (request, reply) => {
+    await mutate(request, ['sessions:control']);
+    return reply
+      .status(201)
+      .send(
+        await services.live.replacePublisher((request.params as { channelId: string }).channelId)
+      );
+  });
   app.delete('/api/v1/live-channels/:channelId', async (request, reply) => {
     await mutate(request, ['sessions:control']);
     await services.live.delete((request.params as { channelId: string }).channelId);

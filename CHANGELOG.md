@@ -109,6 +109,8 @@ retained evidence belong in the
   reject conflicting normalized profiles for the same live channel.
 - Claim live publisher slots during MediaMTX publish authorization so duplicate
   publishers are rejected until reconciliation marks the channel offline.
+- Let administrators issue replacement OBS publisher credentials without
+  reopening old credentials for reconnects.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

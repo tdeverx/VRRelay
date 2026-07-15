@@ -65,6 +65,13 @@ evidence.
   MediaMTX accepts a publish request. A second publisher is rejected while the
   channel is `online` or `reconnecting`, and primary/backup URLs can publish
   again only after reconciliation marks the channel offline.
+- Administrators can issue replacement OBS publisher credentials for a live
+  channel. Replacement tokens are staged server-side, old credentials are no
+  longer accepted for reconnects once replacement is authorized, and the
+  replacement token can claim the publisher slot even while the previous
+  publisher is still marked `online` or `reconnecting`. The replacement hash is
+  promoted to the primary publisher hash on successful MediaMTX authorization
+  and is never returned in public channel responses.
 
 ## Lean guardrails run
 
@@ -92,6 +99,7 @@ npx vitest run apps/relay/src/composition/role-server.test.ts
 npx vitest run apps/relay/src/composition/role-server.test.ts -t "reconfigures a live edge origin path"
 npx vitest run packages/application/src/services.test.ts -t "live"
 npx vitest run packages/application/src/services.test.ts -t "Live relay service"
+npx vitest run packages/application/src/services.test.ts -t "administrator-issued publisher replacement"
 npx vitest run packages/adapters/src/ffmpeg-live-normalizer.test.ts
 npm run generate:api
 npm run check:agent-protocol-schema
@@ -109,13 +117,13 @@ npm run build --workspace @vrrelay/relay
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 359 tests with 23
+Result: all commands passed. The local full CI gate passed 360 tests with 23
 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
 - Broader external object-store lifecycle and destructive outage evidence.
-- Administrator-authorized publisher replacement, destructive origin recovery
-  evidence, and one upstream pull per active edge evidence.
+- Destructive origin recovery evidence and one upstream pull per active edge
+  evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

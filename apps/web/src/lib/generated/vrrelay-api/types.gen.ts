@@ -290,6 +290,7 @@ export type LiveChannel = {
     normalize: boolean;
     publisherState: 'offline' | 'online' | 'reconnecting' | 'error';
     publisherUpdatedAt?: string;
+    publisherReplacementRequestedAt?: string;
     rtmpUrl: string;
     srtUrl: string;
     whipUrl: string;
@@ -1170,6 +1171,24 @@ export type CreateLiveChannelResponses = {
 };
 
 export type CreateLiveChannelResponse = CreateLiveChannelResponses[keyof CreateLiveChannelResponses];
+
+export type ReplaceLivePublisherData = {
+    body?: never;
+    path: {
+        channelId: string;
+    };
+    query?: never;
+    url: '/live-channels/{channelId}/publisher/replacement';
+};
+
+export type ReplaceLivePublisherResponses = {
+    /**
+     * Replacement publisher credentials authorized
+     */
+    201: CreatedLiveChannel;
+};
+
+export type ReplaceLivePublisherResponse = ReplaceLivePublisherResponses[keyof ReplaceLivePublisherResponses];
 
 export type DeleteLiveChannelData = {
     body?: never;

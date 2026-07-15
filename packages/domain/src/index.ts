@@ -252,6 +252,8 @@ export const LiveChannelSchema = z.object({
   publisherState: z.enum(['offline', 'online', 'reconnecting', 'error']).default('offline'),
   publisherUpdatedAt: z.iso.datetime().optional(),
   publishTokenHash: z.string(),
+  replacementPublishTokenHash: z.string().optional(),
+  publisherReplacementRequestedAt: z.iso.datetime().optional(),
   rtmpUrl: z.url(),
   srtUrl: z.url(),
   whipUrl: z.url(),
@@ -260,7 +262,10 @@ export const LiveChannelSchema = z.object({
   createdAt: z.iso.datetime()
 });
 export type LiveChannel = z.infer<typeof LiveChannelSchema>;
-export const PublicLiveChannelSchema = LiveChannelSchema.omit({ publishTokenHash: true });
+export const PublicLiveChannelSchema = LiveChannelSchema.omit({
+  publishTokenHash: true,
+  replacementPublishTokenHash: true
+});
 export type PublicLiveChannel = z.infer<typeof PublicLiveChannelSchema>;
 
 export function publicLiveChannel(channel: LiveChannel): PublicLiveChannel {
