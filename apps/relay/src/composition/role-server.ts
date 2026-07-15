@@ -245,6 +245,9 @@ export async function createRoleServer(
         throw error;
       }
     };
+    const forgetLiveEdgePath = (path: string): void => {
+      configuredLivePaths.delete(path);
+    };
 
     app.get('/play/:token/index.m3u8', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -324,7 +327,10 @@ export async function createRoleServer(
           Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
         }
       });
-      if (!response.ok) return reply.status(response.status).send();
+      if (!response.ok) {
+        forgetLiveEdgePath(channel.path);
+        return reply.status(response.status).send();
+      }
       const playlist = (await response.text())
         .split('\n')
         .map((line) =>
@@ -356,7 +362,10 @@ export async function createRoleServer(
           }
         }
       );
-      if (!response.ok || !response.body) return reply.status(response.status).send();
+      if (!response.ok || !response.body) {
+        forgetLiveEdgePath(channel.path);
+        return reply.status(response.status).send();
+      }
       reply.header('Cache-Control', response.headers.get('cache-control') ?? 'no-store');
       return reply
         .type(response.headers.get('content-type') ?? 'application/octet-stream')

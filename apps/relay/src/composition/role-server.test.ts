@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   LiveService,
   type MediaCapabilities,
@@ -24,6 +24,8 @@ const metrics: MetricsSink = {
   observe: () => undefined,
   render: async () => ''
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('data-plane role servers', () => {
   it('registers only the source-worker HTTP surface', async () => {
@@ -102,6 +104,44 @@ describe('data-plane role servers', () => {
     await expect(
       request({ action: 'read', user: 'vrrelay-read', password: readToken }, '203.0.113.40')
     ).resolves.toMatchObject({ statusCode: 403 });
+    await app.close();
+  });
+
+  it('reconfigures a live edge origin path after an upstream HLS failure', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v3/config/paths/add/live-fixture'))
+        return new Response(null, { status: 200 });
+      if (url.endsWith('/live-fixture/index.m3u8')) return new Response('', { status: 502 });
+      return new Response('', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const sessions = {
+      touchViewer: async () => ({ id: 'live-session' }),
+      resolveLive: async () => ({ path: 'live-fixture' }),
+      recordEgress: () => undefined
+    } as unknown as SessionService;
+    const app = await createRoleServer(
+      loadConfig({ VRRELAY_LIVE_ORIGIN_URL: 'rtsp://origin.example:8554' }),
+      {
+        kind: 'edge',
+        sessions,
+        capabilities,
+        metrics
+      }
+    );
+
+    await expect(
+      app.inject({ method: 'GET', url: '/play/live-token/live.m3u8' })
+    ).resolves.toMatchObject({ statusCode: 502 });
+    await expect(
+      app.inject({ method: 'GET', url: '/play/live-token/live.m3u8' })
+    ).resolves.toMatchObject({ statusCode: 502 });
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/v3/config/paths/add/live-fixture')
+      )
+    ).toHaveLength(2);
     await app.close();
   });
 

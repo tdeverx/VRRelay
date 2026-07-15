@@ -170,6 +170,8 @@ edge-delivery and live-fan-out verification is still pending.
 - Segment generation and object-store restore enforce the configured disk cache
   limit immediately while protecting the requested segment from same-request
   eviction.
+- Edge live playback drops cached MediaMTX path configuration after failed HLS
+  upstream responses so the next request can reapply origin pull configuration.
 - Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
   format check, generated-contract and TypeScript checks, lint, package builds,
   and relay build passed. See
@@ -202,8 +204,8 @@ edge-delivery and live-fan-out verification is still pending.
   recovery, immediate disk-pressure enforcement, and per-node backend
   application tracking now have implementation checkpoints. Broader
   object-store lifecycle reconciliation, profile-driven normalization, live
-  backup/replacement behavior, origin recovery, and one-pull-per-edge
-  guarantees remain Phase 6 work.
+  backup/replacement behavior, destructive origin recovery evidence, and
+  one-pull-per-edge guarantees remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

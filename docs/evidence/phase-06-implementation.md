@@ -47,6 +47,9 @@ evidence.
   cache limit immediately instead of waiting for the periodic cleanup loop. The
   segment just requested is protected while older cached objects are evicted to
   bring disk usage back under the configured limit where possible.
+- Edge live playback forgets cached MediaMTX path configuration after a failed
+  HLS upstream response, so the next viewer request reapplies the origin pull
+  source instead of pinning a stale path configuration indefinitely.
 
 ## Lean guardrails run
 
@@ -70,6 +73,8 @@ npx vitest run packages/contracts/src/agent-protocol.test.ts apps/relay/src/agen
 npx vitest run packages/application/src/services.test.ts
 npx vitest run packages/application/src/services.test.ts -t "corrupt object-store restores"
 npx vitest run packages/application/src/services.test.ts -t "disk cache pressure"
+npx vitest run apps/relay/src/composition/role-server.test.ts
+npx vitest run apps/relay/src/composition/role-server.test.ts -t "reconfigures a live edge origin path"
 npm run check:agent-protocol-schema
 npm run check:api
 npm run check:tests
@@ -88,6 +93,7 @@ Result: all commands passed.
 
 - Broader object-store lifecycle reconciliation.
 - Immutable-profile-driven normalization, primary/backup publisher states,
-  origin recovery, and one upstream pull per active edge evidence.
+  destructive origin recovery evidence, and one upstream pull per active edge
+  evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

@@ -99,6 +99,8 @@ retained evidence belong in the
   job state.
 - Enforce disk cache limits immediately after segment writes and object-store
   restores while protecting the segment currently being served.
+- Reconfigure live edge origin pull paths after failed HLS upstream responses
+  instead of keeping stale MediaMTX path state pinned indefinitely.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

@@ -471,6 +471,9 @@ export async function createServer(
       throw error;
     }
   };
+  const forgetLiveEdgePath = (path: string): void => {
+    configuredLivePaths.delete(path);
+  };
 
   await app.register(cookie, { hook: 'onRequest' });
   await app.register(helmet, {
@@ -1328,7 +1331,10 @@ export async function createServer(
         Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
       }
     });
-    if (!response.ok) return reply.status(response.status).send();
+    if (!response.ok) {
+      forgetLiveEdgePath(channel.path);
+      return reply.status(response.status).send();
+    }
     const playlist = (await response.text())
       .split('\n')
       .map((line) =>
@@ -1361,7 +1367,10 @@ export async function createServer(
           }
         }
       );
-      if (!response.ok || !response.body) return reply.status(response.status).send();
+      if (!response.ok || !response.body) {
+        forgetLiveEdgePath(channel.path);
+        return reply.status(response.status).send();
+      }
       reply.header('Cache-Control', response.headers.get('cache-control') ?? 'no-store');
       return reply
         .type(response.headers.get('content-type') ?? 'application/octet-stream')
