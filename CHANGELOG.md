@@ -26,6 +26,8 @@ retained evidence belong in the
   S3-compatible, Azure Blob, and GCS object-store adapters.
 - Standalone, Compose, multi-host Compose, Helm, macOS, Windows, OCI, backup,
   release, SBOM, provenance, and corresponding-source scaffolding.
+- Multi-host Compose role profiles with explicit service definitions and
+  semantic checks for role-owned ports/listeners.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.

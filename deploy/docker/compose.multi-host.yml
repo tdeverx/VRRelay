@@ -1,49 +1,85 @@
 name: vrrelay-node
+
+x-relay-base: &relay-base
+  image: ${VRRELAY_IMAGE:?Set VRRELAY_IMAGE}
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  env_file:
+    - { path: .env, required: false }
+
+x-relay-environment: &relay-environment
+  VRRELAY_ENVIRONMENT: ${VRRELAY_ENVIRONMENT:-production}
+  VRRELAY_LISTEN_ADDR: 127.0.0.1:8099
+  VRRELAY_TRUSTED_PROXY_CIDRS: ${VRRELAY_TRUSTED_PROXY_CIDRS:?Set VRRELAY_TRUSTED_PROXY_CIDRS}
+  VRRELAY_REPOSITORY_DRIVER: postgres
+  VRRELAY_POSTGRES_URL: ${VRRELAY_POSTGRES_URL:?Set VRRELAY_POSTGRES_URL}
+  VRRELAY_COORDINATION_DRIVER: valkey
+  VRRELAY_VALKEY_URL: ${VRRELAY_VALKEY_URL:?Set VRRELAY_VALKEY_URL}
+  VRRELAY_OBJECT_STORE_DRIVER: ${VRRELAY_OBJECT_STORE_DRIVER:?Set VRRELAY_OBJECT_STORE_DRIVER}
+  VRRELAY_OBJECT_STORE_BUCKET: ${VRRELAY_OBJECT_STORE_BUCKET:?Set VRRELAY_OBJECT_STORE_BUCKET}
+  VRRELAY_OBJECT_STORE_PREFIX: ${VRRELAY_OBJECT_STORE_PREFIX:-segments}
+  VRRELAY_MASTER_KEY: ${VRRELAY_MASTER_KEY:?Set VRRELAY_MASTER_KEY}
+  VRRELAY_MEDIAMTX_READ_TOKEN: ${VRRELAY_MEDIAMTX_READ_TOKEN:?Set VRRELAY_MEDIAMTX_READ_TOKEN}
+
 services:
   controller:
+    <<: *relay-base
     profiles: [controller]
-    image: ${VRRELAY_IMAGE:?Set VRRELAY_IMAGE}
-    restart: unless-stopped
-    read_only: true
-    tmpfs: [/tmp]
-    env_file:
-      - { path: .env, required: false }
     environment:
-      {
-        VRRELAY_NODE_ROLES: controller,
-        VRRELAY_LISTEN_ADDR: '0.0.0.0:8099',
-        VRRELAY_AGENT_LISTEN_ADDR: '0.0.0.0:8100'
-      }
-    volumes: [vrrelay-data:/data, vrrelay-cache:/cache]
+      <<: *relay-environment
+      VRRELAY_NODE_ID: ${VRRELAY_NODE_ID:-controller-1}
+      VRRELAY_NODE_NAME: ${VRRELAY_NODE_NAME:-Controller}
+      VRRELAY_NODE_REGION: ${VRRELAY_NODE_REGION:-home}
+      VRRELAY_NODE_ROLES: controller
+      VRRELAY_LISTEN_ADDR: 0.0.0.0:8099
+      VRRELAY_PUBLIC_URL: ${VRRELAY_PUBLIC_URL:?Set VRRELAY_PUBLIC_URL}
+      VRRELAY_SETUP_TOKEN: ${VRRELAY_SETUP_TOKEN:?Set VRRELAY_SETUP_TOKEN for first-run initialization}
+      VRRELAY_AGENT_LISTEN_ADDR: 0.0.0.0:8100
+      VRRELAY_AGENT_TLS_NAMES: ${VRRELAY_AGENT_TLS_NAMES:?Set VRRELAY_AGENT_TLS_NAMES}
+      VRRELAY_METRICS_TOKEN: ${VRRELAY_METRICS_TOKEN:-}
+    volumes: [controller-data:/data, controller-cache:/cache]
     ports: [8099:8099, 8100:8100]
+
   source-worker:
+    <<: *relay-base
     profiles: [source-worker]
-    extends: { service: controller }
-    environment: { VRRELAY_NODE_ROLES: source-worker, VRRELAY_LISTEN_ADDR: '0.0.0.0:8099' }
-    ports: []
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: ${VRRELAY_NODE_NAME:-Source worker}
+      VRRELAY_NODE_REGION: ${VRRELAY_NODE_REGION:-home}
+      VRRELAY_NODE_ROLES: source-worker
+      VRRELAY_PUBLIC_URL: ${VRRELAY_PUBLIC_URL:?Set this source worker's HTTPS VRRELAY_PUBLIC_URL}
+      VRRELAY_CONTROLLER_AGENT_URL: ${VRRELAY_CONTROLLER_AGENT_URL:?Set VRRELAY_CONTROLLER_AGENT_URL}
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: ${VRRELAY_CONTROLLER_ENROLLMENT_URL:?Set VRRELAY_CONTROLLER_ENROLLMENT_URL}
+      VRRELAY_NODE_JOIN_TOKEN: ${VRRELAY_NODE_JOIN_TOKEN:-}
+      VRRELAY_METRICS_TOKEN: ${VRRELAY_METRICS_TOKEN:-}
+    volumes: [source-worker-data:/data, source-worker-cache:/cache]
+
   ingest-origin:
+    <<: *relay-base
     profiles: [ingest-origin]
-    extends: { service: controller }
     environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: ${VRRELAY_NODE_NAME:-Ingest origin}
+      VRRELAY_NODE_REGION: ${VRRELAY_NODE_REGION:-home}
       VRRELAY_NODE_ROLES: ingest-origin
-      VRRELAY_LISTEN_ADDR: '0.0.0.0:8099'
+      VRRELAY_PUBLIC_URL: ${VRRELAY_PUBLIC_URL:?Set this ingest origin's HTTPS VRRELAY_PUBLIC_URL}
+      VRRELAY_CONTROLLER_AGENT_URL: ${VRRELAY_CONTROLLER_AGENT_URL:?Set VRRELAY_CONTROLLER_AGENT_URL}
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: ${VRRELAY_CONTROLLER_ENROLLMENT_URL:?Set VRRELAY_CONTROLLER_ENROLLMENT_URL}
+      VRRELAY_NODE_JOIN_TOKEN: ${VRRELAY_NODE_JOIN_TOKEN:-}
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-origin:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-origin:8554
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-origin:8888
       VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
-    ports: []
-  edge:
-    profiles: [edge]
-    extends: { service: controller }
-    environment:
-      VRRELAY_NODE_ROLES: edge
-      VRRELAY_LISTEN_ADDR: '0.0.0.0:8099'
-      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-edge:8888
-      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-edge:9997
-      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-edge:8554
-      VRRELAY_LIVE_ORIGIN_URL: ${VRRELAY_LIVE_ORIGIN_URL:-}
-    ports: [8099:8099]
+      VRRELAY_METRICS_TOKEN: ${VRRELAY_METRICS_TOKEN:-}
+    volumes: [ingest-origin-data:/data, ingest-origin-cache:/cache]
+
   mediamtx-origin:
     profiles: [ingest-origin]
     image: bluenviron/mediamtx:1.18.2
     restart: unless-stopped
+    depends_on: { ingest-origin: { condition: service_started } }
     environment:
       MTX_AUTHMETHOD: http
       MTX_AUTHHTTPADDRESS: http://ingest-origin:8099/internal/mediamtx/auth
@@ -54,13 +90,46 @@ services:
       MTX_WEBRTCLOCALUDPADDRESS: :8189
       MTX_WEBRTCADDITIONALHOSTS: ${VRRELAY_WEBRTC_ADDITIONAL_HOSTS:-}
     ports: [1935:1935, 8889:8889, '8189:8189/udp', '8890:8890/udp']
+
+  edge:
+    <<: *relay-base
+    profiles: [edge]
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: ${VRRELAY_NODE_NAME:-Edge}
+      VRRELAY_NODE_REGION: ${VRRELAY_NODE_REGION:-home}
+      VRRELAY_NODE_ROLES: edge
+      VRRELAY_LISTEN_ADDR: 0.0.0.0:8099
+      VRRELAY_PUBLIC_URL: ${VRRELAY_PUBLIC_URL:?Set this edge's HTTPS VRRELAY_PUBLIC_URL}
+      VRRELAY_CONTROLLER_AGENT_URL: ${VRRELAY_CONTROLLER_AGENT_URL:?Set VRRELAY_CONTROLLER_AGENT_URL}
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: ${VRRELAY_CONTROLLER_ENROLLMENT_URL:?Set VRRELAY_CONTROLLER_ENROLLMENT_URL}
+      VRRELAY_NODE_JOIN_TOKEN: ${VRRELAY_NODE_JOIN_TOKEN:-}
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-edge:8888
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-edge:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-edge:8554
+      VRRELAY_LIVE_ORIGIN_URL: ${VRRELAY_LIVE_ORIGIN_URL:?Set VRRELAY_LIVE_ORIGIN_URL}
+      VRRELAY_LIVE_SRT_PASSPHRASE: ${VRRELAY_LIVE_SRT_PASSPHRASE:-}
+      VRRELAY_METRICS_TOKEN: ${VRRELAY_METRICS_TOKEN:-}
+    volumes: [edge-data:/data, edge-cache:/cache]
+    ports: [8099:8099]
+
   mediamtx-edge:
     profiles: [edge]
     image: bluenviron/mediamtx:1.18.2
     restart: unless-stopped
+    depends_on: { edge: { condition: service_started } }
     volumes: [./mediamtx-edge.yml:/mediamtx.yml:ro]
     environment:
       MTX_AUTHMETHOD: http
       MTX_AUTHHTTPADDRESS: http://edge:8099/internal/mediamtx/auth
       MTX_HLSVARIANT: mpegts
-volumes: { vrrelay-data: {}, vrrelay-cache: {} }
+
+volumes:
+  controller-data:
+  controller-cache:
+  source-worker-data:
+  source-worker-cache:
+  ingest-origin-data:
+  ingest-origin-cache:
+  edge-data:
+  edge-cache:

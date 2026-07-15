@@ -282,10 +282,11 @@ pending.
   mobile, keyboard, and accessibility workflows.
 - Adapter contracts, browser coverage, destructive cluster scenarios, and
   retained target-environment benchmark evidence remain release work.
-- Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM
-  provisioning, native installers, signing/notarization, supply-chain evidence,
-  upgrade/rollback, and clean-target installation have not passed their release
-  gates.
+- Multi-host Compose now has explicit role profiles and semantic render checks,
+  but true multi-host boot evidence, Kubernetes migration/TLS behavior,
+  cloud-neutral VM provisioning, native installers, signing/notarization,
+  supply-chain evidence, upgrade/rollback, and clean-target installation have
+  not passed their release gates.
 
 ## Release gates requiring target infrastructure or people
 
