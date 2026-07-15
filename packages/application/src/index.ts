@@ -18,7 +18,10 @@ import type {
   SegmentJob,
   ProviderBinding,
   NodeCertificateState,
-  AgentLogEntry
+  AgentLogEntry,
+  AuditCategory,
+  AuditEvent,
+  NodeCapability
 } from '@vrrelay/domain';
 import type { CatalogQuery, RelayEvent } from '@vrrelay/contracts';
 
@@ -137,21 +140,188 @@ export interface CoordinationStore {
 }
 
 export interface ClusterRepository {
-  putNode(node: ClusterNode): Promise<void>;
+  createNode(
+    node: ClusterNode,
+    initialCertificate?: NodeCertificateState
+  ): Promise<VersionedRecord<ClusterNode>>;
+  ensureLocalNode(node: ClusterNode): Promise<VersionedRecord<ClusterNode>>;
   getNode(id: string): Promise<ClusterNode | undefined>;
   listNodes(): Promise<ClusterNode[]>;
-  deleteNode(id: string): Promise<void>;
-  putSegmentJob(job: SegmentJob): Promise<void>;
+  removeNode(id: string, expectedRevision: number): Promise<AtomicDeleteResult<ClusterNode>>;
+  createSegmentJob(job: SegmentJob): Promise<SegmentJobCreateResult>;
   getSegmentJob(id: string): Promise<SegmentJob | undefined>;
   listSegmentJobs(limit?: number): Promise<SegmentJob[]>;
-  putProviderBinding(binding: ProviderBinding): Promise<void>;
-  getProviderBinding(id: string): Promise<ProviderBinding | undefined>;
-  listProviderBindings(providerId?: string): Promise<ProviderBinding[]>;
-  deleteProviderBinding(id: string): Promise<void>;
-  putNodeCertificate(certificate: NodeCertificateState): Promise<void>;
+  createProviderBinding(
+    provider: ProviderConnection,
+    binding: ProviderBinding,
+    expectedProviderRevision: number | null
+  ): Promise<ProviderBindingCreateResult>;
+  getProviderBinding(
+    id: string,
+    options?: ProviderBindingReadOptions
+  ): Promise<ProviderBinding | undefined>;
+  getVersionedProviderBinding(
+    id: string,
+    options?: ProviderBindingReadOptions
+  ): Promise<VersionedRecord<ProviderBinding> | undefined>;
+  compareAndSetProviderBinding(
+    binding: ProviderBinding,
+    expectedRevision: number,
+    allowedCurrentStates?: readonly ProviderBinding['state'][]
+  ): Promise<AtomicWriteResult<ProviderBinding>>;
+  listProviderBindings(
+    providerId?: string,
+    options?: ProviderBindingReadOptions
+  ): Promise<ProviderBinding[]>;
+  beginProviderBindingDeletion(
+    id: string,
+    updatedAt: string
+  ): Promise<AtomicWriteResult<ProviderBinding>>;
+  finalizeProviderBindingDeletion(
+    id: string,
+    expectedRevision: number
+  ): Promise<AtomicDeleteResult<ProviderBinding>>;
   listNodeCertificates(nodeId: string): Promise<NodeCertificateState[]>;
+  rotateNodeCertificate(update: NodeCertificateRotation): Promise<AtomicWriteResult<ClusterNode>>;
+  revokeNode(update: NodeRevocation): Promise<AtomicWriteResult<ClusterNode>>;
   putAgentLog(entry: AgentLogEntry): Promise<void>;
   listAgentLogs(nodeId: string, limit?: number): Promise<AgentLogEntry[]>;
+  getVersionedNode(id: string): Promise<VersionedRecord<ClusterNode> | undefined>;
+  recordNodeHeartbeat(update: NodeHeartbeatUpdate): Promise<AtomicWriteResult<ClusterNode>>;
+  setNodeDrain(update: NodeDrainUpdate): Promise<AtomicWriteResult<ClusterNode>>;
+  setNodeOperationalState(
+    update: NodeOperationalStateUpdate
+  ): Promise<AtomicWriteResult<ClusterNode>>;
+  getVersionedSegmentJob(id: string): Promise<VersionedRecord<SegmentJob> | undefined>;
+  compareAndSetSegmentJob(
+    job: SegmentJob,
+    expectedRevision: number,
+    allowedCurrentStates: readonly SegmentJob['state'][]
+  ): Promise<AtomicWriteResult<SegmentJob>>;
+  completeSegmentJob(
+    job: SegmentJob,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<SegmentJob>>;
+  cancelSegmentJob(
+    job: SegmentJob,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<SegmentJob>>;
+}
+
+export interface VersionedRecord<T> {
+  value: T;
+  revision: number;
+}
+
+export type AtomicWriteFailureReason =
+  'not-found' | 'revision-conflict' | 'invalid-state' | 'dependency-conflict';
+
+export type AtomicWriteResult<T> =
+  | { applied: true; record: VersionedRecord<T> }
+  | {
+      applied: false;
+      reason: AtomicWriteFailureReason;
+      current?: VersionedRecord<T>;
+      dependencies?: readonly string[];
+    };
+
+export type AtomicDeleteResult<T> =
+  | { applied: true; deleted: VersionedRecord<T> }
+  | {
+      applied: false;
+      reason: AtomicWriteFailureReason;
+      current?: VersionedRecord<T>;
+      dependencies?: readonly string[];
+    };
+
+export type ProviderBindingCreateResult =
+  | {
+      applied: true;
+      provider: ProviderConnection;
+      binding: VersionedRecord<ProviderBinding>;
+    }
+  | {
+      applied: false;
+      reason:
+        | 'provider-conflict'
+        | 'provider-not-found'
+        | 'provider-revision-conflict'
+        | 'provider-deleting'
+        | 'binding-deleting'
+        | 'node-unavailable'
+        | 'binding-conflict';
+      provider?: ProviderConnection;
+      binding?: VersionedRecord<ProviderBinding>;
+    };
+
+export interface ProviderBindingReadOptions {
+  includeDeletionPending?: boolean;
+}
+
+export interface SettingInsertResult {
+  inserted: boolean;
+  record: VersionedRecord<string>;
+}
+
+export interface SegmentJobCreateResult {
+  created: boolean;
+  record: VersionedRecord<SegmentJob>;
+}
+
+export interface NodeHeartbeatUpdate {
+  nodeId: string;
+  expectedRevision: number;
+  capabilities: NodeCapability;
+  reportedState: 'online' | 'degraded' | 'draining';
+  lastHeartbeatAt: string;
+  updatedAt: string;
+  certificateExpiresAt?: string;
+}
+
+export interface NodeDrainUpdate {
+  nodeId: string;
+  expectedRevision: number;
+  draining: boolean;
+  updatedAt: string;
+}
+
+export interface NodeOperationalStateUpdate {
+  nodeId: string;
+  expectedRevision: number;
+  state: 'online' | 'degraded' | 'offline';
+  updatedAt: string;
+}
+
+export interface NodeCertificateRotation {
+  nodeId: string;
+  expectedRevision: number;
+  certificate: NodeCertificateState;
+  updatedAt: string;
+}
+
+export interface NodeRevocation {
+  nodeId: string;
+  expectedRevision: number;
+  revokedAt: string;
+}
+
+export interface PersonalTokenUse {
+  tokenHash: string;
+  usedAt: string;
+  touchBefore: string;
+}
+
+export interface AuditQuery {
+  category?: AuditCategory;
+  actorId?: string;
+  targetId?: string;
+  before?: string;
+  limit?: number;
+}
+
+export interface AuditRepository {
+  appendAuditEvent(event: AuditEvent): Promise<void>;
+  listAuditEvents(query?: AuditQuery): Promise<AuditEvent[]>;
 }
 
 export interface TrafficDirector {
@@ -234,32 +404,68 @@ export interface RemoteSegmentRequester {
 
 export interface Repository {
   migrate(): Promise<void>;
-  putProvider(provider: ProviderConnection): Promise<void>;
+  assertSchemaCurrent(): Promise<void>;
+  createProvider(provider: ProviderConnection): Promise<VersionedRecord<ProviderConnection>>;
   listProviders(): Promise<ProviderConnection[]>;
   getProvider(id: string): Promise<ProviderConnection | undefined>;
-  deleteProvider(id: string): Promise<void>;
+  getVersionedProvider(id: string): Promise<VersionedRecord<ProviderConnection> | undefined>;
+  compareAndSetProvider(
+    provider: ProviderConnection,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<ProviderConnection>>;
+  beginProviderDeletion(id: string): Promise<AtomicWriteResult<ProviderConnection>>;
+  finalizeProviderDeletion(
+    id: string,
+    expectedRevision: number
+  ): Promise<AtomicDeleteResult<ProviderConnection>>;
   putProfile(profile: ProfileRevision): Promise<void>;
   listProfiles(): Promise<ProfileRevision[]>;
   getProfile(id: string, revision?: number): Promise<ProfileRevision | undefined>;
-  putSession(session: RelaySession): Promise<void>;
+  createSessionWithPlaybackGrant(
+    session: RelaySession,
+    grant: PlaybackGrant,
+    expectedLiveChannelRevision?: number
+  ): Promise<AtomicWriteResult<RelaySession>>;
   listSessions(): Promise<RelaySession[]>;
   getSession(id: string): Promise<RelaySession | undefined>;
-  deleteSession(id: string): Promise<void>;
-  putPlaybackGrant(grant: PlaybackGrant): Promise<void>;
+  getVersionedSession(id: string): Promise<VersionedRecord<RelaySession> | undefined>;
+  compareAndSetSession(
+    session: RelaySession,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<RelaySession>>;
+  setSessionViewers(
+    sessionId: string,
+    expectedRevision: number,
+    viewers: number,
+    updatedAt: string
+  ): Promise<AtomicWriteResult<RelaySession>>;
+  deleteSessionAndRevokePlaybackGrants(sessionId: string, revokedAt?: string): Promise<void>;
   getPlaybackGrant(tokenHash: string): Promise<PlaybackGrant | undefined>;
-  revokePlaybackGrants(sessionId: string): Promise<void>;
-  putLiveChannel(channel: LiveChannel): Promise<void>;
+  createLiveChannel(channel: LiveChannel): Promise<VersionedRecord<LiveChannel>>;
   listLiveChannels(): Promise<LiveChannel[]>;
   getLiveChannel(id: string): Promise<LiveChannel | undefined>;
-  deleteLiveChannel(id: string): Promise<void>;
+  getVersionedLiveChannel(id: string): Promise<VersionedRecord<LiveChannel> | undefined>;
+  compareAndSetLiveChannel(
+    channel: LiveChannel,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<LiveChannel>>;
+  deleteLiveChannel(id: string, expectedRevision: number): Promise<AtomicWriteResult<LiveChannel>>;
   putCompatibilityResult(result: CompatibilityResult): Promise<void>;
   listCompatibilityResults(): Promise<CompatibilityResult[]>;
   putPersonalToken(token: PersonalAccessToken): Promise<void>;
   getPersonalToken(tokenHash: string): Promise<PersonalAccessToken | undefined>;
+  usePersonalToken(update: PersonalTokenUse): Promise<PersonalAccessToken | undefined>;
   listPersonalTokens(): Promise<PersonalAccessToken[]>;
-  revokePersonalToken(id: string): Promise<void>;
+  revokePersonalToken(id: string, revokedAt?: string): Promise<void>;
   putSetting(key: string, value: string): Promise<void>;
   getSetting(key: string): Promise<string | undefined>;
+  getVersionedSetting(key: string): Promise<VersionedRecord<string> | undefined>;
+  putSettingIfAbsent(key: string, value: string): Promise<SettingInsertResult>;
+  compareAndSetSetting(
+    key: string,
+    value: string,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<string>>;
 }
 
 export interface EncoderCapability {
@@ -357,3 +563,4 @@ export class DefaultProviderRegistry implements ProviderRegistry {
 export * from './errors.js';
 export * from './services.js';
 export * from './cluster-service.js';
+export * from './audit-service.js';

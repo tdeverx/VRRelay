@@ -7,6 +7,7 @@ import {
   BuiltinTrafficDirector,
   SwitchableMetricsExporter,
   SwitchableTrafficDirector,
+  type MetricsExporter,
   type SecretStore
 } from '@vrrelay/application';
 import {
@@ -346,5 +347,292 @@ describe('backend service', () => {
         local
       )
     ).rejects.toThrow('documented JSON credential fields');
+  });
+
+  it('does not switch the live metrics exporter when desired-state persistence fails', async () => {
+    class FailingRepository extends SqliteRepository {
+      override async putSettingIfAbsent(key: string, value: string) {
+        if (key === 'backend.metrics') throw new Error('simulated setting write failure');
+        return super.putSettingIfAbsent(key, value);
+      }
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ healthy: true, message: 'ready' }))
+    );
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-backend-write-failure-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const repository = new FailingRepository(join(dir, 'state.sqlite3'));
+    await repository.migrate();
+    cleanups.push(async () => repository.close());
+    const exporter = new SwitchableMetricsExporter();
+    const service = new BackendService(
+      repository,
+      { put: async () => undefined, get: async () => '', delete: async () => undefined },
+      new LocalObjectStore(join(dir, 'objects')),
+      new MemoryCoordinationStore(),
+      new SwitchableTrafficDirector(new BuiltinTrafficDirector()),
+      exporter,
+      {
+        repositoryKind: 'sqlite',
+        secretKind: 'encrypted-file',
+        metrics: new PrometheusMetricsSink()
+      }
+    );
+
+    await expect(
+      service.activate({
+        category: 'metrics',
+        kind: 'webhook',
+        endpoint: 'https://127.0.0.1:9443/metrics'
+      })
+    ).rejects.toThrow('simulated setting write failure');
+    expect(exporter.kind).toBe('prometheus');
+    await expect(repository.getSetting('backend.metrics')).resolves.toBeUndefined();
+  });
+
+  it('rolls desired metrics state back when the live transition fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-backend-live-failure-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const repository = new SqliteRepository(join(dir, 'state.sqlite3'));
+    await repository.migrate();
+    cleanups.push(async () => repository.close());
+    const previousConfiguration = {
+      category: 'metrics' as const,
+      kind: 'webhook' as const,
+      endpoint: 'https://metrics-old.example/ingest'
+    };
+    await repository.putSetting('backend.metrics', JSON.stringify(previousConfiguration));
+    let stopAttempts = 0;
+    const previous: MetricsExporter = {
+      kind: 'previous-webhook',
+      start: () => undefined,
+      stop: async () => {
+        stopAttempts += 1;
+        if (stopAttempts === 1) throw new Error('simulated exporter stop failure');
+      },
+      health: async () => ({
+        category: 'metrics',
+        kind: 'webhook',
+        healthy: true,
+        checkedAt: new Date().toISOString()
+      })
+    };
+    const exporter = new SwitchableMetricsExporter();
+    await exporter.activate(previous);
+    const service = new BackendService(
+      repository,
+      { put: async () => undefined, get: async () => '', delete: async () => undefined },
+      new LocalObjectStore(join(dir, 'objects')),
+      new MemoryCoordinationStore(),
+      new SwitchableTrafficDirector(new BuiltinTrafficDirector()),
+      exporter,
+      {
+        repositoryKind: 'sqlite',
+        secretKind: 'encrypted-file',
+        metrics: new PrometheusMetricsSink()
+      }
+    );
+
+    await expect(service.activate({ category: 'metrics', kind: 'prometheus' })).rejects.toThrow(
+      'simulated exporter stop failure'
+    );
+    expect(exporter.kind).toBe('previous-webhook');
+    expect(await repository.getSetting('backend.metrics')).toBe(
+      JSON.stringify(previousConfiguration)
+    );
+    await exporter.stop();
+  });
+
+  it('serializes activations and rejects a conflicting independent controller write', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ healthy: true, message: 'ready' }))
+    );
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-backend-cas-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const path = join(dir, 'state.sqlite3');
+    const arrivals = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let waiting = 0;
+    class BarrierRepository extends SqliteRepository {
+      override async putSettingIfAbsent(key: string, value: string) {
+        if (key === 'backend.metrics') {
+          waiting += 1;
+          if (waiting === 2) arrivals.resolve();
+          await release.promise;
+        }
+        return super.putSettingIfAbsent(key, value);
+      }
+    }
+    const firstRepository = new BarrierRepository(path);
+    await firstRepository.migrate();
+    const secondRepository = new BarrierRepository(path);
+    cleanups.push(async () => firstRepository.close());
+    cleanups.push(async () => secondRepository.close());
+    const firstExporter = new SwitchableMetricsExporter();
+    const secondExporter = new SwitchableMetricsExporter();
+    const buildService = (repository: SqliteRepository, exporter: SwitchableMetricsExporter) =>
+      new BackendService(
+        repository,
+        { put: async () => undefined, get: async () => '', delete: async () => undefined },
+        new LocalObjectStore(join(dir, 'objects')),
+        new MemoryCoordinationStore(),
+        new SwitchableTrafficDirector(new BuiltinTrafficDirector()),
+        exporter,
+        {
+          repositoryKind: 'sqlite',
+          secretKind: 'encrypted-file',
+          metrics: new PrometheusMetricsSink()
+        }
+      );
+    const firstService = buildService(firstRepository, firstExporter);
+    const secondService = buildService(secondRepository, secondExporter);
+    const webhook = {
+      category: 'metrics' as const,
+      kind: 'webhook' as const,
+      endpoint: 'https://127.0.0.1:9443/metrics'
+    };
+    const prometheus = { category: 'metrics' as const, kind: 'prometheus' as const };
+    const first = firstService.activate(webhook);
+    const second = secondService.activate(prometheus);
+    await arrivals.promise;
+    release.resolve();
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    const persisted = await firstRepository.getSetting('backend.metrics');
+    if (results[0]?.status === 'fulfilled') {
+      expect(persisted).toBe(JSON.stringify(webhook));
+      expect(firstExporter.kind).toBe('webhook');
+      expect(secondExporter.kind).toBe('prometheus');
+    } else {
+      expect(persisted).toBe(JSON.stringify(prometheus));
+      expect(firstExporter.kind).toBe('prometheus');
+      expect(secondExporter.kind).toBe('prometheus');
+    }
+    await firstService.close();
+    await secondService.close();
+  });
+
+  it('queues concurrent activations within one controller in request order', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ healthy: true, message: 'ready' }))
+    );
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-backend-queue-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let reads = 0;
+    let writes = 0;
+    class QueuedRepository extends SqliteRepository {
+      override async getVersionedSetting(key: string) {
+        if (key === 'backend.metrics') reads += 1;
+        return super.getVersionedSetting(key);
+      }
+
+      override async putSettingIfAbsent(key: string, value: string) {
+        if (key === 'backend.metrics' && writes++ === 0) {
+          entered.resolve();
+          await release.promise;
+        }
+        return super.putSettingIfAbsent(key, value);
+      }
+    }
+    const repository = new QueuedRepository(join(dir, 'state.sqlite3'));
+    await repository.migrate();
+    cleanups.push(async () => repository.close());
+    const exporter = new SwitchableMetricsExporter();
+    const service = new BackendService(
+      repository,
+      { put: async () => undefined, get: async () => '', delete: async () => undefined },
+      new LocalObjectStore(join(dir, 'objects')),
+      new MemoryCoordinationStore(),
+      new SwitchableTrafficDirector(new BuiltinTrafficDirector()),
+      exporter,
+      {
+        repositoryKind: 'sqlite',
+        secretKind: 'encrypted-file',
+        metrics: new PrometheusMetricsSink()
+      }
+    );
+    const first = service.activate({ category: 'metrics', kind: 'prometheus' });
+    const webhook = {
+      category: 'metrics' as const,
+      kind: 'webhook' as const,
+      endpoint: 'https://127.0.0.1:9443/metrics'
+    };
+    const second = service.activate(webhook);
+    await entered.promise;
+    await Promise.resolve();
+    expect(reads).toBe(1);
+    release.resolve();
+    await Promise.all([first, second]);
+
+    expect(await repository.getSetting('backend.metrics')).toBe(JSON.stringify(webhook));
+    expect(exporter.kind).toBe('webhook');
+    await service.close();
+  });
+
+  it('waits for queued activation before closing and rejects later activation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ healthy: true, message: 'ready' }))
+    );
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-backend-close-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    class BlockingRepository extends SqliteRepository {
+      override async putSettingIfAbsent(key: string, value: string) {
+        if (key === 'backend.metrics') {
+          entered.resolve();
+          await release.promise;
+        }
+        return super.putSettingIfAbsent(key, value);
+      }
+    }
+    const repository = new BlockingRepository(join(dir, 'state.sqlite3'));
+    await repository.migrate();
+    cleanups.push(async () => repository.close());
+    const exporter = new SwitchableMetricsExporter();
+    const service = new BackendService(
+      repository,
+      { put: async () => undefined, get: async () => '', delete: async () => undefined },
+      new LocalObjectStore(join(dir, 'objects')),
+      new MemoryCoordinationStore(),
+      new SwitchableTrafficDirector(new BuiltinTrafficDirector()),
+      exporter,
+      {
+        repositoryKind: 'sqlite',
+        secretKind: 'encrypted-file',
+        metrics: new PrometheusMetricsSink()
+      }
+    );
+    const activation = service.activate({
+      category: 'metrics',
+      kind: 'webhook',
+      endpoint: 'https://127.0.0.1:9443/metrics'
+    });
+    await entered.promise;
+
+    let closeSettled = false;
+    const closing = service.close().then(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+    expect(closeSettled).toBe(false);
+    await expect(service.activate({ category: 'metrics', kind: 'prometheus' })).rejects.toThrow(
+      'Backend service is closed'
+    );
+
+    release.resolve();
+    await activation;
+    await closing;
+    expect(closeSettled).toBe(true);
+    expect(exporter.kind).toBe('prometheus');
   });
 });

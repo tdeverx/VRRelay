@@ -14,6 +14,7 @@ interface AdminSession {
 
 export interface Principal {
   kind: 'admin_session' | 'personal_token';
+  id?: string;
   scopes: readonly Scope[];
   csrfToken?: string;
 }
@@ -30,7 +31,7 @@ export class AuthService {
   async initialize(password: string): Promise<void> {
     if (await this.repository.getSetting('admin.passwordHash'))
       throw new Error('Administrator is already configured');
-    await this.repository.putSetting(
+    const result = await this.repository.putSettingIfAbsent(
       'admin.passwordHash',
       await hash(password, {
         algorithm: 2,
@@ -39,6 +40,7 @@ export class AuthService {
         parallelism: 1
       })
     );
+    if (!result.inserted) throw new Error('Administrator is already configured');
   }
 
   async login(password: string): Promise<{ token: string; csrfToken: string; expiresAt: string }> {
@@ -66,6 +68,7 @@ export class AuthService {
       if (session && session.expiresAt > Date.now()) {
         const principal: Principal = {
           kind: 'admin_session',
+          id: 'local-admin',
           scopes: ['admin'],
           csrfToken: session.csrfToken
         };
@@ -75,16 +78,19 @@ export class AuthService {
     }
     const authorization = request.headers.authorization;
     if (authorization?.startsWith('Bearer ')) {
-      const record = await this.repository.getPersonalToken(hashToken(authorization.slice(7)));
-      if (
-        record &&
-        !record.revokedAt &&
-        (!record.expiresAt || Date.parse(record.expiresAt) > Date.now())
-      ) {
-        const now = new Date().toISOString();
-        if (!record.lastUsedAt || Date.now() - Date.parse(record.lastUsedAt) >= 60_000)
-          await this.repository.putPersonalToken({ ...record, lastUsedAt: now });
-        const principal: Principal = { kind: 'personal_token', scopes: record.scopes };
+      const usedAtMilliseconds = Date.now();
+      const usedAt = new Date(usedAtMilliseconds).toISOString();
+      const record = await this.repository.usePersonalToken({
+        tokenHash: hashToken(authorization.slice(7)),
+        usedAt,
+        touchBefore: new Date(usedAtMilliseconds - 60_000).toISOString()
+      });
+      if (record) {
+        const principal: Principal = {
+          kind: 'personal_token',
+          id: record.id,
+          scopes: record.scopes
+        };
         this.#assertScopes(principal, requiredScopes);
         return principal;
       }

@@ -13,8 +13,33 @@ export class SwitchableMetricsExporter {
     const previous = this.#delegate;
     if (previous === next) return;
     next?.start();
+    try {
+      await previous?.stop();
+    } catch (error) {
+      const rollbackErrors: unknown[] = [];
+      if (next) {
+        try {
+          await next.stop();
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (previous) {
+        try {
+          previous.start();
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (rollbackErrors.length)
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          'Metrics exporter activation failed and rollback was incomplete',
+          { cause: error }
+        );
+      throw error;
+    }
     this.#delegate = next;
-    await previous?.stop();
   }
 
   async health(): Promise<BackendStatus> {
@@ -30,7 +55,8 @@ export class SwitchableMetricsExporter {
 
   async stop(): Promise<void> {
     const current = this.#delegate;
-    this.#delegate = undefined;
-    await current?.stop();
+    if (!current) return;
+    await current.stop();
+    if (this.#delegate === current) this.#delegate = undefined;
   }
 }

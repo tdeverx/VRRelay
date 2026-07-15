@@ -338,6 +338,7 @@ export const ProviderBindingSchema = z.object({
   secretRef: z.string(),
   reachable: z.boolean(),
   state: z.enum(['pending', 'healthy', 'degraded', 'revoked']).default('pending'),
+  deletionPending: z.boolean().default(false),
   lastError: z.string().max(500).optional(),
   validatedAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
@@ -401,6 +402,45 @@ export const AgentLogEntrySchema = z.object({
   timestamp: z.iso.datetime()
 });
 export type AgentLogEntry = z.infer<typeof AgentLogEntrySchema>;
+
+export const AuditCategorySchema = z.enum([
+  'authentication',
+  'authorization',
+  'cluster',
+  'provider',
+  'backend',
+  'session',
+  'token',
+  'system'
+]);
+export type AuditCategory = z.infer<typeof AuditCategorySchema>;
+
+export const AuditActorSchema = z.object({
+  type: z.enum(['administrator', 'token', 'node', 'system']),
+  id: z.string().min(1).max(200).optional()
+});
+export type AuditActor = z.infer<typeof AuditActorSchema>;
+
+export const AuditTargetSchema = z.object({
+  type: z.string().min(1).max(100),
+  id: z.string().min(1).max(200).optional()
+});
+export type AuditTarget = z.infer<typeof AuditTargetSchema>;
+
+const AuditContextValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+export const AuditEventSchema = z.object({
+  id: z.string().min(1),
+  operationId: z.string().uuid(),
+  category: AuditCategorySchema,
+  action: z.string().min(1).max(160),
+  outcome: z.enum(['attempt', 'success', 'denied', 'failure']),
+  actor: AuditActorSchema,
+  target: AuditTargetSchema.optional(),
+  message: z.string().max(500).optional(),
+  context: z.record(z.string(), AuditContextValueSchema).default({}),
+  occurredAt: z.iso.datetime()
+});
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 export const AgentMessageKindSchema = z.enum([
   'hello',
@@ -518,5 +558,5 @@ export function publicProvider(provider: ProviderConnection): PublicProviderConn
 
 export function publicProviderBinding(binding: ProviderBinding): PublicProviderBinding {
   const { secretRef: _secretRef, ...safe } = binding;
-  return safe;
+  return { ...safe, deletionPending: binding.deletionPending === true };
 }

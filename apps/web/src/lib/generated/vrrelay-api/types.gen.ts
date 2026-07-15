@@ -454,6 +454,10 @@ export type ProviderBinding = {
     nodeId: string;
     reachable: boolean;
     state: 'pending' | 'healthy' | 'degraded' | 'revoked';
+    /**
+     * Credential cleanup has begun and the binding is ineligible for scheduling.
+     */
+    deletionPending: boolean;
     lastError?: string;
     validatedAt: string | null;
     createdAt: string;
@@ -1446,13 +1450,25 @@ export type DeleteProviderBindingData = {
     path: {
         bindingId: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Required to finalize cleanup when the bound node is already revoked and its local credential cannot be erased. Revoke or rotate the provider token before acknowledging.
+         */
+        acknowledgeOrphanedCredential?: boolean;
+    };
     url: '/provider-bindings/{bindingId}';
+};
+
+export type DeleteProviderBindingErrors = {
+    /**
+     * Worker cleanup is unavailable or orphaned credential acknowledgement is required
+     */
+    409: unknown;
 };
 
 export type DeleteProviderBindingResponses = {
     /**
-     * Binding and node-local credential removed
+     * Binding deletion finalized after worker-confirmed credential removal or an explicit administrator acknowledgement that cleanup on a revoked or missing node is unverifiable.
      */
     204: void;
 };

@@ -5,6 +5,7 @@ import type {
   ClusterNode,
   EdgeRoute,
   NodeCapability,
+  NodeCertificateState,
   NodeRole,
   PlacementPolicy,
   ProfileRevision,
@@ -12,6 +13,7 @@ import type {
 } from '@vrrelay/domain';
 import type {
   CertificateAuthority,
+  CertificateBundle,
   ClusterRepository,
   CoordinationStore,
   EventBus,
@@ -21,6 +23,7 @@ import { ConflictError, NotFoundError } from './errors.js';
 import { opaqueToken } from './services.js';
 
 const JOIN_PREFIX = 'cluster:join:';
+const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
 
 interface JoinClaim {
   name: string;
@@ -173,34 +176,47 @@ export class ClusterService {
       createdAt: now,
       updatedAt: now
     };
-    await this.repository.putNode(node);
+    const created = await this.repository.createNode(
+      node,
+      certificate ? this.#certificateState(id, certificate, now) : undefined
+    );
     this.events.publish({
       version: 1,
       id: randomUUID(),
       type: 'node.joined',
       timestamp: now,
-      payload: { nodeId: id, name: node.name, roles: node.roles }
+      payload: { nodeId: id, name: created.value.name, roles: created.value.roles }
     });
-    return { node, certificate };
+    return { node: created.value, certificate };
   }
 
   async rotateCertificate(id: string) {
-    const node = await this.repository.getNode(id);
-    if (!node || node.state === 'revoked')
+    const initial = await this.repository.getVersionedNode(id);
+    if (!initial || initial.value.state === 'revoked')
       throw new NotFoundError('Active cluster node was not found');
-    const rotatedAt = new Date().toISOString();
-    for (const previous of await this.repository.listNodeCertificates(id)) {
-      if (!previous.revokedAt)
-        await this.repository.putNodeCertificate({ ...previous, revokedAt: rotatedAt });
-    }
     const certificate = await this.#issueCertificate(id);
     if (!certificate) throw new ConflictError('Cluster certificate authority is not configured');
-    await this.repository.putNode({
-      ...node,
-      certificateExpiresAt: certificate.expiresAt,
-      updatedAt: new Date().toISOString()
-    });
-    return certificate;
+    const rotatedAt = new Date().toISOString();
+    const certificateState = this.#certificateState(id, certificate, rotatedAt);
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedNode(id);
+      if (!current || current.value.state === 'revoked')
+        throw new NotFoundError('Active cluster node was not found');
+      const result = await this.repository.rotateNodeCertificate({
+        nodeId: id,
+        expectedRevision: current.revision,
+        certificate: certificateState,
+        updatedAt: rotatedAt
+      });
+      if (result.applied) return certificate;
+      if (result.reason === 'not-found')
+        throw new NotFoundError('Active cluster node was not found');
+      if (result.reason === 'invalid-state')
+        throw new NotFoundError('Active cluster node was not found');
+    }
+    throw new ConflictError(
+      'Cluster certificate rotation conflicted with repeated concurrent updates'
+    );
   }
 
   async certificateAuthority(): Promise<string | undefined> {
@@ -208,15 +224,26 @@ export class ClusterService {
   }
 
   async revoke(id: string): Promise<ClusterNode> {
-    const node = await this.repository.getNode(id);
-    if (!node) throw new NotFoundError('Cluster node was not found');
     const now = new Date().toISOString();
-    for (const certificate of await this.repository.listNodeCertificates(id)) {
-      if (!certificate.revokedAt)
-        await this.repository.putNodeCertificate({ ...certificate, revokedAt: now });
+    let revoked: ClusterNode | undefined;
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedNode(id);
+      if (!current) throw new NotFoundError('Cluster node was not found');
+      const result = await this.repository.revokeNode({
+        nodeId: id,
+        expectedRevision: current.revision,
+        revokedAt: now
+      });
+      if (result.applied) {
+        revoked = result.record.value;
+        break;
+      }
+      if (result.reason === 'not-found') throw new NotFoundError('Cluster node was not found');
     }
-    const revoked: ClusterNode = { ...node, state: 'revoked', updatedAt: now };
-    await this.repository.putNode(revoked);
+    if (!revoked)
+      throw new ConflictError(
+        'Cluster node revocation conflicted with repeated concurrent updates'
+      );
     await this.coordination.publish(
       'cluster:revocations',
       JSON.stringify({ nodeId: id, revokedAt: now })
@@ -251,14 +278,59 @@ export class ClusterService {
     );
   }
 
-  async putBinding(binding: ProviderBinding): Promise<void> {
-    await this.repository.putProviderBinding(binding);
-  }
   async bindings(providerId?: string): Promise<ProviderBinding[]> {
-    return this.repository.listProviderBindings(providerId);
+    return this.repository.listProviderBindings(providerId, { includeDeletionPending: true });
   }
-  async removeBinding(id: string): Promise<void> {
-    await this.repository.deleteProviderBinding(id);
+
+  async beginBindingDeletion(id: string) {
+    const updatedAt = new Date().toISOString();
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      try {
+        const result = await this.repository.beginProviderBindingDeletion(id, updatedAt);
+        if (result.applied) return result.record;
+        if (result.reason === 'not-found') return undefined;
+        if (result.reason === 'invalid-state')
+          throw new ConflictError('Provider binding deletion is not allowed in its current state');
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError instanceof Error) throw lastError;
+    if (lastError !== undefined)
+      throw new Error('Provider binding deletion failed', { cause: lastError });
+    throw new ConflictError(
+      'Provider binding deletion conflicted with repeated concurrent updates'
+    );
+  }
+
+  async finalizeBindingDeletion(id: string, initialRevision: number): Promise<void> {
+    let expectedRevision = initialRevision;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      try {
+        const result = await this.repository.finalizeProviderBindingDeletion(id, expectedRevision);
+        if (result.applied || result.reason === 'not-found') return;
+        if (result.reason === 'invalid-state')
+          throw new ConflictError('Provider binding deletion is not pending');
+      } catch (error) {
+        lastError = error;
+      }
+      try {
+        const pending = await this.beginBindingDeletion(id);
+        if (!pending) return;
+        expectedRevision = pending.revision;
+        lastError = undefined;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError instanceof Error) throw lastError;
+    if (lastError !== undefined)
+      throw new Error('Provider binding deletion failed', { cause: lastError });
+    throw new ConflictError(
+      'Provider binding deletion conflicted with repeated concurrent updates'
+    );
   }
   async logs(nodeId: string, limit = 200): Promise<AgentLogEntry[]> {
     return this.repository.listAgentLogs(nodeId, limit);
@@ -270,16 +342,14 @@ export class ClusterService {
   async registerLocal(
     input: Omit<ClusterNode, 'createdAt' | 'updatedAt' | 'lastHeartbeatAt'>
   ): Promise<ClusterNode> {
-    const existing = await this.repository.getNode(input.id);
     const now = new Date().toISOString();
     const node: ClusterNode = {
       ...input,
-      createdAt: existing?.createdAt ?? now,
+      createdAt: now,
       lastHeartbeatAt: now,
       updatedAt: now
     };
-    await this.repository.putNode(node);
-    return node;
+    return (await this.repository.ensureLocalNode(node)).value;
   }
 
   async heartbeat(
@@ -287,23 +357,47 @@ export class ClusterService {
     capabilities: NodeCapability,
     state: 'online' | 'degraded' | 'draining'
   ): Promise<ClusterNode> {
-    const node = await this.repository.getNode(id);
-    if (!node) throw new NotFoundError('Cluster node was not found');
-    const now = new Date().toISOString();
-    const updated = { ...node, state, capabilities, lastHeartbeatAt: now, updatedAt: now };
-    await this.repository.putNode(updated);
-    return updated;
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedNode(id);
+      if (!current) throw new NotFoundError('Cluster node was not found');
+      if (current.value.state === 'revoked') return current.value;
+      const now = new Date().toISOString();
+      const result = await this.repository.recordNodeHeartbeat({
+        nodeId: id,
+        expectedRevision: current.revision,
+        capabilities,
+        reportedState: state,
+        lastHeartbeatAt: now,
+        updatedAt: now
+      });
+      if (result.applied) return result.record.value;
+      if (result.reason === 'not-found') throw new NotFoundError('Cluster node was not found');
+      if (result.reason === 'invalid-state') return result.current?.value ?? current.value;
+    }
+    throw new ConflictError('Cluster node heartbeat conflicted with repeated concurrent updates');
   }
 
   async drain(id: string, draining: boolean): Promise<ClusterNode> {
-    const node = await this.repository.getNode(id);
-    if (!node) throw new NotFoundError('Cluster node was not found');
-    const updated: ClusterNode = {
-      ...node,
-      state: draining ? 'draining' : 'online',
-      updatedAt: new Date().toISOString()
-    };
-    await this.repository.putNode(updated);
+    let updated: ClusterNode | undefined;
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedNode(id);
+      if (!current) throw new NotFoundError('Cluster node was not found');
+      const result = await this.repository.setNodeDrain({
+        nodeId: id,
+        expectedRevision: current.revision,
+        draining,
+        updatedAt: new Date().toISOString()
+      });
+      if (result.applied) {
+        updated = result.record.value;
+        break;
+      }
+      if (result.reason === 'not-found') throw new NotFoundError('Cluster node was not found');
+      if (result.reason === 'invalid-state')
+        throw new ConflictError('A revoked cluster node cannot change drain state');
+    }
+    if (!updated)
+      throw new ConflictError('Cluster node drain conflicted with repeated concurrent updates');
     this.events.publish({
       version: 1,
       id: randomUUID(),
@@ -315,7 +409,20 @@ export class ClusterService {
   }
 
   async remove(id: string): Promise<void> {
-    await this.repository.deleteNode(id);
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedNode(id);
+      if (!current) throw new NotFoundError('Cluster node was not found');
+      if (current.value.state !== 'revoked')
+        throw new ConflictError('Revoke the cluster node before removing it');
+      const result = await this.repository.removeNode(id, current.revision);
+      if (result.applied) return;
+      if (result.reason === 'not-found') throw new NotFoundError('Cluster node was not found');
+      if (result.reason === 'invalid-state')
+        throw new ConflictError('Revoke the cluster node before removing it');
+      if (result.reason === 'dependency-conflict')
+        throw new ConflictError('Delete every provider binding for this node before removing it');
+    }
+    throw new ConflictError('Cluster node removal conflicted with repeated concurrent updates');
   }
 
   async list(): Promise<ClusterNode[]> {
@@ -329,22 +436,29 @@ export class ClusterService {
           Date.parse(node.lastHeartbeatAt) < staleBefore &&
           node.state !== 'offline'
         ) {
-          const offline: ClusterNode = {
-            ...node,
-            state: 'offline',
-            updatedAt: new Date().toISOString()
-          };
-          await this.repository.putNode(offline);
-          return offline;
+          return (
+            (await this.#setOperationalState(
+              (id) =>
+                id.state !== 'revoked' &&
+                id.state !== 'draining' &&
+                id.state !== 'offline' &&
+                Date.parse(id.lastHeartbeatAt) < staleBefore
+                  ? 'offline'
+                  : undefined,
+              node.id
+            )) ?? node
+          );
         }
         if (node.state === 'online' && Date.parse(node.lastHeartbeatAt) < degradedBefore) {
-          const degraded: ClusterNode = {
-            ...node,
-            state: 'degraded',
-            updatedAt: new Date().toISOString()
-          };
-          await this.repository.putNode(degraded);
-          return degraded;
+          return (
+            (await this.#setOperationalState(
+              (id) =>
+                id.state === 'online' && Date.parse(id.lastHeartbeatAt) < degradedBefore
+                  ? 'degraded'
+                  : undefined,
+              node.id
+            )) ?? node
+          );
         }
         return node;
       })
@@ -413,17 +527,45 @@ export class ClusterService {
     return createHash('sha256').update(value).digest('hex');
   }
 
+  async #setOperationalState(
+    selectState: (node: ClusterNode) => 'online' | 'degraded' | 'offline' | undefined,
+    nodeId: string
+  ): Promise<ClusterNode | undefined> {
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedNode(nodeId);
+      if (!current) return undefined;
+      const state = selectState(current.value);
+      if (!state) return current.value;
+      const result = await this.repository.setNodeOperationalState({
+        nodeId,
+        expectedRevision: current.revision,
+        state,
+        updatedAt: new Date().toISOString()
+      });
+      if (result.applied) return result.record.value;
+      if (result.reason === 'not-found') return undefined;
+      if (result.reason === 'invalid-state') return result.current?.value ?? current.value;
+    }
+    throw new ConflictError('Cluster node maintenance conflicted with repeated concurrent updates');
+  }
+
   async #issueCertificate(nodeId: string) {
     if (!this.certificates) return undefined;
-    const certificate = await this.certificates.issue(`node:${nodeId}`, 7 * 24 * 60 * 60_000);
-    await this.repository.putNodeCertificate({
+    return this.certificates.issue(`node:${nodeId}`, 7 * 24 * 60 * 60_000);
+  }
+
+  #certificateState(
+    nodeId: string,
+    certificate: CertificateBundle,
+    createdAt: string
+  ): NodeCertificateState {
+    return {
       nodeId,
       serialNumber: certificate.serialNumber,
       fingerprintSha256: certificate.fingerprintSha256,
       expiresAt: certificate.expiresAt,
       revokedAt: null,
-      createdAt: new Date().toISOString()
-    });
-    return certificate;
+      createdAt
+    };
   }
 }

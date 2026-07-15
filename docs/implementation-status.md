@@ -35,25 +35,74 @@ These bullets inventory code and assets; they do not assert that every exposed
 setting, failure mode, deployment topology, or administrator workflow is
 complete.
 
+## Phase 2 implementation and evidence
+
+Phase 2 is complete. Its targeted SQLite/PostgreSQL evidence and full
+pinned-runtime repository gate are green.
+
+- Controller, source-worker, ingest-origin, edge, and standalone now dispatch
+  through distinct composition roots with explicit dependency graphs,
+  role-owned HTTP surfaces, schema-startup policy, and ordered shutdown tests.
+- SQLite and PostgreSQL migrations now have immutable version/name/SHA-256
+  metadata through v6. V4 adds live-channel revisions, v5 adds provider
+  revisions/deletion state, and v6 adds crash-safe binding deletion. Startup
+  validates exact columns, storage types, JSON/JSONB and timestamp shape,
+  nullability, runtime-critical defaults, boolean checks, keys, unique
+  constraints, and named indexes rather than trusting the migration number.
+- Session, node, job, binding, setting, live-channel, and provider states now have
+  insert/CAS primitives. Transactional guards keep live-session creation atomic
+  with channel existence, VOD creation atomic with provider lifecycle, channel
+  deletion atomic with publisher/session checks, and node removal restricted to
+  revoked nodes without bindings.
+- Provider binding setup stages a unique node-local token reference, atomically
+  locks the expected provider and usable source-worker node, reconciles
+  concurrent or replayed binding creation, deletes only a confirmed losing
+  secret, and retains an ambiguous staged secret for later repair rather than
+  risking a committed credential. Binding removal and provider removal are
+  resumable mark/secret-delete/finalize flows protected from stale writes and
+  new dependencies. Revoked-node orphan cleanup requires explicit administrator
+  acknowledgement instead of silently claiming the node-local credential was
+  removed.
+- Administrative mutations write a redacted, correlated audit attempt before
+  mutation and append a terminal result afterward. File-backed encrypted secret
+  mutation uses per-path in-process serialization, restrictive permissions,
+  synced unique temporary files, atomic rename, and parent-directory sync.
+- Session CAS preserves immutable media/profile identity, and duplicate
+  certificate serials fail consistently in SQLite and PostgreSQL.
+- The final real PostgreSQL 17 matrix passed 49 of 49 tests, including
+  two-connection CAS and transaction races. The complete pinned-runtime CI gate
+  passed 235 tests with 23 intentional skips and no failures; format, generated
+  client freshness, all typechecks, Svelte diagnostics, lint, builds,
+  repository checks, and the zero-vulnerability npm audit also passed. See
+  [Phase 2 evidence](evidence/phase-02.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
   and test-source typechecks, generated-client freshness, unit tests, builds,
   and the npm dependency audit pass under the pinned Node runtime. This is a
   baseline gate, not evidence for the unreached feature and deployment phases.
-- Runtime composition still mixes roles, persistence uses broad document
-  updates and non-immutable migration behavior, and distributed cancellation,
-  recovery, placement, and credential boundaries require further work.
-- Node enrollment currently needs security redesign around local private-key
-  generation, certificate rotation, durable drain, typed protocol messages,
-  transport enforcement, and role-specific exposure.
+- A real PostgreSQL `pg_dump`/restore drill has not yet been retained; unit-tested
+  backup invocation is not a substitute for the Phase 9–11 recovery and
+  deployment evidence.
+- Node enrollment and transport still need Phase 3 hardening around node-local
+  private-key generation, certificate lifecycle/revocation propagation, typed
+  protocol messages, replay/rate enforcement, and public-WSS plus overlay-WSS
+  acceptance evidence. The underlying drain/revocation persistence and
+  role-specific runtime exposure are now Phase 2 foundations, not remaining
+  broad-write/composition gaps.
+- Distributed cancellation, restart recovery, placement, provider failover,
+  and node-secret transport still require their Phase 3/4 end-to-end gates even
+  though the underlying persistence transitions are now atomic.
 - Several media-profile fields and experimental delivery modes are incomplete
   or schema-only. Hardware pipelines, subtitles, tone mapping, passthrough,
   fMP4 concurrency, dual PC/Quest outputs, and corrupt-input handling lack the
   required matrix evidence.
 - Edge grants/revocation, viewer aggregation, targeted cache administration,
-  backend activation, live backup/replacement behavior, origin recovery, and
-  one-pull-per-edge guarantees are incomplete.
+  live backup/replacement behavior, origin recovery, and one-pull-per-edge
+  guarantees are incomplete. Backend configuration does not yet track
+  per-node applied acknowledgement; that belongs to Phase 6 and must not be
+  inferred from the current controller-level activation record.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

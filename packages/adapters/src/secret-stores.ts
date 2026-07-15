@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { execFile, spawn } from 'node:child_process';
 import type { Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import type { SecretStore } from '@vrrelay/application';
+import { publishFileAtomically, withFileMutation } from './file-secret-storage.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -96,9 +96,11 @@ export class EncryptedFileSecretStore implements SecretStore {
   }
 
   async put(ref: string, value: string): Promise<void> {
-    const values = await this.#read();
-    values[ref] = this.#encrypt(value);
-    await this.#write(values);
+    await withFileMutation(this.#path, async () => {
+      const values = await this.#read();
+      values[ref] = this.#encrypt(value);
+      await this.#write(values);
+    });
   }
 
   async get(ref: string): Promise<string> {
@@ -108,9 +110,11 @@ export class EncryptedFileSecretStore implements SecretStore {
   }
 
   async delete(ref: string): Promise<void> {
-    const values = await this.#read();
-    delete values[ref];
-    await this.#write(values);
+    await withFileMutation(this.#path, async () => {
+      const values = await this.#read();
+      delete values[ref];
+      await this.#write(values);
+    });
   }
 
   #encrypt(value: string): EncryptedValue {
@@ -143,11 +147,10 @@ export class EncryptedFileSecretStore implements SecretStore {
   }
 
   async #write(values: Record<string, EncryptedValue>): Promise<void> {
-    await mkdir(dirname(this.#path), { recursive: true, mode: 0o700 });
-    const temporary = `${this.#path}.${process.pid}.tmp`;
-    await writeFile(temporary, JSON.stringify(values, null, 2), { mode: 0o600 });
-    await rename(temporary, this.#path);
-    await chmod(this.#path, 0o600);
+    await publishFileAtomically(this.#path, JSON.stringify(values, null, 2), {
+      directoryMode: 0o700,
+      fileMode: 0o600
+    });
   }
 }
 
@@ -202,9 +205,11 @@ export class WindowsDpapiSecretStore implements SecretStore {
   constructor(private readonly path: string) {}
 
   async put(ref: string, value: string): Promise<void> {
-    const values = await this.#read();
-    values[ref] = await this.#protect(value);
-    await this.#write(values);
+    await withFileMutation(this.path, async () => {
+      const values = await this.#read();
+      values[ref] = await this.#protect(value);
+      await this.#write(values);
+    });
   }
 
   async get(ref: string): Promise<string> {
@@ -214,9 +219,11 @@ export class WindowsDpapiSecretStore implements SecretStore {
   }
 
   async delete(ref: string): Promise<void> {
-    const values = await this.#read();
-    delete values[ref];
-    await this.#write(values);
+    await withFileMutation(this.path, async () => {
+      const values = await this.#read();
+      delete values[ref];
+      await this.#write(values);
+    });
   }
 
   async #protect(value: string): Promise<string> {
@@ -249,16 +256,17 @@ export class WindowsDpapiSecretStore implements SecretStore {
   }
 
   async #write(values: Record<string, string>): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const temporary = `${this.path}.${process.pid}.tmp`;
-    await writeFile(temporary, JSON.stringify(values, null, 2));
-    await rename(temporary, this.path);
-    await execFileAsync('icacls.exe', [
-      this.path,
-      '/inheritance:r',
-      '/grant:r',
-      '*S-1-5-18:F',
-      '*S-1-5-32-544:F'
-    ]);
+    const secure = (path: string) =>
+      execFileAsync('icacls.exe', [
+        path,
+        '/inheritance:r',
+        '/grant:r',
+        '*S-1-5-18:F',
+        '*S-1-5-32-544:F'
+      ]).then(() => undefined);
+    await publishFileAtomically(this.path, JSON.stringify(values, null, 2), {
+      secureTemporary: secure,
+      secureDestination: secure
+    });
   }
 }

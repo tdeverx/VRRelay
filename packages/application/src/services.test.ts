@@ -6,10 +6,12 @@ import {
   DefaultProviderRegistry,
   InMemoryEventBus,
   type MediaProvider,
+  type SecretStore,
   type SegmentRequest,
   type Transcoder
 } from './index.js';
 import { MemorySecretStore, PrometheusMetricsSink, SqliteRepository } from '@vrrelay/adapters';
+import type { ClusterNode } from '@vrrelay/domain';
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
 const dirs: string[] = [];
@@ -43,14 +45,257 @@ const provider: MediaProvider = {
   reportPlayback: async () => {}
 };
 
+class TrackingSecretStore implements SecretStore {
+  readonly values = new Map<string, string>();
+  readonly deleted: string[] = [];
+
+  async put(ref: string, value: string): Promise<void> {
+    this.values.set(ref, value);
+  }
+
+  async get(ref: string): Promise<string> {
+    const value = this.values.get(ref);
+    if (value === undefined) throw new Error('Secret not found');
+    return value;
+  }
+
+  async delete(ref: string): Promise<void> {
+    this.deleted.push(ref);
+    this.values.delete(ref);
+  }
+
+  refs(): string[] {
+    return [...this.values.keys()];
+  }
+}
+
+function providerBindingRegistry(): DefaultProviderRegistry {
+  const registry = new DefaultProviderRegistry();
+  registry.register({
+    ...provider,
+    authenticate: async (_baseUrl, credentials) => ({
+      accessToken: `token-${credentials.username ?? credentials.apiKey ?? 'unknown'}`,
+      userId: 'fixture-user',
+      username: credentials.username ?? 'fixture-user',
+      serverName: 'Fixture',
+      serverVersion: '1.0.0'
+    })
+  });
+  return registry;
+}
+
+function providerBindingInput(username: string) {
+  return {
+    type: 'jellyfin' as const,
+    name: 'Fixture',
+    baseUrl: 'https://fixture.invalid',
+    normalizedBaseUrl: 'https://fixture.invalid',
+    authMode: 'user_token' as const,
+    username,
+    password: 'fixture-password',
+    allowPublicHttp: false
+  };
+}
+
+function sourceWorkerNode(id: string): ClusterNode {
+  const now = new Date().toISOString();
+  return {
+    id,
+    name: id,
+    roles: ['source-worker'],
+    region: 'local',
+    publicUrl: `https://${id}.invalid`,
+    state: 'online' as const,
+    capabilities: {
+      encoders: ['libx264'],
+      hardwareDevices: [],
+      maxWorkers: 2,
+      activeWorkers: 0,
+      queuedWorkers: 0,
+      cacheBytes: 0,
+      cacheLimitBytes: null,
+      egressMbps: 0,
+      providerIds: []
+    },
+    weight: 100,
+    lastHeartbeatAt: now,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+class SessionConflictRepository extends SqliteRepository {
+  #viewersBeforeNextSessionUpdate: number | undefined;
+  #stopBeforeNextViewerUpdate = false;
+  #viewerSaltFailures = 0;
+
+  injectViewersBeforeNextSessionUpdate(viewers: number): void {
+    this.#viewersBeforeNextSessionUpdate = viewers;
+  }
+
+  injectStopBeforeNextViewerUpdate(): void {
+    this.#stopBeforeNextViewerUpdate = true;
+  }
+
+  injectViewerSaltFailure(): void {
+    this.#viewerSaltFailures += 1;
+  }
+
+  override async getSetting(key: string): Promise<string | undefined> {
+    if (key === 'metrics.viewer_salt' && this.#viewerSaltFailures > 0) {
+      this.#viewerSaltFailures -= 1;
+      throw new Error('simulated viewer salt outage');
+    }
+    return super.getSetting(key);
+  }
+
+  override async compareAndSetSession(
+    session: Parameters<SqliteRepository['compareAndSetSession']>[0],
+    expectedRevision: number
+  ) {
+    const viewers = this.#viewersBeforeNextSessionUpdate;
+    if (viewers !== undefined) {
+      this.#viewersBeforeNextSessionUpdate = undefined;
+      const current = (await this.getVersionedSession(session.id))!;
+      await super.setSessionViewers(
+        session.id,
+        current.revision,
+        viewers,
+        new Date().toISOString()
+      );
+      return {
+        applied: false as const,
+        reason: 'revision-conflict' as const,
+        current: (await this.getVersionedSession(session.id))!
+      };
+    }
+    return super.compareAndSetSession(session, expectedRevision);
+  }
+
+  override async setSessionViewers(
+    sessionId: string,
+    expectedRevision: number,
+    viewers: number,
+    updatedAt: string
+  ) {
+    if (this.#stopBeforeNextViewerUpdate) {
+      this.#stopBeforeNextViewerUpdate = false;
+      const current = (await this.getVersionedSession(sessionId))!;
+      await super.compareAndSetSession(
+        { ...current.value, state: 'stopped', updatedAt: new Date().toISOString() },
+        current.revision
+      );
+      return {
+        applied: false as const,
+        reason: 'revision-conflict' as const,
+        current: (await this.getVersionedSession(sessionId))!
+      };
+    }
+    return super.setSessionViewers(sessionId, expectedRevision, viewers, updatedAt);
+  }
+}
+
 describe('VOD relay service', () => {
+  it.each([
+    ['not-found', 'Provider connection was not found'],
+    ['invalid-state', 'Provider connection is being deleted']
+  ] as const)(
+    'maps an atomic provider %s failure without mentioning live channels',
+    async (reason, expectedMessage) => {
+      class ProviderFailureRepository extends SqliteRepository {
+        override async createSessionWithPlaybackGrant(
+          session: Parameters<SqliteRepository['createSessionWithPlaybackGrant']>[0],
+          grant: Parameters<SqliteRepository['createSessionWithPlaybackGrant']>[1],
+          expectedLiveChannelRevision?: number
+        ) {
+          if (session.kind === 'vod') return { applied: false as const, reason };
+          return super.createSessionWithPlaybackGrant(session, grant, expectedLiveChannelRevision);
+        }
+      }
+
+      const dir = await mkdtemp(join(tmpdir(), `vrrelay-vod-provider-${reason}-`));
+      dirs.push(dir);
+      const repo = new ProviderFailureRepository(join(dir, 'db.sqlite'));
+      await repo.migrate();
+      const now = new Date().toISOString();
+      await repo.createProvider({
+        id: 'provider-atomic-failure',
+        type: 'jellyfin',
+        name: 'Fixture provider',
+        baseUrl: 'https://media.invalid',
+        authMode: 'user_token',
+        secretRef: 'provider:atomic-failure',
+        capabilities: ['search', 'direct_source'],
+        healthy: true,
+        createdAt: now,
+        updatedAt: now
+      });
+      await new ProfileService(repo).seed({
+        ffmpegVersion: 'test',
+        encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
+        muxers: ['mpegts'],
+        filters: [],
+        pixelFormats: ['yuv420p']
+      });
+      const secrets = new MemorySecretStore();
+      await secrets.put('provider:atomic-failure', 'access-token');
+      const registry = new DefaultProviderRegistry();
+      registry.register(provider);
+      const service = new SessionService(
+        repo,
+        secrets,
+        registry,
+        {
+          discover: async () => ({
+            ffmpegVersion: 'test',
+            encoders: [],
+            muxers: [],
+            filters: [],
+            pixelFormats: []
+          }),
+          generateSegment: async () => {},
+          streamFragmentedMp4: async () => {}
+        },
+        new InMemoryEventBus(),
+        {
+          publicUrl: 'https://relay.example',
+          internalUrl: 'http://127.0.0.1:8099',
+          cacheDir: join(dir, 'cache'),
+          cacheTtlMs: 1_000,
+          maxWorkers: 1
+        }
+      );
+
+      let failure: unknown;
+      try {
+        await service.create({
+          kind: 'vod',
+          source: { providerId: 'provider-atomic-failure', itemId: 'movie' },
+          profileId: 'universal-h264-hls-vod',
+          profileRevision: 1,
+          platformMode: 'universal',
+          pinned: false,
+          reportActivity: false,
+          placementPolicy: 'local',
+          placementLocked: false,
+          playbackTtlSeconds: null
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe(expectedMessage);
+      expect((failure as Error).message).not.toMatch(/live channel/i);
+    }
+  );
+
   it('publishes a finite manifest and coalesces identical segment work', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = new SessionConflictRepository(join(dir, 'db.sqlite'));
     await repo.migrate();
     const now = new Date().toISOString();
-    await repo.putProvider({
+    await repo.createProvider({
       id: 'p1',
       type: 'jellyfin',
       name: 'Fixture',
@@ -67,6 +312,20 @@ describe('VOD relay service', () => {
     const registry = new DefaultProviderRegistry();
     registry.register(provider);
     let generated = 0;
+    let blockedIndex: number | undefined;
+    let blockedFailure = false;
+    let blockedStarted = Promise.withResolvers<void>();
+    let blockedRelease = Promise.withResolvers<void>();
+    const blockSegment = (index: number, fail: boolean) => {
+      blockedIndex = index;
+      blockedFailure = fail;
+      blockedStarted = Promise.withResolvers<void>();
+      blockedRelease = Promise.withResolvers<void>();
+      return {
+        started: blockedStarted.promise,
+        release: () => blockedRelease.resolve()
+      };
+    };
     const transcoder: Transcoder = {
       discover: async () => ({
         ffmpegVersion: 'test',
@@ -79,6 +338,12 @@ describe('VOD relay service', () => {
         generated++;
         expect(request.source.url).toMatch(/^http:\/\/127\.0\.0\.1:8099\/internal\/source\//);
         expect(request.source.headers).toEqual({});
+        if (request.segmentIndex === blockedIndex) {
+          blockedStarted.resolve();
+          await blockedRelease.promise;
+          blockedIndex = undefined;
+          if (blockedFailure) throw new Error('Simulated late worker failure');
+        }
         await new Promise((r) => setTimeout(r, 20));
         await mkdir(dirname(destination), { recursive: true });
         await writeFile(destination, 'segment');
@@ -137,18 +402,25 @@ describe('VOD relay service', () => {
       workerHistory: [{ state: 'complete', nodeId: 'standalone' }]
     });
     const failedAt = new Date().toISOString();
-    await repo.putSegmentJob({
-      ...completedJob!,
-      state: 'failed',
-      errorMessage: 'Simulated operator retry',
-      workerHistory: completedJob!.workerHistory.map((attempt) => ({
-        ...attempt,
-        state: 'failed' as const,
-        completedAt: failedAt,
-        errorMessage: 'Simulated operator retry'
-      })),
-      updatedAt: failedAt
-    });
+    const completedRecord = (await repo.getVersionedSegmentJob(completedJob!.id))!;
+    await expect(
+      repo.compareAndSetSegmentJob(
+        {
+          ...completedJob!,
+          state: 'failed',
+          errorMessage: 'Simulated operator retry',
+          workerHistory: completedJob!.workerHistory.map((attempt) => ({
+            ...attempt,
+            state: 'failed' as const,
+            completedAt: failedAt,
+            errorMessage: 'Simulated operator retry'
+          })),
+          updatedAt: failedAt
+        },
+        completedRecord.revision,
+        ['complete']
+      )
+    ).resolves.toMatchObject({ applied: true });
     const retried = await service.retryJob(completedJob!.id);
     expect(retried.state).toBe('complete');
     expect(retried.workerHistory.map((attempt) => attempt.state)).toEqual(['failed', 'complete']);
@@ -164,6 +436,39 @@ describe('VOD relay service', () => {
     const renderedMetrics = await metrics.render();
     expect(renderedMetrics).toContain('vrrelay_egress_bytes_total');
     expect(renderedMetrics).toContain('vrrelay_egress_bytes_total{session="unattributed"} 20');
+
+    repo.injectViewersBeforeNextSessionUpdate(7);
+    await expect(service.control(session.id, { pinned: true })).resolves.toMatchObject({
+      pinned: true,
+      viewers: 7
+    });
+    repo.injectViewerSaltFailure();
+    await expect(service.touchViewer(token, 'viewer-a')).rejects.toThrow(
+      'simulated viewer salt outage'
+    );
+    repo.injectStopBeforeNextViewerUpdate();
+    await service.touchViewer(token, 'viewer-a');
+    await expect(repo.getSession(session.id)).resolves.toMatchObject({
+      pinned: true,
+      state: 'stopped',
+      viewers: 1
+    });
+
+    for (const [index, fail] of [
+      [1, false],
+      [2, true]
+    ] as const) {
+      const gate = blockSegment(index, fail);
+      const lateResult = service.segment(token, index);
+      await gate.started;
+      const job = (await service.listJobs()).find((candidate) => candidate.segmentIndex === index);
+      expect(job?.state).toBe('running');
+      await service.cancelJob(job!.id);
+      gate.release();
+      await expect(lateResult).rejects.toThrow(/cancelled/i);
+      await expect(repo.getSegmentJob(job!.id)).resolves.toMatchObject({ state: 'cancelled' });
+    }
+    await expect(repo.getSession(session.id)).resolves.toMatchObject({ state: 'stopped' });
   });
 });
 
@@ -174,7 +479,7 @@ describe('provider lifecycle', () => {
     const repo = new SqliteRepository(join(dir, 'db.sqlite'));
     await repo.migrate();
     const now = new Date().toISOString();
-    await repo.putProvider({
+    await repo.createProvider({
       id: 'provider-delete',
       type: 'jellyfin',
       name: 'Disposable provider',
@@ -186,7 +491,7 @@ describe('provider lifecycle', () => {
       createdAt: now,
       updatedAt: now
     });
-    await repo.putSession({
+    const dependentSession = {
       id: 'dependent-session',
       name: 'Dependent session',
       kind: 'vod',
@@ -204,20 +509,181 @@ describe('provider lifecycle', () => {
       outputUrls: { primary: 'https://relay.invalid/play/token/index.m3u8' },
       createdAt: now,
       updatedAt: now
+    } as const;
+    await repo.createSessionWithPlaybackGrant(dependentSession, {
+      tokenHash: 'dependent-session-grant',
+      sessionId: dependentSession.id,
+      expiresAt: null,
+      revokedAt: null,
+      createdAt: now
     });
     const secrets = new MemorySecretStore();
     await secrets.put('provider:delete', 'access-token');
     const service = new ProviderService(repo, secrets, new DefaultProviderRegistry());
 
     await expect(service.delete('provider-delete')).rejects.toThrow(
-      'Delete relay sessions that use this provider first'
+      'Delete every session and node binding for this provider first'
     );
     expect(await secrets.get('provider:delete')).toBe('access-token');
 
-    await repo.deleteSession('dependent-session');
+    await repo.deleteSessionAndRevokePlaybackGrants('dependent-session', new Date().toISOString());
     await service.delete('provider-delete');
     expect(await repo.getProvider('provider-delete')).toBeUndefined();
     await expect(secrets.get('provider:delete')).rejects.toThrow('Secret not found');
+    await expect(service.delete('provider-delete')).resolves.toBeUndefined();
+  });
+
+  it('resumes a deletion after transient secret-store failure', async () => {
+    class FailOnceSecretStore extends TrackingSecretStore {
+      #fail = true;
+
+      override async delete(ref: string): Promise<void> {
+        if (this.#fail) {
+          this.#fail = false;
+          throw new Error('simulated secret backend outage');
+        }
+        await super.delete(ref);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-secret-retry-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'provider-secret-retry',
+      type: 'jellyfin',
+      name: 'Retry provider',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'provider:secret-retry',
+      capabilities: ['search'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new FailOnceSecretStore();
+    await secrets.put('provider:secret-retry', 'access-token');
+    const service = new ProviderService(repo, secrets, new DefaultProviderRegistry());
+
+    await expect(service.delete('provider-secret-retry')).rejects.toThrow(
+      'simulated secret backend outage'
+    );
+    await expect(secrets.get('provider:secret-retry')).resolves.toBe('access-token');
+    await expect(service.delete('provider-secret-retry')).resolves.toBeUndefined();
+    await expect(repo.getProvider('provider-secret-retry')).resolves.toBeUndefined();
+    await expect(secrets.get('provider:secret-retry')).rejects.toThrow('Secret not found');
+  });
+
+  it.each(['before', 'after'] as const)(
+    'reconciles a finalize acknowledgement lost %s commit',
+    async (failurePoint) => {
+      class AmbiguousFinalizeRepository extends SqliteRepository {
+        #throwOnce = true;
+
+        override async finalizeProviderDeletion(
+          ...args: Parameters<SqliteRepository['finalizeProviderDeletion']>
+        ) {
+          if (this.#throwOnce && failurePoint === 'before') {
+            this.#throwOnce = false;
+            throw new Error('simulated finalize failure before commit');
+          }
+          const result = await super.finalizeProviderDeletion(...args);
+          if (this.#throwOnce && failurePoint === 'after') {
+            this.#throwOnce = false;
+            throw new Error('simulated finalize failure after commit');
+          }
+          return result;
+        }
+      }
+
+      const dir = await mkdtemp(join(tmpdir(), `vrrelay-provider-finalize-${failurePoint}-`));
+      dirs.push(dir);
+      const repo = new AmbiguousFinalizeRepository(join(dir, 'db.sqlite'));
+      await repo.migrate();
+      const now = new Date().toISOString();
+      await repo.createProvider({
+        id: `provider-finalize-${failurePoint}`,
+        type: 'jellyfin',
+        name: 'Finalize provider',
+        baseUrl: 'https://media.invalid',
+        authMode: 'user_token',
+        secretRef: `provider:finalize-${failurePoint}`,
+        capabilities: ['search'],
+        healthy: true,
+        createdAt: now,
+        updatedAt: now
+      });
+      const secrets = new TrackingSecretStore();
+      await secrets.put(`provider:finalize-${failurePoint}`, 'access-token');
+      const service = new ProviderService(repo, secrets, new DefaultProviderRegistry());
+
+      await expect(service.delete(`provider-finalize-${failurePoint}`)).resolves.toBeUndefined();
+      await expect(repo.getProvider(`provider-finalize-${failurePoint}`)).resolves.toBeUndefined();
+      expect(secrets.refs()).toEqual([]);
+    }
+  );
+
+  it('retries validation CAS conflicts without overwriting concurrent metadata', async () => {
+    class ValidationConflictRepository extends SqliteRepository {
+      attempts = 0;
+
+      override async compareAndSetProvider(
+        value: Parameters<SqliteRepository['compareAndSetProvider']>[0],
+        expectedRevision: number
+      ) {
+        this.attempts += 1;
+        if (this.attempts === 1) {
+          const current = (await this.getVersionedProvider(value.id))!;
+          const concurrent = await super.compareAndSetProvider(
+            {
+              ...current.value,
+              name: 'Concurrent provider name',
+              updatedAt: new Date().toISOString()
+            },
+            current.revision
+          );
+          if (!concurrent.applied) throw new Error('Failed to inject provider CAS conflict');
+          return {
+            applied: false as const,
+            reason: 'revision-conflict' as const,
+            current: concurrent.record
+          };
+        }
+        return super.compareAndSetProvider(value, expectedRevision);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-validation-cas-'));
+    dirs.push(dir);
+    const repo = new ValidationConflictRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'provider-validation-cas',
+      type: 'jellyfin',
+      name: 'Original provider name',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'provider:validation-cas',
+      capabilities: ['search'],
+      healthy: false,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new TrackingSecretStore();
+    await secrets.put('provider:validation-cas', 'access-token');
+    const registry = new DefaultProviderRegistry();
+    registry.register(provider);
+    const service = new ProviderService(repo, secrets, registry);
+
+    await service.validate('provider-validation-cas');
+    expect(repo.attempts).toBe(2);
+    await expect(repo.getProvider('provider-validation-cas')).resolves.toMatchObject({
+      name: 'Concurrent provider name',
+      healthy: true
+    });
   });
 });
 
@@ -363,27 +829,74 @@ describe('Live relay service', () => {
       })
     ).resolves.toMatchObject({ kind: 'live', liveChannelId: created.channel.id });
 
-    await repo.putLiveChannel({ ...stored!, publisherState: 'online' });
+    const offlineChannel = (await repo.getVersionedLiveChannel(created.channel.id))!;
+    await repo.compareAndSetLiveChannel(
+      { ...offlineChannel.value, publisherState: 'online' },
+      offlineChannel.revision
+    );
     await expect(service.delete(created.channel.id)).rejects.toThrow(
       'Stop the OBS publisher before deleting this live channel'
     );
-    await repo.putLiveChannel({ ...stored!, publisherState: 'offline' });
+    const onlineChannel = (await repo.getVersionedLiveChannel(created.channel.id))!;
+    await repo.compareAndSetLiveChannel(
+      { ...onlineChannel.value, publisherState: 'offline' },
+      onlineChannel.revision
+    );
     await expect(service.delete(created.channel.id)).rejects.toThrow(
       'Delete live playback sessions that use this channel first'
     );
     const [liveSession] = await repo.listSessions();
-    await repo.deleteSession(liveSession!.id);
+    await repo.deleteSessionAndRevokePlaybackGrants(liveSession!.id, new Date().toISOString());
     await service.delete(created.channel.id);
     await expect(service.delete(created.channel.id)).rejects.toThrow('Live channel was not found');
   });
 });
 
 describe('provider failover bindings', () => {
+  it('requires a durable controller begin before idempotent worker credential cleanup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-cleanup-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    await repo.createNode(sourceWorkerNode('worker-cleanup'));
+    const secrets = new TrackingSecretStore();
+    const service = new ProviderService(repo, secrets, providerBindingRegistry());
+    const created = await service.createBinding(
+      providerBindingInput('cleanup'),
+      'worker-cleanup',
+      'provider-cleanup',
+      'binding-cleanup',
+      { mode: 'new', expectedProviderRevision: null }
+    );
+
+    await expect(service.removeBinding(created.binding.id)).rejects.toThrow(
+      'must be authorized by the controller first'
+    );
+    await expect(secrets.get(created.binding.secretRef)).resolves.toBe('token-cleanup');
+
+    const deleting = await repo.beginProviderBindingDeletion(
+      created.binding.id,
+      new Date().toISOString()
+    );
+    expect(deleting).toMatchObject({
+      applied: true,
+      record: { value: { deletionPending: true, state: 'revoked', reachable: false } }
+    });
+    await expect(service.removeBinding(created.binding.id)).resolves.toBeUndefined();
+    await expect(service.removeBinding(created.binding.id)).resolves.toBeUndefined();
+    expect(secrets.deleted).toEqual([created.binding.secretRef, created.binding.secretRef]);
+    await expect(
+      repo.getProviderBinding(created.binding.id, { includeDeletionPending: true })
+    ).resolves.toMatchObject({ deletionPending: true });
+  });
+
   it('resolves each worker credential from its own binding', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-'));
     dirs.push(dir);
     const repo = new SqliteRepository(join(dir, 'db.sqlite'));
     await repo.migrate();
+    await repo.createNode(sourceWorkerNode('worker-a'));
+    await repo.createNode(sourceWorkerNode('worker-b'));
     const observedSecrets: string[] = [];
     const adapter: MediaProvider = {
       type: 'jellyfin',
@@ -427,8 +940,8 @@ describe('provider failover bindings', () => {
     };
     const registry = new DefaultProviderRegistry();
     registry.register(adapter);
-    const workerASecrets = new MemorySecretStore();
-    const workerBSecrets = new MemorySecretStore();
+    const workerASecrets = new TrackingSecretStore();
+    const workerBSecrets = new TrackingSecretStore();
     // Both services intentionally retain their pre-enrollment bootstrap ID.
     // Secret-store locality must still resolve the controller-issued bindings.
     const workerA = new ProviderService(repo, workerASecrets, registry, { nodeId: 'standalone' });
@@ -447,17 +960,56 @@ describe('provider failover bindings', () => {
       { ...input, username: 'worker-a' },
       'worker-a',
       'provider-1',
-      'binding-a'
+      'binding-a',
+      { mode: 'new', expectedProviderRevision: null }
     );
+    const providerAfterFirstBinding = (await repo.getVersionedProvider('provider-1'))!;
     await workerB.createBinding(
       { ...input, username: 'worker-b' },
       'worker-b',
       'provider-1',
-      'binding-b'
+      'binding-b',
+      { mode: 'existing', expectedProviderRevision: providerAfterFirstBinding.revision }
     );
+    const providerAfterSecondBinding = (await repo.getVersionedProvider('provider-1'))!;
+    await expect(
+      workerA.createBinding(
+        { ...input, username: 'stale-worker' },
+        'worker-a',
+        'provider-1',
+        'binding-stale',
+        { mode: 'existing', expectedProviderRevision: providerAfterFirstBinding.revision }
+      )
+    ).rejects.toThrow('changed while the binding was being created');
+    expect(
+      workerASecrets.refs().some((ref) => ref.startsWith('provider-binding:binding-stale:'))
+    ).toBe(false);
+    await expect(
+      workerB.createBinding(
+        {
+          ...input,
+          name: 'Conflicting fixture',
+          baseUrl: 'https://other-fixture.invalid',
+          normalizedBaseUrl: 'https://other-fixture.invalid',
+          username: 'worker-b'
+        },
+        'worker-b',
+        'provider-1',
+        'binding-conflict',
+        { mode: 'existing', expectedProviderRevision: providerAfterSecondBinding.revision }
+      )
+    ).rejects.toThrow('same provider server');
+    expect(
+      workerBSecrets.refs().some((ref) => ref.startsWith('provider-binding:binding-conflict:'))
+    ).toBe(false);
 
-    expect(await repo.listProviderBindings('provider-1')).toHaveLength(2);
-    expect((await repo.getProvider('provider-1'))?.secretRef).toBe('provider-binding:binding-a');
+    const storedBindings = await repo.listProviderBindings('provider-1');
+    expect(storedBindings).toHaveLength(2);
+    const bindingA = storedBindings.find(({ id }) => id === 'binding-a')!;
+    const bindingB = storedBindings.find(({ id }) => id === 'binding-b')!;
+    expect(bindingA.secretRef).toMatch(/^provider-binding:binding-a:/);
+    expect(bindingB.secretRef).toMatch(/^provider-binding:binding-b:/);
+    expect((await repo.getProvider('provider-1'))?.secretRef).toBe(bindingA.secretRef);
     await workerA.item('provider-1', 'movie');
     await workerB.item('provider-1', 'movie');
     await workerA.reportActivity('provider-1', {
@@ -526,8 +1078,131 @@ describe('provider failover bindings', () => {
       'token-worker-b',
       'token-worker-b'
     ]);
-    await expect(workerASecrets.get('provider-binding:binding-b')).rejects.toThrow();
-    await expect(workerBSecrets.get('provider-binding:binding-a')).rejects.toThrow();
+    await expect(workerASecrets.get(bindingB.secretRef)).rejects.toThrow();
+    await expect(workerBSecrets.get(bindingA.secretRef)).rejects.toThrow();
+  });
+
+  it('reconciles concurrent and replayed creation of the same binding without deleting the winner', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-race-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    await repo.createNode(sourceWorkerNode('worker-a'));
+    const secrets = new TrackingSecretStore();
+    const service = new ProviderService(repo, secrets, providerBindingRegistry());
+
+    const attempts = await Promise.all([
+      service.createBinding(
+        providerBindingInput('first'),
+        'worker-a',
+        'provider-race',
+        'binding-race',
+        { mode: 'new', expectedProviderRevision: null }
+      ),
+      service.createBinding(
+        providerBindingInput('second'),
+        'worker-a',
+        'provider-race',
+        'binding-race',
+        { mode: 'new', expectedProviderRevision: null }
+      )
+    ]);
+    expect(attempts).toHaveLength(2);
+    const stored = (await repo.getProviderBinding('binding-race'))!;
+    expect(stored.secretRef).toMatch(/^provider-binding:binding-race:/);
+    expect(attempts.map(({ binding }) => binding.secretRef)).toEqual([
+      stored.secretRef,
+      stored.secretRef
+    ]);
+    expect(secrets.refs()).toEqual([stored.secretRef]);
+    expect(secrets.deleted).toHaveLength(1);
+
+    await expect(
+      service.createBinding(
+        providerBindingInput('replay'),
+        'worker-a',
+        'provider-race',
+        'binding-race',
+        { mode: 'new', expectedProviderRevision: null }
+      )
+    ).resolves.toMatchObject({ binding: { secretRef: stored.secretRef } });
+    expect(secrets.refs()).toEqual([stored.secretRef]);
+    expect(secrets.deleted).toHaveLength(2);
+    await expect(secrets.get(stored.secretRef)).resolves.toMatch(/^token-(first|second)$/);
+  });
+
+  it('treats a throw after binding commit as idempotent success and retains its credential', async () => {
+    class ThrowAfterCommitRepository extends SqliteRepository {
+      #throwAfterCommit = true;
+
+      override async createProviderBinding(
+        ...args: Parameters<SqliteRepository['createProviderBinding']>
+      ) {
+        const result = await super.createProviderBinding(...args);
+        if (result.applied && this.#throwAfterCommit) {
+          this.#throwAfterCommit = false;
+          throw new Error('simulated ambiguous binding commit');
+        }
+        return result;
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-commit-'));
+    dirs.push(dir);
+    const repo = new ThrowAfterCommitRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    await repo.createNode(sourceWorkerNode('worker-a'));
+    const secrets = new TrackingSecretStore();
+    const service = new ProviderService(repo, secrets, providerBindingRegistry());
+
+    const created = await service.createBinding(
+      providerBindingInput('committed'),
+      'worker-a',
+      'provider-commit',
+      'binding-commit',
+      { mode: 'new', expectedProviderRevision: null }
+    );
+    expect(created.binding.secretRef).toMatch(/^provider-binding:binding-commit:/);
+    expect(secrets.refs()).toEqual([created.binding.secretRef]);
+    await expect(secrets.get(created.binding.secretRef)).resolves.toBe('token-committed');
+  });
+
+  it('retains a staged credential when an ambiguous commit cannot be reconciled', async () => {
+    class UnreadableCommitRepository extends SqliteRepository {
+      override async createProviderBinding(
+        ...args: Parameters<SqliteRepository['createProviderBinding']>
+      ) {
+        const result = await super.createProviderBinding(...args);
+        if (result.applied) throw new Error('simulated ambiguous binding commit');
+        return result;
+      }
+
+      override async getProviderBinding(): Promise<undefined> {
+        throw new Error('simulated reconciliation read failure');
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-unreadable-'));
+    dirs.push(dir);
+    const repo = new UnreadableCommitRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    await repo.createNode(sourceWorkerNode('worker-a'));
+    const secrets = new TrackingSecretStore();
+    const service = new ProviderService(repo, secrets, providerBindingRegistry());
+
+    await expect(
+      service.createBinding(
+        providerBindingInput('unreadable'),
+        'worker-a',
+        'provider-unreadable',
+        'binding-unreadable',
+        { mode: 'new', expectedProviderRevision: null }
+      )
+    ).rejects.toThrow('simulated ambiguous binding commit');
+    expect(secrets.refs()).toHaveLength(1);
+    expect(secrets.refs()[0]).toMatch(/^provider-binding:binding-unreadable:/);
+    expect(secrets.deleted).toEqual([]);
+    await expect(repo.listProviderBindings('provider-unreadable')).resolves.toHaveLength(1);
   });
 });
 
@@ -538,7 +1213,7 @@ describe('crash recovery', () => {
     const repo = new SqliteRepository(join(dir, 'db.sqlite'));
     await repo.migrate();
     const now = new Date().toISOString();
-    await repo.putSegmentJob({
+    await repo.createSegmentJob({
       id: 'expired',
       contentKey: 'vod/expired.ts',
       sessionId: 'session',
@@ -551,7 +1226,7 @@ describe('crash recovery', () => {
       createdAt: now,
       updatedAt: now
     });
-    await repo.putSegmentJob({
+    await repo.createSegmentJob({
       id: 'active',
       contentKey: 'vod/active.ts',
       sessionId: 'session',

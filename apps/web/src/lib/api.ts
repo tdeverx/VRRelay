@@ -246,8 +246,11 @@ export const api = {
       '/api/v1/provider-bindings',
       json('POST', body)
     ),
-  deleteProviderBinding: (bindingId: string) =>
-    request<void>(`/api/v1/provider-bindings/${bindingId}`, json('DELETE')),
+  deleteProviderBinding: (bindingId: string, acknowledgeOrphanedCredential = false) =>
+    request<void>(
+      `/api/v1/provider-bindings/${bindingId}${acknowledgeOrphanedCredential ? '?acknowledgeOrphanedCredential=true' : ''}`,
+      json('DELETE')
+    ),
   rotateNodeCertificate: (nodeId: string) =>
     request<{ certificateExpiresAt: string }>(
       `/api/v1/nodes/${nodeId}/certificate/rotate`,

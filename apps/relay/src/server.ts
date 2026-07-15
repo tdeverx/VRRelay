@@ -19,6 +19,7 @@ import {
   type ObjectStore,
   type CoordinationStore,
   type MetricsSink,
+  type AuditService,
   ClusterService,
   LiveService,
   ProfileService,
@@ -41,6 +42,7 @@ import {
   PlacementPreviewRequestSchema,
   SessionControlRequestSchema,
   CreateProviderBindingRequestSchema,
+  DeleteProviderBindingQuerySchema,
   RotateNodeCertificateRequestSchema,
   CacheEvictionRequestSchema,
   BackendValidationRequestSchema,
@@ -49,9 +51,17 @@ import {
 import { validateProviderUrl } from '@vrrelay/adapters';
 import { requiresSetupToken, type RelayConfig } from './config.js';
 import { publicProviderBinding } from '@vrrelay/domain';
-import { AuthService } from './auth.js';
+import { AuthService, type Principal } from './auth.js';
 import type { AgentController } from './agent-transport.js';
 import type { BackendService } from './backend-service.js';
+import {
+  auditActor,
+  auditedOperation,
+  type AuditedOperationOptions,
+  type AuditWriteFailure
+} from './audited-operation.js';
+
+export { auditActor, auditedOperation } from './audited-operation.js';
 
 export interface ServerServices {
   repository: Repository;
@@ -66,12 +76,85 @@ export interface ServerServices {
   objectStore: ObjectStore;
   coordination: CoordinationStore;
   metrics: MetricsSink;
+  audit: AuditService;
   backends: BackendService;
   agentController?: AgentController;
 }
 
+export interface ProviderBindingDeletionOutcome {
+  cleanupMode: 'already-finalized' | 'worker-confirmed' | 'administrator-acknowledged-orphan';
+  nodeId?: string;
+  orphanAcknowledged: boolean;
+}
+
+interface ProviderBindingCleanupServices {
+  cluster: Pick<ClusterService, 'beginBindingDeletion' | 'finalizeBindingDeletion' | 'list'>;
+  agentController?: {
+    connected(nodeId: string): boolean;
+    call(
+      nodeId: string,
+      operation: 'provider.unbind',
+      payload: Record<string, unknown>
+    ): Promise<unknown>;
+  };
+}
+
+export function providerBindingDeletionAuditContext(result: ProviderBindingDeletionOutcome) {
+  return {
+    cleanupMode: result.cleanupMode,
+    orphanAcknowledged: result.orphanAcknowledged,
+    ...(result.nodeId ? { nodeId: result.nodeId } : {})
+  };
+}
+
+export async function deleteProviderBindingWithCredentialCleanup(
+  services: ProviderBindingCleanupServices,
+  bindingId: string,
+  acknowledgeOrphanedCredential: boolean
+): Promise<ProviderBindingDeletionOutcome> {
+  const deleting = await services.cluster.beginBindingDeletion(bindingId);
+  if (!deleting) return { cleanupMode: 'already-finalized', orphanAcknowledged: false };
+
+  const binding = deleting.value;
+  const connected = Boolean(services.agentController?.connected(binding.nodeId));
+  if (connected) {
+    await services.agentController!.call(binding.nodeId, 'provider.unbind', { bindingId });
+    await services.cluster.finalizeBindingDeletion(bindingId, deleting.revision);
+    return {
+      cleanupMode: 'worker-confirmed',
+      nodeId: binding.nodeId,
+      orphanAcknowledged: false
+    };
+  }
+
+  const node = (await services.cluster.list()).find((candidate) => candidate.id === binding.nodeId);
+  if (node && node.state !== 'revoked')
+    throw new ApplicationError(
+      'node_unavailable',
+      'Reconnect the source worker to remove its provider credential, or revoke the node first for emergency cleanup',
+      409
+    );
+  if (!acknowledgeOrphanedCredential)
+    throw new ApplicationError(
+      'orphaned_credential_acknowledgement_required',
+      'The revoked or missing node cannot erase its stored provider credential. Revoke or rotate the provider token, then retry with acknowledgeOrphanedCredential=true',
+      409
+    );
+
+  await services.cluster.finalizeBindingDeletion(bindingId, deleting.revision);
+  return {
+    cleanupMode: 'administrator-acknowledged-orphan',
+    nodeId: binding.nodeId,
+    orphanAcknowledged: true
+  };
+}
+
 function parse<T>(schema: ZodType<T>, value: unknown): T {
   return schema.parse(value);
+}
+
+function reportAuditWriteFailure(request: FastifyRequest, failure: AuditWriteFailure): void {
+  request.log.error({ audit: failure }, 'durable audit outcome could not be written');
 }
 
 function tokenFromPath(request: FastifyRequest): string {
@@ -312,6 +395,21 @@ export async function createServer(
     services.auth.requireCsrf(request, principal);
     return principal;
   };
+  const auditAs = <T>(
+    request: FastifyRequest,
+    principal: Principal,
+    options: Omit<AuditedOperationOptions<T>, 'actor' | 'onAuditWriteFailure'>,
+    operation: () => Promise<T>
+  ) =>
+    auditedOperation(
+      services.audit,
+      {
+        ...options,
+        actor: auditActor(principal),
+        onAuditWriteFailure: (failure) => reportAuditWriteFailure(request, failure)
+      },
+      operation
+    );
   const metricsAuthorized = (request: FastifyRequest): boolean => {
     if (!config.metricsToken) return false;
     const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, '') ?? '';
@@ -431,36 +529,67 @@ export async function createServer(
     };
   });
   app.post('/api/v1/nodes/join-tokens', async (request, reply) => {
-    await mutate(request, ['admin']);
-    return reply
-      .status(201)
-      .send(
-        await services.cluster.createJoinToken(
-          parse(CreateNodeJoinTokenRequestSchema, request.body)
-        )
-      );
+    const principal = await mutate(request, ['admin']);
+    const result = await auditAs(
+      request,
+      principal,
+      {
+        category: 'cluster',
+        action: 'node.join-token.create',
+        target: { type: 'node-join-token' },
+        success: (created) => ({ context: { expiresAt: created.expiresAt } })
+      },
+      () => services.cluster.createJoinToken(parse(CreateNodeJoinTokenRequestSchema, request.body))
+    );
+    return reply.status(201).send(result);
   });
   app.post(
     '/api/v1/nodes/enroll',
     { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } },
     async (request, reply) => {
-      const body = parse(EnrollNodeRequestSchema, request.body);
-      return reply.status(201).send(
-        await services.cluster.enroll({
-          token: body.token,
-          name: body.name,
-          publicUrl: body.publicUrl,
-          capabilities: body.capabilities,
-          ...(body.internalUrl ? { internalUrl: body.internalUrl } : {})
-        })
+      const result = await auditedOperation(
+        services.audit,
+        {
+          category: 'cluster',
+          action: 'node.enroll',
+          actor: { type: 'node' },
+          onAuditWriteFailure: (failure) => reportAuditWriteFailure(request, failure),
+          success: (enrollment) => ({
+            target: { type: 'node', id: enrollment.node.id },
+            context: {
+              region: enrollment.node.region,
+              roles: enrollment.node.roles.join(','),
+              certificateIssued: Boolean(enrollment.certificate)
+            }
+          })
+        },
+        async () => {
+          const body = parse(EnrollNodeRequestSchema, request.body);
+          return services.cluster.enroll({
+            token: body.token,
+            name: body.name,
+            publicUrl: body.publicUrl,
+            capabilities: body.capabilities,
+            ...(body.internalUrl ? { internalUrl: body.internalUrl } : {})
+          });
+        }
       );
+      return reply.status(201).send(result);
     }
   );
   app.post('/api/v1/nodes/:nodeId/drain', async (request) => {
-    await mutate(request, ['admin']);
-    return services.cluster.drain(
-      (request.params as { nodeId: string }).nodeId,
-      parse(NodeDrainRequestSchema, request.body).draining
+    const principal = await mutate(request, ['admin']);
+    const nodeId = (request.params as { nodeId: string }).nodeId;
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'cluster',
+        action: 'node.drain',
+        target: { type: 'node', id: nodeId },
+        success: (node) => ({ context: { state: node.state } })
+      },
+      () => services.cluster.drain(nodeId, parse(NodeDrainRequestSchema, request.body).draining)
     );
   });
   app.post('/api/v1/nodes/:nodeId/certificate/rotate', async (request) => {
@@ -482,11 +611,22 @@ export async function createServer(
     };
   });
   app.post('/api/v1/nodes/:nodeId/revoke', async (request) => {
-    await mutate(request, ['admin']);
+    const principal = await mutate(request, ['admin']);
     const nodeId = (request.params as { nodeId: string }).nodeId;
-    const node = await services.cluster.revoke(nodeId);
-    services.agentController?.disconnect(nodeId, 'Node revoked by administrator');
-    return node;
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'cluster',
+        action: 'node.revoke',
+        target: { type: 'node', id: nodeId }
+      },
+      async () => {
+        const node = await services.cluster.revoke(nodeId);
+        services.agentController?.disconnect(nodeId, 'Node revoked by administrator');
+        return node;
+      }
+    );
   });
   app.get('/api/v1/nodes/:nodeId/logs', async (request) => {
     await authenticate(request, ['admin']);
@@ -495,22 +635,52 @@ export async function createServer(
     };
   });
   app.delete('/api/v1/nodes/:nodeId', async (request, reply) => {
-    await mutate(request, ['admin']);
-    await services.cluster.remove((request.params as { nodeId: string }).nodeId);
+    const principal = await mutate(request, ['admin']);
+    const nodeId = (request.params as { nodeId: string }).nodeId;
+    await auditAs(
+      request,
+      principal,
+      {
+        category: 'cluster',
+        action: 'node.remove',
+        target: { type: 'node', id: nodeId }
+      },
+      () => services.cluster.remove(nodeId)
+    );
+    services.agentController?.disconnect(nodeId, 'Node removed by administrator');
     return reply.status(204).send();
   });
   app.post('/api/v1/placement/preview', async (request) => {
-    await authenticate(request, ['sessions:create']);
-    const body = parse(PlacementPreviewRequestSchema, request.body);
-    const profile = await services.repository.getProfile(body.profileId, body.profileRevision);
-    if (!profile) throw new ApplicationError('not_found', 'Profile revision was not found', 404);
-    return services.cluster.previewPlacement({
-      policy: body.placementPolicy,
-      profile,
-      ...(body.providerId ? { providerId: body.providerId } : {}),
-      ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
-      ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
-    });
+    const principal = await authenticate(request, ['sessions:create']);
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'cluster',
+        action: 'placement.preview',
+        success: (placement) => ({
+          outcome: placement.node ? 'success' : 'failure',
+          ...(placement.node ? { target: { type: 'node', id: placement.node.id } } : {}),
+          context: {
+            available: Boolean(placement.node),
+            reason: placement.reason
+          }
+        })
+      },
+      async () => {
+        const body = parse(PlacementPreviewRequestSchema, request.body);
+        const profile = await services.repository.getProfile(body.profileId, body.profileRevision);
+        if (!profile)
+          throw new ApplicationError('not_found', 'Profile revision was not found', 404);
+        return services.cluster.previewPlacement({
+          policy: body.placementPolicy,
+          profile,
+          ...(body.providerId ? { providerId: body.providerId } : {}),
+          ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
+          ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
+        });
+      }
+    );
   });
 
   app.get('/api/v1/provider-bindings', async (request) => {
@@ -519,51 +689,94 @@ export async function createServer(
     return { items: (await services.cluster.bindings(providerId)).map(publicProviderBinding) };
   });
   app.post('/api/v1/provider-bindings', async (request, reply) => {
-    await mutate(request, ['admin']);
-    if (!services.agentController)
-      throw new ApplicationError(
-        'cluster_unavailable',
-        'The node agent controller is not enabled',
-        409
-      );
-    const body = parse(CreateProviderBindingRequestSchema, request.body);
-    if (!services.agentController.connected(body.nodeId))
-      throw new ApplicationError(
-        'node_unavailable',
-        'The selected source worker is not connected',
-        409
-      );
-    const policy = await validateProviderUrl(body.baseUrl, body.allowPublicHttp);
-    const providerId = body.providerId ?? randomUUID();
-    const bindingId = randomUUID();
-    const result = await services.agentController.call<{
-      provider: unknown;
-      binding: import('@vrrelay/domain').ProviderBinding;
-    }>(body.nodeId, 'provider.bind', {
-      nodeId: body.nodeId,
-      providerId,
-      bindingId,
-      input: { ...body, baseUrl: policy.normalizedUrl }
-    });
+    const principal = await mutate(request, ['admin']);
+    const result = await auditAs(
+      request,
+      principal,
+      {
+        category: 'provider',
+        action: 'provider-binding.create',
+        success: (created) => ({
+          target: { type: 'provider-binding', id: created.binding.id },
+          context: {
+            providerId: created.binding.providerId,
+            nodeId: created.binding.nodeId
+          }
+        })
+      },
+      async () => {
+        if (!services.agentController)
+          throw new ApplicationError(
+            'cluster_unavailable',
+            'The node agent controller is not enabled',
+            409
+          );
+        const body = parse(CreateProviderBindingRequestSchema, request.body);
+        if (!services.agentController.connected(body.nodeId))
+          throw new ApplicationError(
+            'node_unavailable',
+            'The selected source worker is not connected',
+            409
+          );
+        const policy = await validateProviderUrl(body.baseUrl, body.allowPublicHttp);
+        const providerId = body.providerId ?? randomUUID();
+        const bindingId = randomUUID();
+        let creation:
+          | { creationMode: 'new'; expectedProviderRevision: null }
+          | { creationMode: 'existing'; expectedProviderRevision: number };
+        if (body.providerId) {
+          const provider = await services.repository.getVersionedProvider(body.providerId);
+          if (!provider)
+            throw new ApplicationError('not_found', 'Provider connection was not found', 404);
+          creation = {
+            creationMode: 'existing',
+            expectedProviderRevision: provider.revision
+          };
+        } else {
+          creation = { creationMode: 'new', expectedProviderRevision: null };
+        }
+        return services.agentController.call<{
+          provider: unknown;
+          binding: import('@vrrelay/domain').ProviderBinding;
+        }>(body.nodeId, 'provider.bind', {
+          nodeId: body.nodeId,
+          providerId,
+          bindingId,
+          ...creation,
+          input: { ...body, baseUrl: policy.normalizedUrl }
+        });
+      }
+    );
     return reply
       .status(201)
       .send({ provider: result.provider, binding: publicProviderBinding(result.binding) });
   });
   app.delete('/api/v1/provider-bindings/:bindingId', async (request, reply) => {
-    await mutate(request, ['admin']);
+    const principal = await mutate(request, ['admin']);
     const bindingId = (request.params as { bindingId: string }).bindingId;
-    const binding = (await services.cluster.bindings()).find(
-      (candidate) => candidate.id === bindingId
+    const { acknowledgeOrphanedCredential } = parse(
+      DeleteProviderBindingQuerySchema,
+      request.query
     );
-    if (!binding) throw new ApplicationError('not_found', 'Provider binding was not found', 404);
-    if (!services.agentController?.connected(binding.nodeId))
-      throw new ApplicationError(
-        'node_unavailable',
-        'The bound source worker must be connected before its credential can be removed',
-        409
-      );
-    await services.agentController.call(binding.nodeId, 'provider.unbind', { bindingId });
-    await services.cluster.removeBinding(bindingId);
+    await auditAs(
+      request,
+      principal,
+      {
+        category: 'provider',
+        action: 'provider-binding.delete',
+        target: { type: 'provider-binding', id: bindingId },
+        context: { orphanAcknowledgementRequested: acknowledgeOrphanedCredential },
+        success: (result) => ({
+          context: providerBindingDeletionAuditContext(result)
+        })
+      },
+      () =>
+        deleteProviderBindingWithCredentialCleanup(
+          services,
+          bindingId,
+          acknowledgeOrphanedCredential
+        )
+    );
     return reply.status(204).send();
   });
 
@@ -576,37 +789,86 @@ export async function createServer(
     return services.sessions.get((request.params as { sessionId: string }).sessionId);
   });
   app.post('/api/v1/sessions', async (request, reply) => {
-    await mutate(request, ['sessions:create']);
-    const body = parse(CreateSessionRequestSchema, request.body);
-    body.placementLocked = Boolean(body.preferredNodeId);
-    if (body.kind === 'vod' && body.placementPolicy !== 'local') {
-      const profile = await services.repository.getProfile(body.profileId, body.profileRevision);
-      if (!profile) throw new ApplicationError('not_found', 'Profile revision was not found', 404);
-      const placement = await services.cluster.previewPlacement({
-        policy: body.placementPolicy,
-        providerId: body.source.providerId,
-        profile,
-        ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
-        ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
-      });
-      if (!placement.node)
-        throw new ApplicationError('placement_unavailable', placement.reason, 409);
-      body.preferredNodeId = placement.node.id;
-    }
-    return reply.status(201).send(await services.sessions.create(body));
+    const principal = await mutate(request, ['sessions:create']);
+    const session = await auditAs(
+      request,
+      principal,
+      {
+        category: 'session',
+        action: 'session.create',
+        success: (created) => ({
+          target: { type: 'session', id: created.id },
+          context: {
+            kind: created.kind,
+            profileId: created.profileId,
+            profileRevision: created.profileRevision,
+            assignedNodeId: created.assignedNodeId ?? null
+          }
+        })
+      },
+      async () => {
+        const body = parse(CreateSessionRequestSchema, request.body);
+        body.placementLocked = Boolean(body.preferredNodeId);
+        if (body.kind === 'vod' && body.placementPolicy !== 'local') {
+          const profile = await services.repository.getProfile(
+            body.profileId,
+            body.profileRevision
+          );
+          if (!profile)
+            throw new ApplicationError('not_found', 'Profile revision was not found', 404);
+          const placement = await services.cluster.previewPlacement({
+            policy: body.placementPolicy,
+            providerId: body.source.providerId,
+            profile,
+            ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
+            ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
+          });
+          if (!placement.node)
+            throw new ApplicationError('placement_unavailable', placement.reason, 409);
+          body.preferredNodeId = placement.node.id;
+        }
+        return services.sessions.create(body);
+      }
+    );
+    return reply.status(201).send(session);
   });
   app.delete('/api/v1/sessions/:sessionId', async (request, reply) => {
-    await mutate(request, ['sessions:control']);
-    await services.sessions.delete((request.params as { sessionId: string }).sessionId);
+    const principal = await mutate(request, ['sessions:control']);
+    const sessionId = (request.params as { sessionId: string }).sessionId;
+    await auditAs(
+      request,
+      principal,
+      {
+        category: 'session',
+        action: 'session.delete',
+        target: { type: 'session', id: sessionId }
+      },
+      () => services.sessions.delete(sessionId)
+    );
     return reply.status(204).send();
   });
   app.patch('/api/v1/sessions/:sessionId', async (request) => {
-    await mutate(request, ['sessions:control']);
-    const body = parse(SessionControlRequestSchema, request.body);
-    return services.sessions.control((request.params as { sessionId: string }).sessionId, {
-      ...(body.pinned !== undefined ? { pinned: body.pinned } : {}),
-      ...(body.state !== undefined ? { state: body.state } : {})
-    });
+    const principal = await mutate(request, ['sessions:control']);
+    const sessionId = (request.params as { sessionId: string }).sessionId;
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'session',
+        action: 'session.control',
+        target: { type: 'session', id: sessionId },
+        success: (session) => ({
+          context: { state: session.state, pinned: session.pinned }
+        })
+      },
+      () => {
+        const body = parse(SessionControlRequestSchema, request.body);
+        return services.sessions.control(sessionId, {
+          ...(body.pinned !== undefined ? { pinned: body.pinned } : {}),
+          ...(body.state !== undefined ? { state: body.state } : {})
+        });
+      }
+    );
   });
 
   app.get('/api/v1/live-channels', async (request) => {
@@ -637,19 +899,45 @@ export async function createServer(
     return reply.status(201).send(result);
   });
   app.post('/api/v1/tokens', async (request, reply) => {
-    await mutate(request, ['admin']);
-    const body = parse(CreatePersonalTokenRequestSchema, request.body);
-    return reply
-      .status(201)
-      .send(await services.auth.createPersonalToken(body.name, body.scopes, body.expiresAt));
+    const principal = await mutate(request, ['admin']);
+    const token = await auditAs(
+      request,
+      principal,
+      {
+        category: 'token',
+        action: 'personal-token.create',
+        success: (created) => ({
+          target: { type: 'personal-token', id: created.id },
+          context: {
+            scopeCount: created.scopes.length,
+            expires: Boolean(created.expiresAt)
+          }
+        })
+      },
+      async () => {
+        const body = parse(CreatePersonalTokenRequestSchema, request.body);
+        return services.auth.createPersonalToken(body.name, body.scopes, body.expiresAt);
+      }
+    );
+    return reply.status(201).send(token);
   });
   app.get('/api/v1/tokens', async (request) => {
     await authenticate(request, ['admin']);
     return { items: await services.auth.listPersonalTokens() };
   });
   app.delete('/api/v1/tokens/:tokenId', async (request, reply) => {
-    await mutate(request, ['admin']);
-    await services.auth.revokePersonalToken((request.params as { tokenId: string }).tokenId);
+    const principal = await mutate(request, ['admin']);
+    const tokenId = (request.params as { tokenId: string }).tokenId;
+    await auditAs(
+      request,
+      principal,
+      {
+        category: 'token',
+        action: 'personal-token.revoke',
+        target: { type: 'personal-token', id: tokenId }
+      },
+      () => services.auth.revokePersonalToken(tokenId)
+    );
     return reply.status(204).send();
   });
   app.get('/api/v1/events/recent', async (request) => {
@@ -679,8 +967,25 @@ export async function createServer(
     return services.backends.validate(body);
   });
   app.post('/api/v1/backends/activate', async (request) => {
-    await mutate(request, ['admin']);
-    return services.backends.activate(parse(BackendActivationRequestSchema, request.body));
+    const principal = await mutate(request, ['admin']);
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'backend',
+        action: 'backend.activate',
+        success: (status) => ({
+          target: { type: 'backend', id: `${status.category}:${status.kind}` },
+          context: {
+            category: status.category,
+            kind: status.kind,
+            healthy: status.healthy,
+            restartRequired: Boolean(status.restartRequired)
+          }
+        })
+      },
+      () => services.backends.activate(parse(BackendActivationRequestSchema, request.body))
+    );
   });
   app.get('/api/v1/cache', async (request) => {
     await authenticate(request, ['sessions:read']);

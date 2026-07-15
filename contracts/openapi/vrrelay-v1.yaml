@@ -319,9 +319,21 @@ paths:
     delete:
       operationId: deleteProviderBinding
       tags: [Cluster]
-      parameters: [{ $ref: '#/components/parameters/BindingId' }]
+      parameters:
+        - { $ref: '#/components/parameters/BindingId' }
+        - name: acknowledgeOrphanedCredential
+          in: query
+          description: >-
+            Required to finalize cleanup when the bound node is already revoked and its local
+            credential cannot be erased. Revoke or rotate the provider token before acknowledging.
+          schema: { type: boolean, default: false }
       responses:
-        '204': { description: Binding and node-local credential removed }
+        '204':
+          description: >-
+            Binding deletion finalized after worker-confirmed credential removal or an explicit
+            administrator acknowledgement that cleanup on a revoked or missing node is unverifiable.
+        '409':
+          description: Worker cleanup is unavailable or orphaned credential acknowledgement is required
   /placement/preview:
     post:
       operationId: previewPlacement
@@ -1365,13 +1377,27 @@ components:
             nodeId: { type: string }
     ProviderBinding:
       type: object
-      required: [id, providerId, nodeId, reachable, state, validatedAt, createdAt, updatedAt]
+      required:
+        [
+          id,
+          providerId,
+          nodeId,
+          reachable,
+          state,
+          deletionPending,
+          validatedAt,
+          createdAt,
+          updatedAt
+        ]
       properties:
         id: { type: string }
         providerId: { type: string }
         nodeId: { type: string }
         reachable: { type: boolean }
         state: { type: string, enum: [pending, healthy, degraded, revoked] }
+        deletionPending:
+          type: boolean
+          description: Credential cleanup has begun and the binding is ineligible for scheduling.
         lastError: { type: string }
         validatedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
         createdAt: { type: string, format: date-time }

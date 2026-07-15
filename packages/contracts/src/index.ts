@@ -177,6 +177,14 @@ export const CreateProviderBindingRequestSchema = z
   });
 export type CreateProviderBindingRequest = z.infer<typeof CreateProviderBindingRequestSchema>;
 
+export const DeleteProviderBindingQuerySchema = z.object({
+  acknowledgeOrphanedCredential: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true')
+});
+export type DeleteProviderBindingQuery = z.infer<typeof DeleteProviderBindingQuerySchema>;
+
 export const RotateNodeCertificateRequestSchema = z.object({ force: z.boolean().default(false) });
 export type RotateNodeCertificateRequest = z.infer<typeof RotateNodeCertificateRequestSchema>;
 export const CacheEvictionRequestSchema = z

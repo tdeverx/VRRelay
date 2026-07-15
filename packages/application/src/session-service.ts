@@ -1,0 +1,801 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { createHmac, randomUUID } from 'node:crypto';
+import { access, mkdir, rm, utimes } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import type { Writable } from 'node:stream';
+import type {
+  CachedObject,
+  LiveChannel,
+  MediaItem,
+  NodeRole,
+  ProfileRevision,
+  ProviderConnection,
+  RelaySession,
+  SegmentJob
+} from '@vrrelay/domain';
+import type { CreateSessionRequest } from '@vrrelay/contracts';
+import type {
+  ClusterRepository,
+  CoordinationStore,
+  EventBus,
+  MediaProvider,
+  MetricsSink,
+  ObjectStore,
+  ProviderRegistry,
+  RemoteProviderGateway,
+  RemoteSegmentCommand,
+  RemoteSegmentDispatcher,
+  RemoteSegmentRequester,
+  Repository,
+  ResolvedSource,
+  SecretStore,
+  SourceResponse,
+  Transcoder
+} from './index.js';
+import { CapacityError, ConflictError, NotFoundError, UnauthorizedError } from './errors.js';
+import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
+import { SessionCache } from './session-cache.js';
+import { SessionJobCoordinator } from './session-jobs.js';
+
+const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
+
+export interface SessionServiceOptions {
+  publicUrl: string;
+  internalUrl: string;
+  cacheDir: string;
+  cacheTtlMs: number;
+  maxWorkers: number;
+  cacheLimitBytes?: number;
+  nodeId?: string;
+  roles?: NodeRole[];
+}
+
+export interface SessionServiceInfrastructure {
+  objectStore?: ObjectStore;
+  coordination?: CoordinationStore;
+  clusterRepository?: ClusterRepository;
+  metrics?: MetricsSink;
+  dispatcher?: RemoteSegmentDispatcher;
+  providerGateway?: RemoteProviderGateway;
+  ensureRequester?: RemoteSegmentRequester;
+}
+
+export class SessionService {
+  readonly #inflight = new Map<string, Promise<string>>();
+  readonly #sourceGrants = new Map<
+    string,
+    { source: ResolvedSource; provider: MediaProvider; expiresAt: number }
+  >();
+  readonly #waiters: Array<() => void> = [];
+  readonly #viewers = new Map<string, Map<string, number>>();
+  readonly #activity = new Map<string, number>();
+  readonly #egressSamples: Array<{ bytes: number; observedAt: number }> = [];
+  readonly #cache: SessionCache;
+  readonly #jobs: SessionJobCoordinator;
+  #viewerSalt: Promise<string> | undefined;
+  #activeWorkers = 0;
+
+  constructor(
+    private readonly repository: Repository,
+    private readonly secrets: SecretStore,
+    private readonly providers: ProviderRegistry,
+    private readonly transcoder: Transcoder,
+    private readonly events: EventBus,
+    private readonly options: SessionServiceOptions,
+    private readonly infrastructure: SessionServiceInfrastructure = {}
+  ) {
+    this.#cache = new SessionCache(
+      options,
+      infrastructure.objectStore,
+      infrastructure.metrics,
+      events
+    );
+    this.#jobs = new SessionJobCoordinator(
+      repository,
+      events,
+      options,
+      this.#cache,
+      infrastructure,
+      {
+        getSession: (id) => this.get(id),
+        generateSegment: (session, profile, index, destination, signal) =>
+          this.#generateSegment(session, profile, index, destination, signal)
+      }
+    );
+  }
+
+  async create(input: CreateSessionRequest): Promise<RelaySession> {
+    const profile = await this.repository.getProfile(input.profileId, input.profileRevision);
+    if (!profile) throw new NotFoundError('Profile revision was not found');
+    const id = randomUUID();
+    const token = opaqueToken();
+    const now = new Date().toISOString();
+    let durationSeconds: number | undefined;
+    let liveChannelRevision: number | undefined;
+    let name = input.name;
+    if (input.kind === 'vod') {
+      const connection = await this.repository.getProvider(input.source.providerId);
+      if (!connection) throw new NotFoundError('Provider connection was not found');
+      const remoteNode = await this.#remoteProviderNode(connection.id);
+      const item = remoteNode
+        ? await this.infrastructure.providerGateway!.call<MediaItem>(remoteNode, 'provider.item', {
+            providerId: connection.id,
+            itemId: input.source.itemId
+          })
+        : await this.providers
+            .get(connection.type)
+            .item(connection, await this.#providerSecret(connection), input.source.itemId);
+      durationSeconds = item.durationSeconds;
+      if (!durationSeconds || durationSeconds <= 0)
+        throw new Error('Selected media does not expose a finite duration');
+      name ??= item.name;
+    } else {
+      const channel = await this.repository.getVersionedLiveChannel(input.liveChannelId);
+      if (!channel) throw new NotFoundError('Live channel was not found');
+      liveChannelRevision = channel.revision;
+      if (profile.delivery.method !== 'hls' || profile.delivery.playlistType !== 'live')
+        throw new ConflictError('Live sessions require a live HLS profile');
+    }
+    const path =
+      input.kind === 'live'
+        ? 'live.m3u8'
+        : profile.delivery.method === 'fragmented_mp4'
+          ? 'stream.mp4'
+          : 'index.m3u8';
+    const session: RelaySession = {
+      id,
+      name: name ?? 'Untitled relay',
+      kind: input.kind,
+      ...(input.kind === 'vod'
+        ? { source: input.source, durationSeconds }
+        : { liveChannelId: input.liveChannelId }),
+      profileId: profile.profileId,
+      profileRevision: profile.revision,
+      platformMode: input.platformMode,
+      state: input.kind === 'live' ? 'live' : 'idle',
+      pinned: input.pinned,
+      reportActivity: input.reportActivity,
+      viewers: 0,
+      placementPolicy: input.placementPolicy,
+      ...(input.preferredNodeId ? { assignedNodeId: input.preferredNodeId } : {}),
+      placementLocked: input.placementLocked,
+      ...(input.preferredRegion ? { preferredRegion: input.preferredRegion } : {}),
+      outputUrls: { primary: `${this.options.publicUrl}/play/${token}/${path}` },
+      createdAt: now,
+      updatedAt: now
+    };
+    const expiresAt = input.playbackTtlSeconds
+      ? new Date(Date.now() + input.playbackTtlSeconds * 1_000).toISOString()
+      : null;
+    const created = await this.repository.createSessionWithPlaybackGrant(
+      session,
+      {
+        tokenHash: hashToken(token),
+        sessionId: id,
+        expiresAt,
+        revokedAt: null,
+        createdAt: now
+      },
+      liveChannelRevision
+    );
+    if (!created.applied) {
+      if (session.kind === 'live') {
+        if (created.reason === 'not-found') throw new NotFoundError('Live channel was not found');
+        throw new ConflictError(
+          'Live channel changed while the session was being created; try again'
+        );
+      }
+      if (created.reason === 'not-found')
+        throw new NotFoundError('Provider connection was not found');
+      if (created.reason === 'invalid-state')
+        throw new ConflictError('Provider connection is being deleted');
+      throw new ConflictError(
+        'Provider connection changed while the session was being created; try again'
+      );
+    }
+    this.events.publish(event('session.created', { name: session.name, kind: session.kind }, id));
+    return session;
+  }
+
+  async list(): Promise<RelaySession[]> {
+    return this.repository.listSessions();
+  }
+
+  async get(id: string): Promise<RelaySession> {
+    const session = await this.repository.getSession(id);
+    if (!session) throw new NotFoundError('Session was not found');
+    return session;
+  }
+
+  async control(
+    id: string,
+    input: { pinned?: boolean; state?: 'idle' | 'stopped' }
+  ): Promise<RelaySession> {
+    const result = await this.#updateSession(
+      id,
+      (session) => ({
+        ...session,
+        ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
+        ...(input.state ? { state: input.state } : {}),
+        updatedAt: new Date().toISOString()
+      }),
+      'Session control conflicted with repeated concurrent updates'
+    );
+    const updated = result.session;
+    if (!updated) throw new NotFoundError('Session was not found');
+    if (input.state === 'stopped')
+      await this.#reportActivity(updated, 0, 'stop').catch(() => undefined);
+    this.events.publish(
+      event('session.updated', { pinned: updated.pinned, state: updated.state }, id)
+    );
+    return updated;
+  }
+
+  async recover(): Promise<number> {
+    let recovered = 0;
+    // Remote worker output is always temporary. A process restart means no
+    // surviving FFmpeg process owns these directories, so stale files must not
+    // be mistaken for completed work.
+    await this.#cache.recoverPartials();
+    for (const session of await this.repository.listSessions()) {
+      if (['queued', 'starting', 'active'].includes(session.state)) {
+        const result = await this.#updateSession(
+          session.id,
+          (current) =>
+            ['queued', 'starting', 'active'].includes(current.state)
+              ? { ...current, state: 'idle', updatedAt: new Date().toISOString() }
+              : undefined,
+          'Session recovery conflicted with repeated concurrent updates',
+          true
+        );
+        if (result.applied) recovered += 1;
+      }
+    }
+    recovered += await this.#jobs.recoverExpiredJobs();
+    return recovered;
+  }
+
+  async delete(id: string): Promise<void> {
+    const session = await this.repository.getSession(id);
+    if (!session) throw new NotFoundError('Session was not found');
+    await this.#reportActivity(session, session.durationSeconds ?? 0, 'stop').catch(
+      () => undefined
+    );
+    await this.repository.deleteSessionAndRevokePlaybackGrants(id);
+    await rm(join(this.options.cacheDir, 'vod', id), { recursive: true, force: true });
+    this.events.publish(event('session.deleted', { name: session.name }, id));
+  }
+
+  async manifest(token: string, segmentBaseUrl?: string): Promise<string> {
+    const { session, profile } = await this.#playback(token);
+    if (session.kind !== 'vod' || !session.durationSeconds)
+      throw new NotFoundError('VOD output was not found');
+    if (profile.delivery.method !== 'hls')
+      throw new NotFoundError('HLS output is not enabled for this session');
+    const segmentDuration = profile.delivery.segmentDuration;
+    const count = Math.ceil(session.durationSeconds / segmentDuration);
+    const lines = [
+      '#EXTM3U',
+      `#EXT-X-VERSION:${profile.delivery.segmentType === 'fmp4' ? 7 : 3}`,
+      `#EXT-X-TARGETDURATION:${Math.ceil(segmentDuration)}`,
+      '#EXT-X-MEDIA-SEQUENCE:0',
+      '#EXT-X-PLAYLIST-TYPE:VOD',
+      '#EXT-X-INDEPENDENT-SEGMENTS'
+    ];
+    if (profile.delivery.segmentType === 'fmp4') {
+      lines.push(
+        `#EXT-X-MAP:URI="${segmentBaseUrl ? `${segmentBaseUrl}/init.mp4` : 'segment/init.mp4'}"`
+      );
+    }
+    for (let index = 0; index < count; index += 1) {
+      const duration = Math.min(segmentDuration, session.durationSeconds - index * segmentDuration);
+      const extension = profile.delivery.segmentType === 'fmp4' ? 'm4s' : 'ts';
+      lines.push(
+        `#EXTINF:${duration.toFixed(3)},`,
+        segmentBaseUrl ? `${segmentBaseUrl}/${index}.${extension}` : `segment/${index}.${extension}`
+      );
+    }
+    lines.push('#EXT-X-ENDLIST', '');
+    return lines.join('\n');
+  }
+
+  async segment(token: string, index: number, signal?: AbortSignal): Promise<string> {
+    const { session, profile } = await this.#playback(token);
+    if (session.kind !== 'vod' || !session.source || !session.durationSeconds) {
+      throw new NotFoundError('VOD segment was not found');
+    }
+    const segmentDuration = profile.delivery.segmentDuration;
+    const startSeconds = index * segmentDuration;
+    if (!Number.isInteger(index) || index < 0 || startSeconds >= session.durationSeconds) {
+      throw new NotFoundError('VOD segment was not found');
+    }
+    const activityEvent = this.#activity.has(session.id)
+      ? index === Math.ceil(session.durationSeconds / segmentDuration) - 1
+        ? 'stop'
+        : 'progress'
+      : 'start';
+    await this.#reportActivity(session, startSeconds, activityEvent).catch((error) => {
+      this.events.publish(
+        event(
+          'worker.failed',
+          {
+            activityReporting: true,
+            message: error instanceof Error ? error.message : String(error)
+          },
+          session.id
+        )
+      );
+    });
+    const extension = profile.delivery.segmentType === 'fmp4' ? 'm4s' : 'ts';
+    const destination = join(
+      this.options.cacheDir,
+      'vod',
+      session.id,
+      `${profile.profileId}-r${profile.revision}`,
+      `${index}.${extension}`
+    );
+    const contentKey = this.#cache.contentKey(session, profile, index);
+    try {
+      await access(destination);
+      const now = new Date();
+      await utimes(destination, now, now);
+      this.events.publish(event('cache.hit', { segment: index }, session.id));
+      return destination;
+    } catch {
+      // Cache miss.
+    }
+    if (await this.#cache.restoreObject(contentKey, destination)) {
+      this.infrastructure.metrics?.increment('cache_hits_total', { layer: 'object_store' });
+      this.events.publish(
+        event('cache.hit', { segment: index, layer: 'object-store' }, session.id)
+      );
+      return destination;
+    }
+    if (this.#isEdgeOnly()) {
+      await this.#requestOrigin(token, index, signal);
+      if (await this.#cache.restoreObject(contentKey, destination)) return destination;
+      throw new Error('Origin completed the segment request but no object was published');
+    }
+    const key = destination;
+    const existing = this.#inflight.get(key);
+    if (existing) return existing;
+    const job = this.#jobs
+      .generateDistributedSegment(session, profile, index, destination, contentKey, signal)
+      .finally(() => {
+        this.#inflight.delete(key);
+      });
+    this.#inflight.set(key, job);
+    return job;
+  }
+
+  async initSegment(token: string, signal?: AbortSignal): Promise<string> {
+    const { session, profile } = await this.#playback(token);
+    if (profile.delivery.segmentType !== 'fmp4')
+      throw new NotFoundError('fMP4 initialization segment was not found');
+    const directory = join(
+      this.options.cacheDir,
+      'vod',
+      session.id,
+      `${profile.profileId}-r${profile.revision}`
+    );
+    const path = join(directory, 'init.mp4');
+    try {
+      await access(path);
+      return path;
+    } catch {
+      /* restore or generate below */
+    }
+    const initKey = this.#cache.contentKey(session, profile, 0).replace(/\.m4s$/, '.init.mp4');
+    if (await this.#cache.restoreObject(initKey, path)) return path;
+    await this.segment(token, 0, signal);
+    try {
+      await access(path);
+      return path;
+    } catch {
+      /* edge may need the uploaded init object */
+    }
+    if (await this.#cache.restoreObject(initKey, path)) return path;
+    throw new NotFoundError('fMP4 initialization segment was not published');
+  }
+
+  async playbackSession(token: string): Promise<RelaySession> {
+    return (await this.#playback(token)).session;
+  }
+
+  async streamFragmentedMp4(token: string, output: Writable, signal?: AbortSignal): Promise<void> {
+    const { session, profile } = await this.#playback(token);
+    if (session.kind !== 'vod' || !session.source || profile.delivery.method !== 'fragmented_mp4') {
+      throw new NotFoundError('Fragmented MP4 output was not found');
+    }
+    const connection = await this.repository.getProvider(session.source.providerId);
+    if (!connection) throw new NotFoundError('Provider connection was not found');
+    const secret = await this.#providerSecret(connection);
+    const provider = this.providers.get(connection.type);
+    const source = await provider.resolveSource(connection, secret, session.source, signal);
+    await this.transcoder.streamFragmentedMp4(
+      this.#proxySource(source, provider),
+      profile,
+      output,
+      signal
+    );
+  }
+
+  async openSourceProxy(
+    token: string,
+    range?: string,
+    signal?: AbortSignal
+  ): Promise<SourceResponse> {
+    const grant = this.#sourceGrants.get(token);
+    if (!grant || grant.expiresAt <= Date.now()) {
+      this.#sourceGrants.delete(token);
+      throw new NotFoundError('Source grant was not found');
+    }
+    return grant.provider.openSource(grant.source, range, signal);
+  }
+
+  async resolveLive(token: string): Promise<LiveChannel> {
+    const { session } = await this.#playback(token);
+    if (session.kind !== 'live' || !session.liveChannelId)
+      throw new NotFoundError('Live output was not found');
+    const channel = await this.repository.getLiveChannel(session.liveChannelId);
+    if (!channel) throw new NotFoundError('Live channel was not found');
+    return channel;
+  }
+
+  capacity(): { active: number; limit: number; queued: number } {
+    return {
+      active: this.#activeWorkers,
+      limit: this.options.maxWorkers,
+      queued: this.#waiters.length
+    };
+  }
+
+  async listJobs(limit = 100): Promise<SegmentJob[]> {
+    return this.#jobs.listJobs(limit);
+  }
+
+  async cancelJob(id: string): Promise<void> {
+    return this.#jobs.cancelJob(id);
+  }
+
+  async retryJob(id: string): Promise<SegmentJob> {
+    return this.#jobs.retryJob(id);
+  }
+
+  async executeRemoteSegment(command: RemoteSegmentCommand, signal?: AbortSignal): Promise<void> {
+    return this.#jobs.executeRemoteSegment(command, signal);
+  }
+
+  async cleanupExpiredCache(): Promise<number> {
+    const now = Date.now();
+    for (const [token, grant] of this.#sourceGrants) {
+      if (grant.expiresAt <= now) this.#sourceGrants.delete(token);
+    }
+    for (const [sessionId, viewers] of this.#viewers) {
+      for (const [viewer, seenAt] of viewers) if (now - seenAt > 30_000) viewers.delete(viewer);
+      const session = await this.repository.getSession(sessionId);
+      if (session && session.viewers !== viewers.size) {
+        await this.#setSessionViewers(sessionId, viewers.size, true);
+      }
+      this.infrastructure.metrics?.gauge('viewers_active', viewers.size, { session: sessionId });
+    }
+    return this.#cache.cleanupExpired();
+  }
+
+  async cacheInventory(): Promise<CachedObject[]> {
+    return this.#cache.inventory();
+  }
+
+  async evictCache(filter: {
+    sessionId?: string;
+    profileId?: string;
+    all?: boolean;
+  }): Promise<number> {
+    return this.#cache.evict(filter);
+  }
+
+  async touchViewer(token: string, viewerIdentity: string): Promise<RelaySession> {
+    const { session } = await this.#playback(token);
+    const viewers = this.#viewers.get(session.id) ?? new Map<string, number>();
+    const viewer = createHmac('sha256', await this.#getViewerSalt())
+      .update(viewerIdentity)
+      .digest('hex')
+      .slice(0, 20);
+    const joined = !viewers.has(viewer);
+    viewers.set(viewer, Date.now());
+    this.#viewers.set(session.id, viewers);
+    if (joined) {
+      await this.#setSessionViewers(session.id, viewers.size);
+      this.events.publish(event('viewer.joined', { viewers: viewers.size }, session.id));
+    }
+    return session;
+  }
+
+  recordEgress(bytes: number, sessionId?: string): void {
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+    this.#egressSamples.push({ bytes, observedAt: Date.now() });
+    this.#pruneEgressSamples(Date.now());
+    this.infrastructure.metrics?.increment(
+      'egress_bytes_total',
+      { session: sessionId ?? 'unattributed' },
+      bytes
+    );
+  }
+
+  egressMbps(now = Date.now(), windowMs = 30_000): number {
+    this.#pruneEgressSamples(now, windowMs);
+    const bytes = this.#egressSamples.reduce((total, sample) => total + sample.bytes, 0);
+    return (bytes * 8) / (windowMs / 1_000) / 1_000_000;
+  }
+
+  async cacheUsageBytes(): Promise<number> {
+    return this.#cache.usageBytes();
+  }
+
+  async #generateSegment(
+    session: RelaySession,
+    profile: ProfileRevision,
+    index: number,
+    destination: string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    const workerStartedAt = Date.now();
+    await this.#acquire(signal);
+    this.events.publish(event('worker.started', { segment: index }, session.id));
+    try {
+      const connection = await this.repository.getProvider(session.source!.providerId);
+      if (!connection) throw new NotFoundError('Provider connection was not found');
+      const secret = await this.#providerSecret(connection);
+      const provider = this.providers.get(connection.type);
+      const source = await provider.resolveSource(connection, secret, session.source!, signal);
+      const segmentDuration = profile.delivery.segmentDuration;
+      await mkdir(dirname(destination), { recursive: true });
+      await this.transcoder.generateSegment(
+        {
+          source: this.#proxySource(source, provider),
+          profile,
+          segmentIndex: index,
+          startSeconds: index * segmentDuration,
+          duration: Math.min(segmentDuration, session.durationSeconds! - index * segmentDuration),
+          ...(source.defaultAudio !== undefined ? { audioTrack: source.defaultAudio } : {}),
+          ...(source.defaultSubtitle !== undefined ? { subtitleTrack: source.defaultSubtitle } : {})
+        },
+        destination,
+        signal
+      );
+      await this.#updateSession(
+        session.id,
+        (current) =>
+          current.state === 'stopped'
+            ? undefined
+            : { ...current, state: 'active', updatedAt: new Date().toISOString() },
+        'Worker state update conflicted with repeated concurrent session changes',
+        true
+      );
+      this.infrastructure.metrics?.increment('segments_generated_total', {
+        profile: profile.profileId
+      });
+      this.infrastructure.metrics?.observe(
+        'segment_generation_seconds',
+        (Date.now() - workerStartedAt) / 1_000,
+        { profile: profile.profileId, encoder: profile.video.encoder }
+      );
+      this.events.publish(event('worker.completed', { segment: index }, session.id));
+      return destination;
+    } catch (error) {
+      this.events.publish(
+        event(
+          'worker.failed',
+          { segment: index, message: error instanceof Error ? error.message : 'Unknown error' },
+          session.id
+        )
+      );
+      throw error;
+    } finally {
+      this.#release();
+    }
+  }
+
+  #isEdgeOnly(): boolean {
+    const roles = this.options.roles ?? ['controller', 'source-worker', 'ingest-origin', 'edge'];
+    return (
+      roles.includes('edge') && !roles.includes('source-worker') && !roles.includes('controller')
+    );
+  }
+
+  async #requestOrigin(token: string, index: number, signal?: AbortSignal): Promise<void> {
+    if (this.infrastructure.ensureRequester)
+      return this.infrastructure.ensureRequester.ensure(token, index, signal);
+    throw new CapacityError('The edge is not connected to the controller agent channel');
+  }
+
+  async #getViewerSalt(): Promise<string> {
+    const pending = (this.#viewerSalt ??= (async () => {
+      const existing = await this.repository.getSetting('metrics.viewer_salt');
+      if (existing) return existing;
+      const created = opaqueToken(32);
+      return (await this.repository.putSettingIfAbsent('metrics.viewer_salt', created)).record
+        .value;
+    })());
+    try {
+      return await pending;
+    } catch (error) {
+      if (this.#viewerSalt === pending) this.#viewerSalt = undefined;
+      throw error;
+    }
+  }
+
+  async #playback(token: string): Promise<{ session: RelaySession; profile: ProfileRevision }> {
+    const grant = await this.repository.getPlaybackGrant(hashToken(token));
+    if (
+      !grant ||
+      grant.revokedAt ||
+      (grant.expiresAt && Date.parse(grant.expiresAt) <= Date.now())
+    ) {
+      throw new UnauthorizedError('Playback link is invalid or expired');
+    }
+    const session = await this.repository.getSession(grant.sessionId);
+    if (!session) throw new NotFoundError('Session was not found');
+    const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
+    if (!profile) throw new NotFoundError('Profile revision was not found');
+    return { session, profile };
+  }
+
+  async #reportActivity(
+    session: RelaySession,
+    positionSeconds: number,
+    activityEvent: 'start' | 'progress' | 'stop'
+  ): Promise<void> {
+    if (!session.reportActivity || session.kind !== 'vod' || !session.source) return;
+    const last = this.#activity.get(session.id) ?? 0;
+    if (activityEvent === 'progress' && Date.now() - last < 10_000) return;
+    const connection = await this.repository.getProvider(session.source.providerId);
+    if (!connection || !connection.capabilities.includes('activity_reporting')) return;
+    const remoteNode = await this.#remoteProviderNode(connection.id);
+    if (remoteNode) {
+      await this.infrastructure.providerGateway!.call(remoteNode, 'provider.activity', {
+        providerId: connection.id,
+        sessionId: session.id,
+        itemId: session.source.itemId,
+        positionTicks: Math.round(positionSeconds * 10_000_000),
+        paused: activityEvent === 'stop',
+        event: activityEvent
+      });
+      if (activityEvent === 'stop') this.#activity.delete(session.id);
+      else this.#activity.set(session.id, Date.now());
+      return;
+    }
+    const secret = await this.#providerSecret(connection);
+    await this.providers.get(connection.type).reportPlayback(connection, secret, {
+      sessionId: session.id,
+      itemId: session.source.itemId,
+      positionTicks: Math.round(positionSeconds * 10_000_000),
+      paused: activityEvent === 'stop',
+      event: activityEvent
+    });
+    if (activityEvent === 'stop') this.#activity.delete(session.id);
+    else this.#activity.set(session.id, Date.now());
+  }
+
+  async #providerSecret(connection: ProviderConnection): Promise<string> {
+    const bindings = await this.infrastructure.clusterRepository?.listProviderBindings(
+      connection.id
+    );
+    for (const binding of (bindings ?? []).filter(
+      (candidate) => candidate.state === 'healthy' && !candidate.deletionPending
+    )) {
+      try {
+        return await this.secrets.get(binding.secretRef);
+      } catch {
+        // Only the explicitly bound node can resolve this reference.
+      }
+    }
+    return this.secrets.get(connection.secretRef);
+  }
+
+  async #remoteProviderNode(providerId: string): Promise<string | undefined> {
+    if (!this.infrastructure.providerGateway) return undefined;
+    const bindings =
+      (await this.infrastructure.clusterRepository?.listProviderBindings(providerId)) ?? [];
+    return bindings.find(
+      (binding) =>
+        binding.state === 'healthy' &&
+        !binding.deletionPending &&
+        binding.nodeId !== this.options.nodeId &&
+        this.infrastructure.providerGateway!.connected(binding.nodeId)
+    )?.nodeId;
+  }
+
+  #proxySource(source: ResolvedSource, provider: MediaProvider): ResolvedSource {
+    const token = opaqueToken();
+    this.#sourceGrants.set(token, { source, provider, expiresAt: Date.now() + 15 * 60_000 });
+    return { ...source, url: `${this.options.internalUrl}/internal/source/${token}`, headers: {} };
+  }
+
+  async #acquire(signal?: AbortSignal): Promise<void> {
+    if (this.#activeWorkers < this.options.maxWorkers) {
+      this.#activeWorkers += 1;
+      return;
+    }
+    if (this.#waiters.length >= this.options.maxWorkers * 8)
+      throw new CapacityError('Transcode queue is full');
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        const index = this.#waiters.indexOf(resolve);
+        if (index >= 0) this.#waiters.splice(index, 1);
+        reject(signal?.reason ?? new Error('Request was aborted'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      this.#waiters.push(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      });
+    });
+    this.#activeWorkers += 1;
+  }
+
+  #release(): void {
+    this.#activeWorkers = Math.max(0, this.#activeWorkers - 1);
+    this.#waiters.shift()?.();
+  }
+
+  #pruneEgressSamples(now: number, windowMs = 30_000): void {
+    const cutoff = now - windowMs;
+    while (this.#egressSamples[0] && this.#egressSamples[0].observedAt <= cutoff)
+      this.#egressSamples.shift();
+  }
+
+  async #updateSession(
+    sessionId: string,
+    update: (session: RelaySession) => RelaySession | undefined,
+    conflictMessage: string,
+    allowMissing = false
+  ): Promise<{ session?: RelaySession; applied: boolean }> {
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedSession(sessionId);
+      if (!current) {
+        if (allowMissing) return { applied: false };
+        throw new NotFoundError('Session was not found');
+      }
+      const updated = update(current.value);
+      if (!updated) return { session: current.value, applied: false };
+      const result = await this.repository.compareAndSetSession(updated, current.revision);
+      if (result.applied) return { session: result.record.value, applied: true };
+      if (result.reason === 'not-found') {
+        if (allowMissing) return { applied: false };
+        throw new NotFoundError('Session was not found');
+      }
+      if (result.reason === 'invalid-state')
+        throw new ConflictError('Session state transition is no longer valid');
+    }
+    throw new ConflictError(conflictMessage);
+  }
+
+  async #setSessionViewers(
+    sessionId: string,
+    viewers: number,
+    allowMissing = false
+  ): Promise<RelaySession | undefined> {
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.repository.getVersionedSession(sessionId);
+      if (!current) {
+        if (allowMissing) return undefined;
+        throw new NotFoundError('Session was not found');
+      }
+      const result = await this.repository.setSessionViewers(
+        sessionId,
+        current.revision,
+        viewers,
+        new Date().toISOString()
+      );
+      if (result.applied) return result.record.value;
+      if (result.reason === 'not-found') {
+        if (allowMissing) return undefined;
+        throw new NotFoundError('Session was not found');
+      }
+      if (result.reason === 'invalid-state')
+        throw new ConflictError('Session viewer update is no longer valid');
+    }
+    throw new ConflictError('Session viewer update conflicted with repeated concurrent changes');
+  }
+}

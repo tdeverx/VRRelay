@@ -54,6 +54,20 @@ describe('relay configuration', () => {
     ).toBe('/runtime/mediamtx.yml');
   });
 
+  it('parses PostgreSQL migration backup configuration', () => {
+    expect(loadConfig({}).pgDumpPath).toBe('pg_dump');
+    expect(loadConfig({}).pgDumpTimeoutMs).toBe(30 * 60_000);
+    const configured = loadConfig({
+      VRRELAY_PG_DUMP: '/opt/postgresql/bin/pg_dump',
+      VRRELAY_PG_DUMP_TIMEOUT: '45s'
+    });
+    expect(configured.pgDumpPath).toBe('/opt/postgresql/bin/pg_dump');
+    expect(configured.pgDumpTimeoutMs).toBe(45_000);
+    expect(() => loadConfig({ VRRELAY_PG_DUMP_TIMEOUT: 'forever' })).toThrow(
+      'Expected duration like 30m, 10s, or 1h'
+    );
+  });
+
   it('treats blank optional environment values as unset', () => {
     const config = loadConfig({
       VRRELAY_SETUP_TOKEN: '',

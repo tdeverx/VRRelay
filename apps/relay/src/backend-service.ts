@@ -146,6 +146,10 @@ export async function resolveConfiguredObjectStore(
 }
 
 export class BackendService {
+  #activationTail: Promise<void> = Promise.resolve();
+  #closed = false;
+  #closePromise: Promise<void> | undefined;
+
   constructor(
     private readonly repository: Repository,
     private readonly secrets: SecretStore,
@@ -236,7 +240,14 @@ export class BackendService {
       return (await this.#routingCandidate(configuration)).health();
     if (configuration.category === 'metrics') {
       const candidate = await this.#metricsCandidate(configuration);
-      return candidate ? candidate.health() : this.metricsExporter.health();
+      return candidate
+        ? candidate.health()
+        : this.#staticStatus(
+            'metrics',
+            'prometheus',
+            true,
+            'Prometheus exposition endpoint active'
+          );
     }
     if (
       (configuration.category === 'repository' &&
@@ -254,6 +265,16 @@ export class BackendService {
   }
 
   async activate(configuration: BackendValidationRequest): Promise<BackendStatus> {
+    if (this.#closed) throw new ConflictError('Backend service is closed');
+    const activation = this.#activationTail.then(() => this.#activate(configuration));
+    this.#activationTail = activation.then(
+      () => undefined,
+      () => undefined
+    );
+    return activation;
+  }
+
+  async #activate(configuration: BackendValidationRequest): Promise<BackendStatus> {
     if (configuration.category === 'object-store') {
       const candidate = await createConfiguredObjectStore(
         configuration,
@@ -262,7 +283,7 @@ export class BackendService {
       );
       const status = await candidate.health();
       if (!status.healthy) throw new ConflictError(status.message ?? 'Object store is unhealthy');
-      await this.repository.putSetting(OBJECT_STORE_SETTING, JSON.stringify(configuration));
+      await this.#persistDesired(OBJECT_STORE_SETTING, configuration);
       return {
         ...status,
         message: 'Validated and staged; restart every relay role to activate this object store',
@@ -281,8 +302,15 @@ export class BackendService {
           );
       if (!status.healthy)
         throw new ConflictError(status.message ?? 'Metrics backend is unhealthy');
-      await this.metricsExporter.activate(candidate);
-      await this.repository.putSetting(METRICS_SETTING, JSON.stringify(configuration));
+      const transition = await this.#persistDesired(METRICS_SETTING, configuration, {
+        category: 'metrics',
+        kind: 'prometheus'
+      });
+      try {
+        await this.metricsExporter.activate(candidate);
+      } catch (error) {
+        await this.#rollbackDesired(METRICS_SETTING, transition, error);
+      }
       return status;
     }
     if (configuration.category !== 'routing')
@@ -296,9 +324,81 @@ export class BackendService {
     const candidate = await this.#routingCandidate(configuration);
     const status = await candidate.health();
     if (!status.healthy) throw new ConflictError(status.message ?? 'Routing backend is unhealthy');
-    this.routing.activate(candidate);
-    await this.repository.putSetting(ROUTING_SETTING, JSON.stringify(configuration));
+    const transition = await this.#persistDesired(ROUTING_SETTING, configuration, {
+      category: 'routing',
+      kind: 'builtin'
+    });
+    try {
+      this.routing.activate(candidate);
+    } catch (error) {
+      await this.#rollbackDesired(ROUTING_SETTING, transition, error);
+    }
     return status;
+  }
+
+  async #persistDesired(
+    key: string,
+    configuration: BackendValidationRequest,
+    defaultConfiguration?: BackendValidationRequest
+  ): Promise<{ changed: boolean; revision: number; previousValue: string }> {
+    const value = JSON.stringify(configuration);
+    const current = await this.repository.getVersionedSetting(key);
+    if (!current) {
+      const inserted = await this.repository.putSettingIfAbsent(key, value);
+      if (!inserted.inserted && inserted.record.value !== value)
+        throw new ConflictError('Backend configuration changed concurrently; validate and retry');
+      return {
+        changed: inserted.inserted,
+        revision: inserted.record.revision,
+        previousValue: JSON.stringify(defaultConfiguration ?? configuration)
+      };
+    }
+    if (current.value === value)
+      return { changed: false, revision: current.revision, previousValue: current.value };
+    const updated = await this.repository.compareAndSetSetting(key, value, current.revision);
+    if (!updated.applied) {
+      if (updated.current?.value === value)
+        return {
+          changed: false,
+          revision: updated.current.revision,
+          previousValue: updated.current.value
+        };
+      throw new ConflictError('Backend configuration changed concurrently; validate and retry');
+    }
+    return {
+      changed: true,
+      revision: updated.record.revision,
+      previousValue: current.value
+    };
+  }
+
+  async #rollbackDesired(
+    key: string,
+    transition: { changed: boolean; revision: number; previousValue: string },
+    activationError: unknown
+  ): Promise<never> {
+    if (!transition.changed) throw activationError;
+    let rollback;
+    try {
+      rollback = await this.repository.compareAndSetSetting(
+        key,
+        transition.previousValue,
+        transition.revision
+      );
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [activationError, rollbackError],
+        'Backend activation failed and desired-state rollback could not be written',
+        { cause: activationError }
+      );
+    }
+    if (!rollback.applied)
+      throw new AggregateError(
+        [activationError],
+        'Backend activation failed and desired state changed before rollback',
+        { cause: activationError }
+      );
+    throw activationError;
   }
 
   async #routingCandidate(configuration: BackendValidationRequest): Promise<TrafficDirector> {
@@ -332,7 +432,22 @@ export class BackendService {
   }
 
   async close(): Promise<void> {
-    await this.metricsExporter.stop();
+    this.#closed = true;
+    if (!this.#closePromise) {
+      const closeOperation = this.#activationTail.then(() => this.metricsExporter.stop());
+      this.#activationTail = closeOperation.then(
+        () => undefined,
+        () => undefined
+      );
+      this.#closePromise = closeOperation;
+    }
+    const closeOperation = this.#closePromise;
+    try {
+      await closeOperation;
+    } catch (error) {
+      if (this.#closePromise === closeOperation) this.#closePromise = undefined;
+      throw error;
+    }
   }
 
   #staticStatus(

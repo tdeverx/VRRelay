@@ -35,6 +35,19 @@ retained evidence belong in the
   and obsolete generated files without silently repairing CI state.
 - Configurable object-store activation and an authenticated metrics webhook
   exporter with lifecycle, persistence-order, and delivery-health tests.
+- Dedicated controller, source-worker, ingest-origin, edge, and standalone
+  composition roots with explicit runtime dependency graphs, role-owned HTTP
+  surfaces, schema-startup policy, and ordered shutdown.
+- Immutable SQLite/PostgreSQL migration metadata through v6, complete physical
+  schema-shape validation, revisioned create/CAS repository operations,
+  transactional compound writes, and a shared two-connection concurrency
+  suite.
+- Append-only administrative audit attempts and terminal outcomes with
+  correlated operation identifiers, bounded queries, and structured context
+  redaction.
+- Crash-consistent encrypted file-secret publication using serialized in-process
+  mutations, unique synced temporary files, restrictive permissions, atomic
+  rename, cleanup, and parent-directory sync.
 
 ### Changed
 
@@ -48,6 +61,31 @@ retained evidence belong in the
 - Restore a green local engineering baseline under the checksum-verified pinned
   Node runtime while keeping later feature and deployment claims explicitly
   gated.
+- Make provider/binding creation insert-only and transactional, reconcile
+  concurrent or replayed attempts without deleting the winning node-local
+  credential, and preserve ambiguous staged credentials for explicit repair.
+- Add CAS publisher polling and guarded live-channel deletion so stale polls
+  cannot resurrect deleted channels, and make live-session/channel plus
+  VOD/provider dependency checks transactional.
+- Make provider validation revisioned and deletion a resumable two-phase
+  mark/secret-delete/finalize operation that blocks stale writes and new VOD
+  work while pending.
+- Make provider-binding deletion a durable begin/worker-secret-delete/finalize
+  operation, exclude pending bindings from scheduling, and require explicit
+  acknowledgement before finalizing an orphaned credential on a revoked or
+  removed node.
+- Require a revoked, binding-free node for physical removal and serialize
+  provider-binding creation on a usable source-worker node plus the expected
+  provider revision.
+- Reject session CAS attempts that retarget immutable source/profile identity,
+  and make duplicate certificate serials fail consistently across SQLite and
+  PostgreSQL.
+- Make controller/standalone the migration owners while dedicated data-plane
+  roles perform a read-only schema-current assertion and fail closed on
+  incompatible history.
+- Verify the final Phase 2 slice with a 49-of-49 real PostgreSQL 17 matrix and
+  the complete pinned-runtime CI gate: 235 passed, 23 intentional skips, zero
+  failures, all builds/checks green, and zero npm vulnerabilities.
 
 ### Security
 
@@ -58,15 +96,21 @@ retained evidence belong in the
   internal source grants, URL policy checks, hashed enrollment/token records,
   and platform secret-store adapters as security foundations requiring broader
   Phase 3 and release-gate verification.
+- Do not persist provider setup passwords or API keys at the controller. Remote
+  setup may transiently pass through the controller, but the authenticated
+  source worker exchanges it for a token held only in its node-local secret
+  backend.
 
 ### Known limitations
 
 - The audited repository has not yet passed the feature-complete public release
   candidate gate.
-- Distributed state transitions, role isolation, migration behavior, media
-  matrices, edge/live failure handling, dashboard workflows, observability,
-  deployment topologies, native installers, and supply-chain outputs require
-  the remaining reconciliation phases.
+- A real PostgreSQL dump/restore drill remains Phase 9–11 evidence, and per-node
+  acknowledgement of applied backend configuration remains Phase 6 work.
+- Node transport hardening, distributed orchestration, media matrices,
+  edge/live failure handling, dashboard workflows, observability, deployment
+  topologies, native installers, and supply-chain outputs require the remaining
+  reconciliation phases.
 - Real VRChat PC compatibility, Quest compatibility, clean-machine native
   installation, hosted cloud adapters, and destructive Kubernetes/cluster
   recovery are not currently supported release claims.
