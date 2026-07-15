@@ -244,7 +244,9 @@ export class AzureBlobObjectStore implements ObjectStore {
   }
 
   async delete(key: string): Promise<void> {
-    await this.#container.deleteBlob(this.#key(key), { deleteSnapshots: 'include' });
+    await this.#container.getBlobClient(this.#key(key)).deleteIfExists({
+      deleteSnapshots: 'include'
+    });
   }
   async health(): Promise<BackendStatus> {
     try {

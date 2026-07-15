@@ -182,6 +182,9 @@ edge-delivery and live-fan-out verification is still pending.
 - Explicit cache eviction now removes both the local disk cache object and the
   referenced object-store entry for newly published or restored cache objects,
   while disk-pressure cleanup preserves the remote tier for later restore.
+- Azure Blob deletion is idempotent like the local, S3, and GCS adapters, so
+  explicit eviction can tolerate an external lifecycle policy or administrator
+  having already removed the object.
 - Segment generation and object-store restore enforce the configured disk cache
   limit immediately while protecting the requested segment from same-request
   eviction.
@@ -232,9 +235,9 @@ still pending.
 - Edge grants, coordination-backed viewer aggregation, selected-origin
   metadata, node-targeted cache administration, corrupt object-store restore
   recovery, immediate disk-pressure enforcement, and per-node backend
-  application tracking now have implementation checkpoints. Broader external
-  object-store lifecycle evidence and destructive multi-process origin recovery
-  evidence remain Phase 6 work.
+  application tracking now have implementation checkpoints. Destructive
+  external object-store outage evidence and destructive multi-process origin
+  recovery evidence remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,

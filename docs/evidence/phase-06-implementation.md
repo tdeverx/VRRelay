@@ -47,6 +47,9 @@ evidence.
   object-store keys. Explicit cache eviction removes the local object and deletes
   the corresponding remote object-store entry, while ordinary disk-pressure
   cleanup still leaves the remote tier available for restore.
+- Azure Blob object deletion is now idempotent, matching the local, S3, and GCS
+  adapters so explicit cache eviction can reconcile an object that was already
+  removed by external lifecycle policy or administrator action.
 - Segment generation and object-store restore now enforce the configured disk
   cache limit immediately instead of waiting for the periodic cleanup loop. The
   segment just requested is protected while older cached objects are evicted to
@@ -125,7 +128,7 @@ intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
-- Broader external object-store lifecycle and destructive outage evidence.
+- Destructive external object-store outage evidence.
 - Destructive multi-process origin recovery evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

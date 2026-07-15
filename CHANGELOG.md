@@ -101,6 +101,8 @@ retained evidence belong in the
   job state.
 - Delete referenced object-store entries when an administrator explicitly evicts
   matching temporary cache objects.
+- Treat Azure Blob object deletion as idempotent so explicit cache eviction can
+  reconcile objects that were already removed externally.
 - Enforce disk cache limits immediately after segment writes and object-store
   restores while protecting the segment currently being served.
 - Reconfigure and retry live edge origin pull paths once after failed HLS
