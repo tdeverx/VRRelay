@@ -670,6 +670,20 @@ describe('VOD relay service', () => {
     const renderedMetrics = await metrics.render();
     expect(renderedMetrics).toContain('vrrelay_egress_bytes_total');
     expect(renderedMetrics).toContain('vrrelay_egress_bytes_total 30');
+    expect(renderedMetrics).toContain(
+      'vrrelay_segment_jobs_total{mode="local",outcome="complete"} 2'
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_segment_job_attempts_total{mode="local",outcome="complete"} 2'
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_segment_job_retries_total{mode="unknown",source="manual"} 1'
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_segment_generation_seconds_count{delivery="mpegts",encoder="libx264"} 2'
+    );
+    expect(renderedMetrics).toContain('vrrelay_cache_requests_total{layer="disk",outcome="miss"}');
+    expect(renderedMetrics).toContain('vrrelay_workers_active{kind="transcode"} 0');
     expect(renderedMetrics).not.toContain('session=');
 
     repo.injectViewersBeforeNextSessionUpdate(7);
@@ -741,6 +755,7 @@ describe('VOD relay service', () => {
     });
     let generated = 0;
     const objectStore = new MutableMemoryObjectStore();
+    const metrics = new PrometheusMetricsSink();
     const service = new SessionService(
       repo,
       secrets,
@@ -768,7 +783,7 @@ describe('VOD relay service', () => {
         cacheTtlMs: 60_000,
         maxWorkers: 1
       },
-      { objectStore, clusterRepository: repo }
+      { objectStore, clusterRepository: repo, metrics }
     );
     const session = await service.create({
       kind: 'vod',
@@ -803,6 +818,17 @@ describe('VOD relay service', () => {
     await expect(service.evictCache({ all: true })).resolves.toBe(1);
     expect(objectStore.deleted).toEqual([contentKey, contentKey]);
     await expect(objectStore.stat(contentKey!)).resolves.toBeUndefined();
+    const renderedMetrics = await metrics.render();
+    expect(renderedMetrics).toContain(
+      'vrrelay_cache_requests_total{layer="object_store",outcome="miss"}'
+    );
+    expect(renderedMetrics).toContain('vrrelay_object_restores_total{outcome="invalidated"} 1');
+    expect(renderedMetrics).toContain(
+      'vrrelay_object_operations_total{operation="put",outcome="success"} 2'
+    );
+    expect(renderedMetrics).toContain(
+      'vrrelay_object_errors_total{operation="restore",kind="validation"} 1'
+    );
   });
 
   it('enforces disk cache pressure after segment generation without evicting the requested file', async () => {

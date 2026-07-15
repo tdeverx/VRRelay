@@ -34,6 +34,10 @@ function objectReferencePath(path: string): string {
   return `${path}${OBJECT_REFERENCE_SUFFIX}`;
 }
 
+function secondsSince(startedAt: number): number {
+  return (Date.now() - startedAt) / 1_000;
+}
+
 async function removePartialFiles(directory: string): Promise<void> {
   let entries;
   try {
@@ -74,33 +78,37 @@ export class SessionCache {
     try {
       if (!this.objectStore) return;
       const segmentSha256 = await this.#fileSha256(destination);
-      await this.objectStore.put(contentKey, createReadStream(destination), {
-        contentType: profile.delivery.segmentType === 'fmp4' ? 'video/iso.segment' : 'video/mp2t',
-        expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
-        sha256: segmentSha256,
-        metadata: {
-          sessionId: session.id,
-          profileId: profile.profileId,
-          revision: String(profile.revision)
-        }
-      });
+      await this.#objectOperation('put', () =>
+        this.objectStore!.put(contentKey, createReadStream(destination), {
+          contentType: profile.delivery.segmentType === 'fmp4' ? 'video/iso.segment' : 'video/mp2t',
+          expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
+          sha256: segmentSha256,
+          metadata: {
+            sessionId: session.id,
+            profileId: profile.profileId,
+            revision: String(profile.revision)
+          }
+        })
+      );
       await this.#writeObjectReference(destination, [contentKey]);
       if (profile.delivery.segmentType === 'fmp4') {
         const initPath = join(dirname(destination), 'init.mp4');
         protectedPaths.push(initPath);
         const initSha256 = await this.#fileSha256(initPath);
         const initKey = contentKey.replace(/\.m4s$/, '.init.mp4');
-        await this.objectStore.put(initKey, createReadStream(initPath), {
-          contentType: 'video/mp4',
-          expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
-          sha256: initSha256,
-          metadata: {
-            sessionId: session.id,
-            profileId: profile.profileId,
-            revision: String(profile.revision),
-            initialization: 'true'
-          }
-        });
+        await this.#objectOperation('put', () =>
+          this.objectStore!.put(initKey, createReadStream(initPath), {
+            contentType: 'video/mp4',
+            expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
+            sha256: initSha256,
+            metadata: {
+              sessionId: session.id,
+              profileId: profile.profileId,
+              revision: String(profile.revision),
+              initialization: 'true'
+            }
+          })
+        );
         await this.#writeObjectReference(initPath, [initKey]);
       }
       this.events.publish(event('storage.uploaded', { contentKey, segment: index }, session.id));
@@ -130,10 +138,19 @@ export class SessionCache {
   async restoreObject(contentKey: string, destination: string): Promise<boolean> {
     const objectStore = this.objectStore;
     if (!objectStore) return false;
-    const object = await objectStore.stat(contentKey);
-    if (!object) return false;
-    const source = await objectStore.open(contentKey);
-    if (!source) return false;
+    const startedAt = Date.now();
+    const object = await this.#objectOperation('stat', () => objectStore.stat(contentKey));
+    if (!object) {
+      this.#recordCacheRequest('object_store', 'miss');
+      this.#recordObjectRestore(startedAt, 'miss');
+      return false;
+    }
+    const source = await this.#objectOperation('open', () => objectStore.open(contentKey));
+    if (!source) {
+      this.#recordCacheRequest('object_store', 'miss');
+      this.#recordObjectRestore(startedAt, 'miss');
+      return false;
+    }
     await mkdir(dirname(destination), { recursive: true });
     const temporary = `${destination}.${process.pid}.${randomUUID()}.part`;
     const hash = createHash('sha256');
@@ -155,10 +172,18 @@ export class SessionCache {
       await rename(temporary, destination);
       await this.#writeObjectReference(destination, [contentKey]);
       await this.cleanupExpired([destination]);
+      this.#recordCacheRequest('object_store', 'hit');
+      this.#recordObjectRestore(startedAt, 'success');
     } catch (error) {
       await rm(temporary, { force: true });
       if (error instanceof CacheRestoreValidationError) {
-        await objectStore.delete(contentKey);
+        await this.#objectOperation('delete', () => objectStore.delete(contentKey));
+        this.#recordCacheRequest('object_store', 'miss');
+        this.#recordObjectRestore(startedAt, 'invalidated');
+        this.metrics?.increment('object_errors_total', {
+          operation: 'restore',
+          kind: 'validation'
+        });
         this.events.publish(
           event('storage.invalidated', {
             contentKey,
@@ -167,6 +192,8 @@ export class SessionCache {
         );
         return false;
       }
+      this.#recordObjectRestore(startedAt, 'error');
+      this.metrics?.increment('object_errors_total', { operation: 'restore', kind: 'error' });
       throw error;
     }
     return true;
@@ -271,7 +298,9 @@ export class SessionCache {
       const path = join(this.options.cacheDir, 'vod', object.key);
       const objectStoreKeys = await this.#readObjectReference(path);
       await this.#removeLocalObject(path);
-      for (const key of objectStoreKeys) await this.objectStore?.delete(key);
+      for (const key of objectStoreKeys)
+        if (this.objectStore)
+          await this.#objectOperation('delete', () => this.objectStore!.delete(key));
       removed += 1;
     }
     if (removed) this.events.publish(event('cache.evicted', { count: removed, ...filter }));
@@ -319,5 +348,41 @@ export class SessionCache {
 
   async #removeLocalObject(path: string): Promise<void> {
     await Promise.all([rm(path, { force: true }), rm(objectReferencePath(path), { force: true })]);
+  }
+
+  #recordCacheRequest(layer: 'disk' | 'object_store', outcome: 'hit' | 'miss'): void {
+    this.metrics?.increment('cache_requests_total', { layer, outcome });
+  }
+
+  #recordObjectRestore(
+    startedAt: number,
+    outcome: 'success' | 'miss' | 'invalidated' | 'error'
+  ): void {
+    this.metrics?.increment('object_restores_total', { outcome });
+    this.metrics?.observe('object_restore_seconds', secondsSince(startedAt), { outcome });
+  }
+
+  async #objectOperation<T>(
+    operation: 'put' | 'stat' | 'open' | 'delete',
+    run: () => Promise<T>
+  ): Promise<T> {
+    const startedAt = Date.now();
+    try {
+      const result = await run();
+      this.metrics?.increment('object_operations_total', { operation, outcome: 'success' });
+      this.metrics?.observe('object_operation_seconds', secondsSince(startedAt), {
+        operation,
+        outcome: 'success'
+      });
+      return result;
+    } catch (error) {
+      this.metrics?.increment('object_operations_total', { operation, outcome: 'error' });
+      this.metrics?.observe('object_operation_seconds', secondsSince(startedAt), {
+        operation,
+        outcome: 'error'
+      });
+      this.metrics?.increment('object_errors_total', { operation, kind: 'error' });
+      throw error;
+    }
   }
 }

@@ -25,6 +25,23 @@ class SegmentJobCancelledError extends Error {
   }
 }
 
+type SegmentJobMode = 'local' | 'remote' | 'unknown';
+type SegmentJobOutcome = 'complete' | 'failed' | 'cancelled';
+
+function secondsSince(startedAt: number): number {
+  return (Date.now() - startedAt) / 1_000;
+}
+
+function failureKind(
+  error: unknown
+): 'capacity' | 'conflict' | 'not_found' | 'unauthorized' | 'error' {
+  if (error instanceof CapacityError) return 'capacity';
+  if (error instanceof ConflictError) return 'conflict';
+  if (error instanceof NotFoundError) return 'not_found';
+  if (error instanceof UnauthorizedError) return 'unauthorized';
+  return 'error';
+}
+
 export interface SessionJobOptions {
   cacheDir: string;
   nodeId?: string;
@@ -118,6 +135,9 @@ export class SessionJobCoordinator {
         ]);
         if (result.applied) {
           recovered += 1;
+          this.infrastructure.metrics?.increment('segment_jobs_recovered_total', {
+            reason: 'expired_lease'
+          });
           settled = true;
           break;
         }
@@ -146,6 +166,9 @@ export class SessionJobCoordinator {
       };
       const result = await repository.cancelSegmentJob(cancelled, current.revision);
       if (result.applied) {
+        this.infrastructure.metrics?.increment('segment_job_cancellations_total', {
+          source: 'admin'
+        });
         this.#jobControllers.get(id)?.abort(new Error('Job cancelled'));
         if (current.value.ownerNodeId && current.value.ownerNodeId !== this.options.nodeId)
           await this.infrastructure.dispatcher?.cancel(current.value.ownerNodeId, id);
@@ -246,6 +269,8 @@ export class SessionJobCoordinator {
     contentKey: string,
     signal?: AbortSignal
   ): Promise<string> {
+    const jobStartedAt = Date.now();
+    let jobMode: SegmentJobMode = 'local';
     const coordination = this.infrastructure.coordination;
     const owner = `${this.options.nodeId ?? 'standalone'}:${randomUUID()}`;
     const leaseKey = `segment:${contentKey}`;
@@ -303,6 +328,7 @@ export class SessionJobCoordinator {
     try {
       const candidates = await this.#remoteCandidates(session, profile);
       if (candidates.length) {
+        jobMode = 'remote';
         let failure: unknown;
         const candidatePool = session.placementLocked ? candidates.slice(0, 1) : candidates;
         const remainingAttempts = Math.max(0, 3 - job.attempts);
@@ -321,6 +347,12 @@ export class SessionJobCoordinator {
             ],
             updatedAt: new Date().toISOString()
           }));
+          this.#recordJobAttempt('remote', 'started');
+          if (attempt > 1)
+            this.infrastructure.metrics?.increment('segment_job_retries_total', {
+              mode: 'remote',
+              source: 'automatic'
+            });
           try {
             await this.infrastructure.dispatcher!.dispatch(
               remoteNode,
@@ -333,10 +365,12 @@ export class SessionJobCoordinator {
               ...finishLatestAttempt(current, 'complete'),
               updatedAt: new Date().toISOString()
             }));
+            this.#recordJobAttempt('remote', 'complete');
             failure = undefined;
             break;
           } catch (error) {
             failure = error;
+            this.#recordJobAttempt('remote', 'failed');
             job = await this.#transitionActiveJob(job, (current) => ({
               ...finishLatestAttempt(
                 current,
@@ -374,6 +408,12 @@ export class SessionJobCoordinator {
           ],
           updatedAt: new Date().toISOString()
         }));
+        this.#recordJobAttempt('local', 'started');
+        if (attempt > 1)
+          this.infrastructure.metrics?.increment('segment_job_retries_total', {
+            mode: 'local',
+            source: 'automatic'
+          });
         await this.callbacks.generateSegment(
           session,
           profile,
@@ -382,23 +422,33 @@ export class SessionJobCoordinator {
           leaseController.signal
         );
         await this.cache.publishObject(session, profile, index, destination, contentKey);
+        this.#recordJobAttempt('local', 'complete');
         job = finishLatestAttempt(job, 'complete');
       }
       const completedAt = new Date().toISOString();
       job = await this.#completeJob(job, completedAt);
+      this.#recordJobFinished(jobStartedAt, jobMode, 'complete');
       this.events.publish(event('job.completed', { jobId: job.id }, session.id));
       await coordination?.publish('segments', JSON.stringify({ contentKey, state: 'complete' }));
       return destination;
     } catch (error) {
-      if (error instanceof SegmentJobCancelledError) throw error;
-      this.infrastructure.metrics?.increment('segment_jobs_failed_total', {
-        profile: profile.profileId
+      if (error instanceof SegmentJobCancelledError) {
+        this.#recordJobFinished(jobStartedAt, jobMode, 'cancelled');
+        throw error;
+      }
+      this.infrastructure.metrics?.increment('segment_job_failures_total', {
+        mode: jobMode,
+        kind: failureKind(error)
       });
       const failed = await this.#failJob(
         job,
         error instanceof Error ? error.message : String(error)
       );
-      if (failed.state === 'cancelled') throw new SegmentJobCancelledError();
+      if (failed.state === 'cancelled') {
+        this.#recordJobFinished(jobStartedAt, jobMode, 'cancelled');
+        throw new SegmentJobCancelledError();
+      }
+      this.#recordJobFinished(jobStartedAt, jobMode, 'failed');
       this.events.publish(
         event(
           'job.failed',
@@ -436,7 +486,13 @@ export class SessionJobCoordinator {
         'failed',
         'cancelled'
       ]);
-      if (result.applied) return result.record.value;
+      if (result.applied) {
+        this.infrastructure.metrics?.increment('segment_job_retries_total', {
+          mode: 'unknown',
+          source: 'manual'
+        });
+        return result.record.value;
+      }
       if (result.reason === 'not-found') throw new NotFoundError('Segment job was not found');
       if (result.reason === 'invalid-state')
         throw new ConflictError('Only failed or cancelled segment jobs can be retried');
@@ -598,5 +654,21 @@ export class SessionJobCoordinator {
         );
       })
       .map((node) => node.id);
+  }
+
+  #recordJobAttempt(
+    mode: Exclude<SegmentJobMode, 'unknown'>,
+    outcome: 'started' | 'complete' | 'failed'
+  ): void {
+    this.infrastructure.metrics?.increment('segment_job_attempts_total', { mode, outcome });
+  }
+
+  #recordJobFinished(startedAt: number, mode: SegmentJobMode, outcome: SegmentJobOutcome): void {
+    const duration = Number.isFinite(startedAt) ? secondsSince(startedAt) : 0;
+    this.infrastructure.metrics?.increment('segment_jobs_total', { mode, outcome });
+    this.infrastructure.metrics?.observe('segment_job_duration_seconds', duration, {
+      mode,
+      outcome
+    });
   }
 }

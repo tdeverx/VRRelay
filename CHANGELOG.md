@@ -37,6 +37,8 @@ retained evidence belong in the
   dependency-aware readiness distinct from `/api/v1/health` liveness.
 - Low-cardinality aggregate viewer and egress metrics that avoid per-session
   Prometheus labels while keeping exact per-session state in the repository.
+- Low-cardinality worker queue, segment job, cache request, and object-store
+  operation metrics for operational debugging without session/object-key labels.
 - Configurable object-store activation and an authenticated metrics webhook
   exporter with lifecycle, persistence-order, and delivery-health tests.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone

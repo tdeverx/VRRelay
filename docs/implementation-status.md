@@ -229,6 +229,10 @@ pending.
   egress is a total counter, viewer activity is an aggregate gauge, and
   per-session truth remains in repository state/events instead of long-lived
   metric labels.
+- Worker queue/pressure, segment job attempts/retries/failures/duration, disk
+  and object-store cache requests, object operation latency/errors, and object
+  restore outcomes now use bounded Prometheus labels; session IDs, object keys,
+  URLs, and node IDs are not emitted as metric labels.
 
 ## Known gaps in the audited checkout
 
@@ -262,7 +266,7 @@ pending.
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
-- Additional low-cardinality operational metrics, bounded structured logs,
+- Additional ingest/reconnect/node-egress metrics, bounded structured logs,
   adapter contracts, browser coverage, destructive cluster scenarios, and
   reproducible benchmark evidence remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM

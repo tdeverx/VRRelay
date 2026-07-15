@@ -450,13 +450,13 @@ export class SessionService {
       await access(destination);
       const now = new Date();
       await utimes(destination, now, now);
+      this.#recordCacheRequest('disk', 'hit');
       this.events.publish(event('cache.hit', { segment: index }, session.id));
       return destination;
     } catch {
-      // Cache miss.
+      this.#recordCacheRequest('disk', 'miss');
     }
     if (await this.#cache.restoreObject(contentKey, destination)) {
-      this.infrastructure.metrics?.increment('cache_hits_total', { layer: 'object_store' });
       this.events.publish(
         event('cache.hit', { segment: index, layer: 'object-store' }, session.id)
       );
@@ -554,6 +554,7 @@ export class SessionService {
   }
 
   capacity(): { active: number; limit: number; queued: number } {
+    this.#recordWorkerMetrics();
     return {
       active: this.#activeWorkers,
       limit: this.options.maxWorkers,
@@ -670,12 +671,16 @@ export class SessionService {
     this.#egressSamples.push({ bytes, observedAt: Date.now() });
     this.#pruneEgressSamples(Date.now());
     this.infrastructure.metrics?.increment('egress_bytes_total', {}, bytes);
+    this.infrastructure.metrics?.gauge('egress_mbps', this.egressMbps(), { window: '30s' });
   }
 
   egressMbps(now = Date.now(), windowMs = 30_000): number {
     this.#pruneEgressSamples(now, windowMs);
     const bytes = this.#egressSamples.reduce((total, sample) => total + sample.bytes, 0);
-    return (bytes * 8) / (windowMs / 1_000) / 1_000_000;
+    const mbps = (bytes * 8) / (windowMs / 1_000) / 1_000_000;
+    if (windowMs === 30_000)
+      this.infrastructure.metrics?.gauge('egress_mbps', mbps, { window: '30s' });
+    return mbps;
   }
 
   async cacheUsageBytes(): Promise<number> {
@@ -723,12 +728,13 @@ export class SessionService {
         true
       );
       this.infrastructure.metrics?.increment('segments_generated_total', {
-        profile: profile.profileId
+        delivery: profile.delivery.segmentType,
+        encoder: profile.video.encoder
       });
       this.infrastructure.metrics?.observe(
         'segment_generation_seconds',
         (Date.now() - workerStartedAt) / 1_000,
-        { profile: profile.profileId, encoder: profile.video.encoder }
+        { delivery: profile.delivery.segmentType, encoder: profile.video.encoder }
       );
       this.events.publish(event('worker.completed', { segment: index }, session.id));
       return destination;
@@ -900,14 +906,20 @@ export class SessionService {
   async #acquire(signal?: AbortSignal): Promise<void> {
     if (this.#activeWorkers < this.options.maxWorkers) {
       this.#activeWorkers += 1;
+      this.#recordWorkerMetrics();
       return;
     }
-    if (this.#waiters.length >= this.options.maxWorkers * 8)
+    if (this.#waiters.length >= this.options.maxWorkers * 8) {
+      this.infrastructure.metrics?.increment('worker_queue_rejections_total', {
+        kind: 'transcode'
+      });
       throw new CapacityError('Transcode queue is full');
+    }
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => {
         const index = this.#waiters.indexOf(resolve);
         if (index >= 0) this.#waiters.splice(index, 1);
+        this.#recordWorkerMetrics();
         reject(signal?.reason ?? new Error('Request was aborted'));
       };
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -915,19 +927,39 @@ export class SessionService {
         signal?.removeEventListener('abort', onAbort);
         resolve();
       });
+      this.#recordWorkerMetrics();
     });
     this.#activeWorkers += 1;
+    this.#recordWorkerMetrics();
   }
 
   #release(): void {
     this.#activeWorkers = Math.max(0, this.#activeWorkers - 1);
-    this.#waiters.shift()?.();
+    const waiter = this.#waiters.shift();
+    this.#recordWorkerMetrics();
+    waiter?.();
   }
 
   #pruneEgressSamples(now: number, windowMs = 30_000): void {
     const cutoff = now - windowMs;
     while (this.#egressSamples[0] && this.#egressSamples[0].observedAt <= cutoff)
       this.#egressSamples.shift();
+  }
+
+  #recordCacheRequest(layer: 'disk', outcome: 'hit' | 'miss'): void {
+    this.infrastructure.metrics?.increment('cache_requests_total', { layer, outcome });
+  }
+
+  #recordWorkerMetrics(): void {
+    const active = this.#activeWorkers;
+    const limit = Math.max(1, this.options.maxWorkers);
+    this.infrastructure.metrics?.gauge('workers_active', active, { kind: 'transcode' });
+    this.infrastructure.metrics?.gauge('worker_queue_depth', this.#waiters.length, {
+      kind: 'transcode'
+    });
+    this.infrastructure.metrics?.gauge('worker_pressure_ratio', active / limit, {
+      kind: 'transcode'
+    });
   }
 
   async #updateSession(

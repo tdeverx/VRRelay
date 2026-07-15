@@ -24,6 +24,12 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   an aggregate gauge during cleanup, and exact per-session viewer/egress state
   remains in repository state, events, and playback accounting rather than
   long-lived metric labels.
+- Segment generation, queue pressure, worker utilization, segment job
+  attempts/retries/failures/duration, disk/object cache requests, object-store
+  operation latency/errors, and object restore outcomes are now emitted through
+  bounded Prometheus labels such as `mode`, `outcome`, `operation`, `kind`,
+  `delivery`, and `encoder`. Session IDs, object keys, URLs, and node IDs are
+  intentionally excluded from these long-lived series.
 
 ## Lean guardrails run
 
@@ -52,8 +58,8 @@ intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
 
-- Queue, cache, object-latency, ingest, reconnect, node-egress, and
-  session-bandwidth metrics beyond the current aggregate viewer/egress
+- Ingest-state, publisher reconnect, and per-node egress metrics beyond the
+  current aggregate viewer/egress, queue, job, cache, object, and worker
   counters.
 - Bounded structured node/job log streaming and retention controls.
 - Static routing adapter, benchmark scenarios, and retained benchmark metadata.
