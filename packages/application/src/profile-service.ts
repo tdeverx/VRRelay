@@ -3,6 +3,38 @@ import { randomUUID } from 'node:crypto';
 import type { ProfileRevision } from '@vrrelay/domain';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import type { MediaCapabilities, Repository } from './index.js';
+import { ConflictError } from './errors.js';
+
+function assertImplementedProfile(input: CreateProfileRevisionRequest): void {
+  if (input.state === 'verified')
+    throw new ConflictError(
+      'Profile revisions must start as experimental until compatibility evidence promotes them'
+    );
+  if (input.delivery.latencyMode !== 'standard')
+    throw new ConflictError('Low-latency delivery profiles are not implemented');
+  if (input.processing.passthrough !== 'never')
+    throw new ConflictError('Passthrough policy profiles are not implemented');
+
+  if (input.delivery.method === 'rtsp' || input.delivery.method === 'mpegts_http')
+    throw new ConflictError('RTSP and HTTP MPEG-TS delivery profiles are not implemented');
+
+  if (input.delivery.method === 'hls') {
+    if (input.delivery.playlistType === 'event')
+      throw new ConflictError('HLS event playlists are not implemented');
+    if (input.delivery.container === 'mpegts' && input.delivery.segmentType === 'mpegts') return;
+    if (input.delivery.container === 'fmp4' && input.delivery.segmentType === 'fmp4') return;
+    throw new ConflictError('HLS profiles must use matching MPEG-TS or fMP4 segment settings');
+  }
+
+  if (
+    input.delivery.container !== 'mp4' ||
+    input.delivery.segmentType !== 'none' ||
+    input.delivery.playlistType !== 'vod'
+  )
+    throw new ConflictError(
+      'Fragmented MP4 profiles must use MP4 container, no segment output, and VOD playlist type'
+    );
+}
 
 export class ProfileService {
   constructor(private readonly repository: Repository) {}
@@ -150,6 +182,7 @@ export class ProfileService {
   }
 
   async createRevision(input: CreateProfileRevisionRequest): Promise<ProfileRevision> {
+    assertImplementedProfile(input);
     const profileId = input.profileId ?? randomUUID();
     const previous = await this.repository.getProfile(profileId);
     const profile: ProfileRevision = {

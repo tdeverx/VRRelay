@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
   DefaultProviderRegistry,
   InMemoryEventBus,
@@ -195,6 +196,139 @@ class SessionConflictRepository extends SqliteRepository {
     return super.setSessionViewers(sessionId, expectedRevision, viewers, updatedAt);
   }
 }
+
+type ProfileInputOverrides = Omit<
+  Partial<CreateProfileRevisionRequest>,
+  'video' | 'audio' | 'delivery' | 'processing'
+> & {
+  video?: Partial<CreateProfileRevisionRequest['video']>;
+  audio?: Partial<CreateProfileRevisionRequest['audio']>;
+  delivery?: Partial<CreateProfileRevisionRequest['delivery']>;
+  processing?: Partial<CreateProfileRevisionRequest['processing']>;
+};
+
+function profileInput(overrides: ProfileInputOverrides = {}): CreateProfileRevisionRequest {
+  const base: CreateProfileRevisionRequest = {
+    name: 'Profile experiment',
+    platform: 'universal',
+    state: 'experimental',
+    video: {
+      codec: 'h264',
+      encoder: 'libx264',
+      hardwareMode: 'software',
+      decodeMode: 'auto',
+      profile: 'high',
+      level: '4.1',
+      pixelFormat: 'yuv420p',
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrateKbps: 8_000,
+      maxrateKbps: 8_500,
+      bufferKbps: 17_000,
+      preset: 'veryfast',
+      gop: 120,
+      bFrames: 0
+    },
+    audio: {
+      codec: 'aac',
+      channels: 2,
+      layout: 'stereo',
+      sampleRate: 48_000,
+      bitrateKbps: 192
+    },
+    delivery: {
+      method: 'hls',
+      container: 'mpegts',
+      segmentType: 'mpegts',
+      segmentDuration: 4,
+      playlistType: 'vod',
+      latencyMode: 'standard'
+    },
+    processing: {
+      toneMap: false,
+      burnSubtitles: false,
+      passthrough: 'never',
+      maxWorkers: 2
+    }
+  };
+  return {
+    ...base,
+    ...overrides,
+    video: { ...base.video, ...(overrides.video ?? {}) },
+    audio: { ...base.audio, ...(overrides.audio ?? {}) },
+    delivery: { ...base.delivery, ...(overrides.delivery ?? {}) },
+    processing: { ...base.processing, ...(overrides.processing ?? {}) }
+  };
+}
+
+describe('profile lifecycle', () => {
+  it('accepts implemented HLS and fragmented MP4 profile shapes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-implemented-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const service = new ProfileService(repo);
+
+    await expect(service.createRevision(profileInput())).resolves.toMatchObject({
+      profileId: expect.any(String),
+      revision: 1,
+      delivery: { method: 'hls', container: 'mpegts', segmentType: 'mpegts' }
+    });
+    await expect(
+      service.createRevision(
+        profileInput({
+          profileId: 'fragmented-profile',
+          delivery: {
+            method: 'fragmented_mp4',
+            container: 'mp4',
+            segmentType: 'none',
+            playlistType: 'vod'
+          }
+        })
+      )
+    ).resolves.toMatchObject({
+      profileId: 'fragmented-profile',
+      revision: 1,
+      delivery: { method: 'fragmented_mp4', container: 'mp4', segmentType: 'none' }
+    });
+  });
+
+  it.each([
+    ['manual verified state', { state: 'verified' }, /must start as experimental/],
+    ['RTSP delivery', { delivery: { method: 'rtsp' } }, /RTSP and HTTP MPEG-TS/],
+    ['HTTP MPEG-TS delivery', { delivery: { method: 'mpegts_http' } }, /RTSP and HTTP MPEG-TS/],
+    ['low-latency delivery', { delivery: { latencyMode: 'low' } }, /Low-latency/],
+    ['HLS event playlist', { delivery: { playlistType: 'event' } }, /event playlists/],
+    [
+      'mismatched HLS segment shape',
+      { delivery: { container: 'fmp4', segmentType: 'mpegts' } },
+      /matching MPEG-TS or fMP4/
+    ],
+    [
+      'mismatched fragmented MP4 shape',
+      { delivery: { method: 'fragmented_mp4', container: 'fmp4', segmentType: 'fmp4' } },
+      /Fragmented MP4 profiles/
+    ],
+    [
+      'schema-only passthrough policy',
+      { processing: { passthrough: 'compatible' } },
+      /Passthrough policy/
+    ]
+  ] as Array<[string, ProfileInputOverrides, RegExp]>)(
+    'rejects unsupported %s profile revisions',
+    async (_name, overrides, expected) => {
+      const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-rejected-'));
+      dirs.push(dir);
+      const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+      await repo.migrate();
+      const service = new ProfileService(repo);
+
+      await expect(service.createRevision(profileInput(overrides))).rejects.toThrow(expected);
+      await expect(repo.listProfiles()).resolves.toEqual([]);
+    }
+  );
+});
 
 describe('VOD relay service', () => {
   it.each([

@@ -120,6 +120,25 @@ multi-node verification is still pending.
   generated-contract and TypeScript checks, lint, and package builds passed. See
   [Phase 4 implementation evidence](evidence/phase-04-implementation.md).
 
+## Phase 5 implementation checkpoint
+
+Phase 5 has a first build-first implementation checkpoint. Its broader media
+matrix and real-client verification are still pending.
+
+- New profile revisions now start as experiments. The create-profile path rejects
+  manual verified state, low-latency delivery, RTSP, HTTP MPEG-TS, HLS event
+  playlists, mismatched HLS segment/container settings, invalid fragmented-MP4
+  shapes, and passthrough-policy profiles instead of accepting schema-only
+  combinations the runtime cannot serve.
+- The dashboard profile form now offers only implemented delivery shapes: HLS
+  with matching MPEG-TS or fMP4 segments, and direct fragmented MP4 with no
+  segment output.
+- H.265, AV1, copy codecs, hardware-specific encoders, tone mapping, subtitle
+  burn-in, fMP4/fragmented-MP4 concurrency, dual PC/Quest output claims, corrupt
+  inputs, and real VRChat compatibility still require the retained Phase 9 and
+  release-gate evidence. See
+  [Phase 5 implementation evidence](evidence/phase-05-implementation.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
@@ -136,10 +155,12 @@ multi-node verification is still pending.
 - Phase 4 still needs broader implementation and end-to-end gates for multi-node
   placement, distributed cancellation, restart recovery, provider failover, and
   provider-binding job flows across real controller/source-worker processes.
-- Several media-profile fields and experimental delivery modes are incomplete
-  or schema-only. Hardware pipelines, subtitles, tone mapping, passthrough,
-  fMP4 concurrency, dual PC/Quest outputs, and corrupt-input handling lack the
-  required matrix evidence.
+- Several media-profile fields and experimental delivery modes still need matrix
+  evidence. Schema-only low-latency, RTSP, HTTP MPEG-TS, HLS event, mismatched
+  segment/container, and passthrough-policy profile outputs are now blocked at
+  profile creation, but hardware pipelines, H.265, AV1, copy codecs, subtitles,
+  tone mapping, fMP4 concurrency, dual PC/Quest outputs, and corrupt-input
+  handling still lack the required matrix evidence.
 - Edge grants/revocation, viewer aggregation, targeted cache administration,
   live backup/replacement behavior, origin recovery, and one-pull-per-edge
   guarantees are incomplete. Backend configuration does not yet track

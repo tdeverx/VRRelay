@@ -77,6 +77,9 @@ retained evidence belong in the
 - Route provider playback activity through the healthy connected remote binding
   when the credential belongs to a source worker, and mark expired distributed
   segment-job attempts as failed before requeueing them for recovery.
+- Reject profile revisions that select delivery, passthrough, or compatibility
+  states the runtime cannot currently serve, and narrow the profile form to
+  implemented HLS and fragmented-MP4 delivery shapes.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

@@ -45,9 +45,23 @@
   let toneMap = $state(false);
   let burnSubtitles = $state(false);
   let passthrough = $state<ProfileRevision['processing']['passthrough']>('never');
+  const deliveryMethods: Array<ProfileRevision['delivery']['method']> = ['hls', 'fragmented_mp4'];
+  const latencyModes: Array<ProfileRevision['delivery']['latencyMode']> = ['standard'];
+  const passthroughPolicies: Array<ProfileRevision['processing']['passthrough']> = ['never'];
   let base = $derived(
     profiles.find((profile) => `${profile.profileId}:${profile.revision}` === baseKey)
   );
+
+  function deliveryContainerOptions(): Array<ProfileRevision['delivery']['container']> {
+    return method === 'fragmented_mp4' ? ['mp4'] : ['mpegts', 'fmp4'];
+  }
+
+  $effect(() => {
+    const containers = deliveryContainerOptions();
+    if (!containers.includes(container)) container = containers[0] ?? 'mpegts';
+    if (latencyMode !== 'standard') latencyMode = 'standard';
+    if (passthrough !== 'never') passthrough = 'never';
+  });
 
   onMount(async () => {
     try {
@@ -242,9 +256,8 @@
             bind:value={method}
             ><Select.Trigger>{method.replace('_', ' ')}</Select.Trigger><Select.Content
               ><Select.Group
-                >{#each ['hls', 'fragmented_mp4', 'rtsp', 'mpegts_http'] as value}<Select.Item
-                    {value}
-                    label={value}>{value.replace('_', ' ')}</Select.Item
+                >{#each deliveryMethods as value}<Select.Item {value} label={value}
+                    >{value.replace('_', ' ')}</Select.Item
                   >{/each}</Select.Group
               ></Select.Content
             ></Select.Root
@@ -256,7 +269,7 @@
             bind:value={container}
             ><Select.Trigger>{container}</Select.Trigger><Select.Content
               ><Select.Group
-                >{#each ['mpegts', 'fmp4', 'mp4'] as value}<Select.Item {value} label={value}
+                >{#each deliveryContainerOptions() as value}<Select.Item {value} label={value}
                     >{value}</Select.Item
                   >{/each}</Select.Group
               ></Select.Content
@@ -380,10 +393,9 @@
                 type="single"
                 bind:value={latencyMode}
                 ><Select.Trigger>{latencyMode}</Select.Trigger><Select.Content
-                  ><Select.Item value="standard" label="standard">standard</Select.Item><Select.Item
-                    value="low"
-                    label="low">low</Select.Item
-                  ></Select.Content
+                  >{#each latencyModes as value}<Select.Item {value} label={value}
+                      >{value}</Select.Item
+                    >{/each}</Select.Content
                 ></Select.Root
               ></Field.Field
             >
@@ -392,9 +404,8 @@
                 type="single"
                 bind:value={passthrough}
                 ><Select.Trigger>{passthrough}</Select.Trigger><Select.Content
-                  >{#each ['never', 'compatible', 'always'] as value}<Select.Item
-                      {value}
-                      label={value}>{value}</Select.Item
+                  >{#each passthroughPolicies as value}<Select.Item {value} label={value}
+                      >{value}</Select.Item
                     >{/each}</Select.Content
                 ></Select.Root
               ></Field.Field
