@@ -33,6 +33,8 @@ retained evidence belong in the
   repository and CI check gate.
 - A non-mutating OpenAPI client freshness check that detects changed, missing,
   and obsolete generated files without silently repairing CI state.
+- A separate unauthenticated `/api/v1/ready` endpoint that reports redacted,
+  dependency-aware readiness distinct from `/api/v1/health` liveness.
 - Configurable object-store activation and an authenticated metrics webhook
   exporter with lifecycle, persistence-order, and delivery-health tests.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone

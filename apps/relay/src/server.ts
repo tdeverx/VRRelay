@@ -577,6 +577,28 @@ export async function createServer(
     now: new Date().toISOString(),
     workers: services.sessions.capacity()
   }));
+  app.get('/api/v1/ready', async (request, reply) => {
+    const backends = await services.backends.list();
+    const dependencies = backends.items.map(
+      ({ category, kind, healthy, checkedAt, restartRequired }) => ({
+        category,
+        kind,
+        healthy,
+        checkedAt,
+        ...(restartRequired ? { restartRequired } : {})
+      })
+    );
+    const ready =
+      dependencies.every((dependency) => dependency.healthy) && !backends.restartRequired;
+    return reply.status(ready ? 200 : 503).send({
+      status: ready ? 'ready' : 'degraded',
+      version: config.applicationVersion,
+      now: new Date().toISOString(),
+      workers: services.sessions.capacity(),
+      dependencies,
+      restartRequired: backends.restartRequired
+    });
+  });
   app.get('/api/v1/setup', async () => {
     const status = await services.auth.setupStatus();
     return {

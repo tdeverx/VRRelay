@@ -22,6 +22,23 @@ export type Health = {
     workers: WorkerCapacity;
 };
 
+export type Readiness = {
+    status: 'ready' | 'degraded';
+    version: string;
+    now: string;
+    workers: WorkerCapacity;
+    dependencies: Array<DependencyReadiness>;
+    restartRequired: boolean;
+};
+
+export type DependencyReadiness = {
+    category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
+    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    healthy: boolean;
+    checkedAt: string;
+    restartRequired?: boolean;
+};
+
 export type WorkerCapacity = {
     active: number;
     limit: number;
@@ -745,6 +762,31 @@ export type GetHealthResponses = {
 };
 
 export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses];
+
+export type GetReadinessData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/ready';
+};
+
+export type GetReadinessErrors = {
+    /**
+     * Dependency-aware readiness
+     */
+    503: Readiness;
+};
+
+export type GetReadinessError = GetReadinessErrors[keyof GetReadinessErrors];
+
+export type GetReadinessResponses = {
+    /**
+     * Dependency-aware readiness
+     */
+    200: Readiness;
+};
+
+export type GetReadinessResponse = GetReadinessResponses[keyof GetReadinessResponses];
 
 export type GetSetupStatusData = {
     body?: never;

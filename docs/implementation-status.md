@@ -210,6 +210,22 @@ still pending.
   and now labels the workflow as node cache instead of edge-only cache. See
   [Phase 7 implementation evidence](evidence/phase-07-implementation.md).
 
+## Phase 8 implementation checkpoint
+
+Phase 8 has a first build-first implementation checkpoint. Its broader
+metrics, log streaming, routing, benchmarking, and operations evidence is still
+pending.
+
+- `/api/v1/health` remains a lightweight unauthenticated liveness endpoint with
+  version, timestamp, and worker capacity.
+- `/api/v1/ready` is now a separate unauthenticated readiness endpoint. It
+  checks the backend health aggregate, returns HTTP 503 when a dependency is
+  unhealthy or a staged backend change requires restart, and returns only
+  redacted category/kind/healthy/timestamp dependency fields.
+- The generated OpenAPI client includes the readiness operation and the route
+  is covered by HTTP tests that verify status codes and redaction. See
+  [Phase 8 implementation evidence](evidence/phase-08-implementation.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
@@ -242,9 +258,9 @@ still pending.
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
-- Readiness, low-cardinality operational metrics, bounded structured logs,
-  adapter contracts, browser coverage, destructive cluster scenarios, and
-  reproducible benchmark evidence remain release work.
+- Low-cardinality operational metrics, bounded structured logs, adapter
+  contracts, browser coverage, destructive cluster scenarios, and reproducible
+  benchmark evidence remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM
   provisioning, native installers, signing/notarization, supply-chain evidence,
   upgrade/rollback, and clean-target installation have not passed their release

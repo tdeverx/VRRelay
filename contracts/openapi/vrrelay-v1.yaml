@@ -24,6 +24,14 @@ paths:
       security: []
       responses:
         '200': { $ref: '#/components/responses/Health' }
+  /ready:
+    get:
+      operationId: getReadiness
+      tags: [System]
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/Readiness' }
+        '503': { $ref: '#/components/responses/Readiness' }
   /setup:
     get:
       operationId: getSetupStatus
@@ -557,6 +565,11 @@ components:
         description: Health and worker capacity,
         content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } }
       }
+    Readiness:
+      {
+        description: Dependency-aware readiness,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Readiness' } } }
+      }
     SetupStatus:
       {
         description: First-run state,
@@ -787,6 +800,48 @@ components:
         version: { type: string }
         now: { type: string, format: date-time }
         workers: { $ref: '#/components/schemas/WorkerCapacity' }
+    Readiness:
+      type: object
+      required: [status, version, now, workers, dependencies, restartRequired]
+      properties:
+        status: { type: string, enum: [ready, degraded] }
+        version: { type: string }
+        now: { type: string, format: date-time }
+        workers: { $ref: '#/components/schemas/WorkerCapacity' }
+        dependencies: { type: array, items: { $ref: '#/components/schemas/DependencyReadiness' } }
+        restartRequired: { type: boolean }
+    DependencyReadiness:
+      type: object
+      required: [category, kind, healthy, checkedAt]
+      properties:
+        category:
+          {
+            type: string,
+            enum: [object-store, coordination, repository, routing, secrets, metrics]
+          }
+        kind:
+          {
+            type: string,
+            enum:
+              [
+                local,
+                s3,
+                azure-blob,
+                gcs,
+                postgres,
+                valkey,
+                builtin,
+                webhook,
+                sqlite,
+                keychain,
+                dpapi,
+                encrypted-file,
+                prometheus
+              ]
+          }
+        healthy: { type: boolean }
+        checkedAt: { type: string, format: date-time }
+        restartRequired: { type: boolean }
     WorkerCapacity:
       type: object
       required: [active, limit, queued]

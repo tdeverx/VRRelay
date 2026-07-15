@@ -207,6 +207,75 @@ describe('control-plane HTTP surface matrix', () => {
     expect(isInternalPeer('203.0.113.10')).toBe(false);
   });
 
+  it('reports redacted dependency-aware readiness separately from liveness', async () => {
+    const checkedAt = new Date().toISOString();
+    const app = await createServer(loadConfig({}), {
+      ...inertServerServices,
+      sessions: { capacity: () => ({ active: 1, limit: 4, queued: 0 }) },
+      backends: {
+        list: async () => ({
+          restartRequired: false,
+          items: [
+            {
+              category: 'object-store',
+              kind: 'local',
+              healthy: true,
+              message: 'internal storage path is intentionally not public',
+              checkedAt
+            }
+          ]
+        })
+      }
+    } as unknown as ServerServices);
+
+    const live = await app.inject({ method: 'GET', url: '/api/v1/health' });
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toMatchObject({ status: 'ok' });
+
+    const ready = await app.inject({ method: 'GET', url: '/api/v1/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toMatchObject({
+      status: 'ready',
+      workers: { active: 1, limit: 4, queued: 0 },
+      restartRequired: false,
+      dependencies: [{ category: 'object-store', kind: 'local', healthy: true, checkedAt }]
+    });
+    expect(ready.payload).not.toContain('internal storage path');
+    await app.close();
+  });
+
+  it('marks readiness degraded for unhealthy dependencies or pending backend restarts', async () => {
+    const checkedAt = new Date().toISOString();
+    const app = await createServer(loadConfig({}), {
+      ...inertServerServices,
+      sessions: { capacity: () => ({ active: 0, limit: 4, queued: 2 }) },
+      backends: {
+        list: async () => ({
+          restartRequired: true,
+          items: [
+            {
+              category: 'coordination',
+              kind: 'valkey',
+              healthy: false,
+              message: 'redis://secret-hostname:6379 is unavailable',
+              checkedAt
+            }
+          ]
+        })
+      }
+    } as unknown as ServerServices);
+
+    const response = await app.inject({ method: 'GET', url: '/api/v1/ready' });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      status: 'degraded',
+      restartRequired: true,
+      dependencies: [{ category: 'coordination', kind: 'valkey', healthy: false, checkedAt }]
+    });
+    expect(response.payload).not.toContain('secret-hostname');
+    await app.close();
+  });
+
   it('fails closed instead of serving controller-local media when no edge is available', async () => {
     let manifestCalls = 0;
     const app = await createServer(

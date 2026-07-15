@@ -11,6 +11,12 @@ The external administrative API is versioned under `/api/v1`. Its OpenAPI descri
 
 Public responses must not contain provider secrets, private source URLs, FFmpeg arguments, backend connection strings, certificate private material, or filesystem paths.
 
+`GET /api/v1/health` is lightweight liveness. `GET /api/v1/ready` is
+dependency-aware readiness for orchestrators: it returns 503 when a backend
+dependency is unhealthy or a staged backend change requires restart, and it
+omits backend error messages so private endpoints and filesystem paths are not
+exposed publicly.
+
 `GET /api/v1/backends` returns redacted health for every infrastructure category. Routing backends may be checked with `/backends/validate` and hot-activated with `/backends/activate`. Object-store, repository, coordination, and root-secret changes that cannot be safely hot-swapped report `restartRequired` instead of silently changing the running topology.
 
 Node capability responses report cache usage in bytes, the configured cache limit when present, and `egressMbps` as the trailing 30-second average of media payload bytes actually consumed by clients. Viewer counts remain explicitly estimated; cumulative media byte counters are exact.

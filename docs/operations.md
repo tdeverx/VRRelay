@@ -6,6 +6,13 @@ Create a single-use join token in **Cluster → Enroll node**, select the exact 
 
 The protocol is identical over public WSS and private overlays. Public mode needs TCP 8100 forwarded to the controller agent listener and the public DNS name in `VRRELAY_AGENT_TLS_NAMES`. Overlay mode uses the overlay address in `VRRELAY_CONTROLLER_AGENT_URL`. Workers, origins, and edges need no inbound management port.
 
+## Health and readiness
+
+Use `/api/v1/health` for process liveness and `/api/v1/ready` for dependency
+readiness. Readiness returns HTTP 503 when repository, coordination,
+object-store, routing, metrics, or restart-required backend state is not ready,
+but it only exposes redacted dependency category/kind/status fields.
+
 ## Traffic director
 
 The default director performs capacity-aware, stable session hashing locally. **Cluster → Configure routing** can validate and activate a generic webhook without restarting the controller. Public endpoints must use HTTPS; private-network HTTP is accepted with the same SSRF and credential-in-URL checks as provider connections. An optional `secretRef` names a bearer token already provisioned in the controller's root secret backend—the secret value is never stored in distributed configuration or returned by the API.
