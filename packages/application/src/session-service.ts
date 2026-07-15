@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { access, mkdir, rm, utimes } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
@@ -8,6 +8,7 @@ import type {
   LiveChannel,
   MediaItem,
   NodeRole,
+  PlaybackGrant,
   ProfileRevision,
   ProviderConnection,
   RelaySession,
@@ -38,6 +39,59 @@ import { SessionCache } from './session-cache.js';
 import { SessionJobCoordinator } from './session-jobs.js';
 
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
+const EDGE_GRANT_PREFIX = 'eg1';
+const EDGE_GRANT_SIGNING_KEY = 'playback.edge_grant_signing_key';
+
+interface EdgePlaybackGrantPayload {
+  v: 1;
+  kind: 'edge-playback';
+  sessionId: string;
+  grantHash: string;
+  edgeNodeId: string;
+  issuedAt: string;
+  expiresAt: string | null;
+}
+
+function hmacBase64Url(secret: string, value: string): string {
+  return createHmac('sha256', secret).update(value).digest('base64url');
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function encodeEdgeGrant(payload: EdgePlaybackGrantPayload, secret: string): string {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${EDGE_GRANT_PREFIX}.${body}.${hmacBase64Url(secret, body)}`;
+}
+
+function parseEdgeGrant(token: string): { body: string; signature: string } | undefined {
+  const [prefix, body, signature, extra] = token.split('.');
+  if (prefix !== EDGE_GRANT_PREFIX || !body || !signature || extra !== undefined) return undefined;
+  return { body, signature };
+}
+
+function decodeEdgeGrantBody(body: string): EdgePlaybackGrantPayload {
+  const decoded = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as unknown;
+  if (
+    !decoded ||
+    typeof decoded !== 'object' ||
+    (decoded as EdgePlaybackGrantPayload).v !== 1 ||
+    (decoded as EdgePlaybackGrantPayload).kind !== 'edge-playback' ||
+    typeof (decoded as EdgePlaybackGrantPayload).sessionId !== 'string' ||
+    typeof (decoded as EdgePlaybackGrantPayload).grantHash !== 'string' ||
+    typeof (decoded as EdgePlaybackGrantPayload).edgeNodeId !== 'string' ||
+    typeof (decoded as EdgePlaybackGrantPayload).issuedAt !== 'string' ||
+    !(
+      (decoded as EdgePlaybackGrantPayload).expiresAt === null ||
+      typeof (decoded as EdgePlaybackGrantPayload).expiresAt === 'string'
+    )
+  )
+    throw new Error('Invalid edge grant payload');
+  return decoded as EdgePlaybackGrantPayload;
+}
 
 export interface SessionServiceOptions {
   publicUrl: string;
@@ -264,6 +318,28 @@ export class SessionService {
     await this.repository.deleteSessionAndRevokePlaybackGrants(id);
     await rm(join(this.options.cacheDir, 'vod', id), { recursive: true, force: true });
     this.events.publish(event('session.deleted', { name: session.name }, id));
+  }
+
+  async createEdgePlaybackGrant(token: string, edgeNodeId: string): Promise<string> {
+    if (parseEdgeGrant(token))
+      throw new UnauthorizedError('Edge playback grants cannot be exchanged for another edge');
+    const grantHash = hashToken(token);
+    const grant = await this.#validPlaybackGrant(grantHash);
+    const session = await this.repository.getSession(grant.sessionId);
+    if (!session) throw new NotFoundError('Session was not found');
+    const secret = await this.#edgeGrantSigningKey(true);
+    return encodeEdgeGrant(
+      {
+        v: 1,
+        kind: 'edge-playback',
+        sessionId: session.id,
+        grantHash,
+        edgeNodeId,
+        issuedAt: new Date().toISOString(),
+        expiresAt: grant.expiresAt
+      },
+      secret
+    );
   }
 
   async manifest(token: string, segmentBaseUrl?: string): Promise<string> {
@@ -625,8 +701,16 @@ export class SessionService {
     }
   }
 
-  async #playback(token: string): Promise<{ session: RelaySession; profile: ProfileRevision }> {
-    const grant = await this.repository.getPlaybackGrant(hashToken(token));
+  async #edgeGrantSigningKey(create: boolean): Promise<string> {
+    const existing = await this.repository.getSetting(EDGE_GRANT_SIGNING_KEY);
+    if (existing) return existing;
+    if (!create) throw new UnauthorizedError('Edge playback link is invalid');
+    return (await this.repository.putSettingIfAbsent(EDGE_GRANT_SIGNING_KEY, opaqueToken(32)))
+      .record.value;
+  }
+
+  async #validPlaybackGrant(tokenHash: string): Promise<PlaybackGrant> {
+    const grant = await this.repository.getPlaybackGrant(tokenHash);
     if (
       !grant ||
       grant.revokedAt ||
@@ -634,6 +718,33 @@ export class SessionService {
     ) {
       throw new UnauthorizedError('Playback link is invalid or expired');
     }
+    return grant;
+  }
+
+  async #resolvePlaybackGrant(token: string): Promise<PlaybackGrant> {
+    const edgeGrant = parseEdgeGrant(token);
+    if (!edgeGrant) return this.#validPlaybackGrant(hashToken(token));
+    const secret = await this.#edgeGrantSigningKey(false);
+    if (!safeEqual(edgeGrant.signature, hmacBase64Url(secret, edgeGrant.body)))
+      throw new UnauthorizedError('Edge playback link is invalid');
+    let payload: EdgePlaybackGrantPayload;
+    try {
+      payload = decodeEdgeGrantBody(edgeGrant.body);
+    } catch {
+      throw new UnauthorizedError('Edge playback link is invalid');
+    }
+    if (this.#isEdgeOnly() && payload.edgeNodeId !== this.options.nodeId)
+      throw new UnauthorizedError('Edge playback link is not valid for this node');
+    if (payload.expiresAt && Date.parse(payload.expiresAt) <= Date.now())
+      throw new UnauthorizedError('Playback link is invalid or expired');
+    const grant = await this.#validPlaybackGrant(payload.grantHash);
+    if (grant.sessionId !== payload.sessionId)
+      throw new UnauthorizedError('Edge playback link does not match its session');
+    return grant;
+  }
+
+  async #playback(token: string): Promise<{ session: RelaySession; profile: ProfileRevision }> {
+    const grant = await this.#resolvePlaybackGrant(token);
     const session = await this.repository.getSession(grant.sessionId);
     if (!session) throw new NotFoundError('Session was not found');
     const profile = await this.repository.getProfile(session.profileId, session.profileRevision);

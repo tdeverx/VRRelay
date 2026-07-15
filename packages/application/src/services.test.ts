@@ -605,6 +605,129 @@ describe('VOD relay service', () => {
     }
     await expect(repo.getSession(session.id)).resolves.toMatchObject({ state: 'stopped' });
   });
+
+  it('issues edge-scoped playback grants that honor session revocation', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-edge-grant-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p1',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 's1',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('s1', 'token');
+    const registry = new DefaultProviderRegistry();
+    registry.register(provider);
+    const transcoder: Transcoder = {
+      discover: async () => ({
+        ffmpegVersion: 'test',
+        encoders: [],
+        muxers: [],
+        filters: [],
+        pixelFormats: []
+      }),
+      generateSegment: async () => {},
+      streamFragmentedMp4: async () => {}
+    };
+    const profileService = new ProfileService(repo);
+    await profileService.seed({
+      ffmpegVersion: 'test',
+      encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
+      muxers: ['mpegts'],
+      filters: [],
+      pixelFormats: ['yuv420p']
+    });
+    const events = new InMemoryEventBus();
+    const controller = new SessionService(
+      repo,
+      secrets,
+      registry,
+      transcoder,
+      events,
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'controller-cache'),
+        cacheTtlMs: 1000,
+        maxWorkers: 1,
+        nodeId: 'controller',
+        roles: ['controller']
+      },
+      { clusterRepository: repo }
+    );
+    const edgeA = new SessionService(
+      repo,
+      secrets,
+      registry,
+      transcoder,
+      events,
+      {
+        publicUrl: 'https://edge-a.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'edge-a-cache'),
+        cacheTtlMs: 1000,
+        maxWorkers: 1,
+        nodeId: 'edge-a',
+        roles: ['edge']
+      },
+      { clusterRepository: repo }
+    );
+    const edgeB = new SessionService(
+      repo,
+      secrets,
+      registry,
+      transcoder,
+      events,
+      {
+        publicUrl: 'https://edge-b.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'edge-b-cache'),
+        cacheTtlMs: 1000,
+        maxWorkers: 1,
+        nodeId: 'edge-b',
+        roles: ['edge']
+      },
+      { clusterRepository: repo }
+    );
+    const session = await controller.create({
+      kind: 'vod',
+      source: { providerId: 'p1', itemId: 'm1' },
+      profileId: 'universal-h264-hls-vod',
+      profileRevision: 1,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const controllerToken = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
+    const edgeToken = await controller.createEdgePlaybackGrant(controllerToken, 'edge-a');
+
+    expect(edgeToken).toMatch(/^eg1\./);
+    expect(edgeToken).not.toContain(controllerToken);
+    await expect(edgeA.touchViewer(edgeToken, 'viewer-a')).resolves.toMatchObject({
+      id: session.id
+    });
+    await expect(edgeB.touchViewer(edgeToken, 'viewer-b')).rejects.toThrow(
+      'Edge playback link is not valid for this node'
+    );
+
+    await repo.deleteSessionAndRevokePlaybackGrants(session.id, new Date().toISOString());
+    await expect(edgeA.touchViewer(edgeToken, 'viewer-a')).rejects.toThrow(
+      'Playback link is invalid or expired'
+    );
+  });
 });
 
 describe('provider lifecycle', () => {

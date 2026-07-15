@@ -139,6 +139,22 @@ matrix and real-client verification are still pending.
   release-gate evidence. See
   [Phase 5 implementation evidence](evidence/phase-05-implementation.md).
 
+## Phase 6 implementation checkpoint
+
+Phase 6 has a first build-first implementation checkpoint. Its broader
+edge-delivery and live-fan-out verification is still pending.
+
+- Controller VOD playlists and live edge redirect playlists now exchange the
+  administrator-facing playback token for a signed edge playback grant scoped to
+  the selected edge node and session.
+- Edge routes validate the signed grant against the durable playback grant on
+  each request. Session deletion or grant revocation therefore invalidates
+  already minted edge links instead of leaving edge URLs usable until process
+  restart.
+- Focused application and HTTP-boundary tests, format check, generated-contract
+  and TypeScript checks, lint, package builds, and relay build passed. See
+  [Phase 6 implementation evidence](evidence/phase-06-implementation.md).
+
 ## Known gaps in the audited checkout
 
 - Phase 1 restored a clean local engineering baseline: format, lint, workspace
@@ -161,11 +177,11 @@ matrix and real-client verification are still pending.
   profile creation, but hardware pipelines, H.265, AV1, copy codecs, subtitles,
   tone mapping, fMP4 concurrency, dual PC/Quest outputs, and corrupt-input
   handling still lack the required matrix evidence.
-- Edge grants/revocation, viewer aggregation, targeted cache administration,
-  live backup/replacement behavior, origin recovery, and one-pull-per-edge
-  guarantees are incomplete. Backend configuration does not yet track
-  per-node applied acknowledgement; that belongs to Phase 6 and must not be
-  inferred from the current controller-level activation record.
+- Edge grants now have a first signed, session-scoped implementation checkpoint,
+  but Valkey viewer aggregation, targeted cache administration, per-node backend
+  activation acknowledgement, live backup/replacement behavior, origin recovery,
+  and one-pull-per-edge guarantees remain Phase 6 work. Backend configuration
+  must not be inferred from the current controller-level activation record.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

@@ -1,6 +1,6 @@
 # Security model
 
-The dashboard uses a first-run administrator password hashed with Argon2id, an HTTP-only same-site cookie, and CSRF tokens for mutations. Personal access tokens are hashed, scoped, revocable records. Playback and one-time OBS publisher connection details contain opaque random grants instead of Jellyfin credentials. Stored live-channel URLs are credential-free, and public channel summaries omit the publisher-token hash.
+The dashboard uses a first-run administrator password hashed with Argon2id, an HTTP-only same-site cookie, and CSRF tokens for mutations. Personal access tokens are hashed, scoped, revocable records. Playback and one-time OBS publisher connection details contain opaque random grants instead of Jellyfin credentials. Controller playlists mint signed, session-scoped edge playback grants for the selected edge instead of reusing the administrator-facing playback token in edge segment URLs. Edge requests verify the signed grant against the durable playback grant, so session deletion or grant revocation stops already minted edge links. Stored live-channel URLs are credential-free, and public channel summaries omit the publisher-token hash.
 
 Jellyfin user credentials are used only for the initial authentication exchange. The password is discarded, and the returned user token is stored in the selected node-local secret backend: macOS Keychain, Windows DPAPI, a Kubernetes-provided secret, or an AES-256-GCM encrypted file. API-key authentication is available as explicitly broad service mode.
 

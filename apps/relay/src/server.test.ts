@@ -229,6 +229,48 @@ describe('control-plane HTTP surface matrix', () => {
     await app.close();
   });
 
+  it('uses signed edge grants when a controller playlist routes VOD traffic to an edge', async () => {
+    const calls: Array<{ token: string; edgeNodeId: string }> = [];
+    let manifestToken: string | undefined;
+    let manifestBase: string | undefined;
+    const app = await createServer(
+      loadConfig({ VRRELAY_NODE_ROLES: 'controller', VRRELAY_NODE_ID: 'controller-node' }),
+      {
+        ...inertServerServices,
+        sessions: {
+          touchViewer: async () => ({ id: 'session-1', preferredRegion: 'eu-west' }),
+          createEdgePlaybackGrant: async (token: string, edgeNodeId: string) => {
+            calls.push({ token, edgeNodeId });
+            return 'signed-edge-token';
+          },
+          manifest: async (token: string, base?: string) => {
+            manifestToken = token;
+            manifestBase = base;
+            return `#EXTM3U\n${base}/0.ts\n`;
+          },
+          recordEgress: () => undefined
+        },
+        cluster: {
+          selectEdge: async (_sessionId: string, preferredRegion?: string) => {
+            expect(preferredRegion).toBe('eu-west');
+            return { nodeId: 'edge-1', publicUrl: 'https://edge.example' };
+          }
+        }
+      } as unknown as ServerServices,
+      'controller'
+    );
+
+    const response = await app.inject({ method: 'GET', url: '/play/controller-token/index.m3u8' });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual([{ token: 'controller-token', edgeNodeId: 'edge-1' }]);
+    expect(manifestToken).toBe('controller-token');
+    expect(manifestBase).toBe('https://edge.example/play/signed-edge-token/segment');
+    expect(response.body).toContain('signed-edge-token');
+    expect(response.body).not.toContain('controller-token/segment');
+    await app.close();
+  });
+
   it('accepts forwarding headers only from configured proxy CIDRs', async () => {
     const identities: string[] = [];
     const app = await createServer(

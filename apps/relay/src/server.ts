@@ -1171,7 +1171,13 @@ export async function createServer(
         'No edge is available to serve this playback session',
         503
       );
-    const base = route ? `${route.publicUrl.replace(/\/$/, '')}/play/${token}/segment` : undefined;
+    const routedToEdge = route && route.nodeId !== config.nodeId;
+    const edgeToken = routedToEdge
+      ? await services.sessions.createEdgePlaybackGrant(token, route.nodeId)
+      : token;
+    const base = route
+      ? `${route.publicUrl.replace(/\/$/, '')}/play/${edgeToken}/segment`
+      : undefined;
     const manifest = await services.sessions.manifest(token, base);
     services.sessions.recordEgress(Buffer.byteLength(manifest), session.id);
     return reply.type('application/vnd.apple.mpegurl').send(manifest);
@@ -1259,7 +1265,8 @@ export async function createServer(
     if (surface === 'controller' || query.edge !== '1') {
       const route = await services.cluster.selectEdge(session.id, session.preferredRegion);
       if (route && route.nodeId !== config.nodeId) {
-        const target = `${route.publicUrl.replace(/\/$/, '')}/play/${token}/live.m3u8?edge=1`;
+        const edgeToken = await services.sessions.createEdgePlaybackGrant(token, route.nodeId);
+        const target = `${route.publicUrl.replace(/\/$/, '')}/play/${edgeToken}/live.m3u8?edge=1`;
         const redirect = `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=8000000\n${target}\n`;
         services.sessions.recordEgress(Buffer.byteLength(redirect), session.id);
         return reply.type('application/vnd.apple.mpegurl').send(redirect);

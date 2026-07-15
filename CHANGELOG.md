@@ -80,6 +80,10 @@ retained evidence belong in the
 - Reject profile revisions that select delivery, passthrough, or compatibility
   states the runtime cannot currently serve, and narrow the profile form to
   implemented HLS and fragmented-MP4 delivery shapes.
+- Route controller-generated VOD and live playlists to edges with signed,
+  session-scoped edge playback grants, so public edge URLs no longer reuse the
+  administrator-facing controller token and session revocation invalidates
+  already minted edge links.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.
