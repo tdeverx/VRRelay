@@ -91,6 +91,9 @@ retained evidence belong in the
   cannot clear restart-required status for the rest of the cluster.
 - Record selected ingest-origin node and region metadata when creating live
   channels from available online origin nodes.
+- Allow cache inventory and eviction requests to target a connected cluster
+  node through strict agent envelopes, while failing closed for disconnected
+  node targets.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.
@@ -134,8 +137,7 @@ retained evidence belong in the
 
 - The audited repository has not yet passed the feature-complete public release
   candidate gate.
-- A real PostgreSQL dump/restore drill remains Phase 9–11 evidence, and per-node
-  acknowledgement of applied backend configuration remains Phase 6 work.
+- A real PostgreSQL dump/restore drill remains Phase 9–11 evidence.
 - Node transport hardening, distributed orchestration, media matrices,
   edge/live failure handling, dashboard workflows, observability, deployment
   topologies, native installers, and supply-chain outputs require the remaining

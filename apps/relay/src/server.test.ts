@@ -21,7 +21,9 @@ import {
   auditActor,
   auditedOperation,
   createServer,
+  cacheInventoryWithNodeTarget,
   deleteProviderBindingWithCredentialCleanup,
+  evictCacheWithNodeTarget,
   isInternalPeer,
   isLoopbackPeer,
   liveHlsUpstreamUrl,
@@ -630,6 +632,94 @@ describe('node certificate rotation delivery', () => {
     );
     expect(events[0]?.operationId).toBe(events[1]?.operationId);
     expect(events[2]?.operationId).toBe(events[3]?.operationId);
+  });
+});
+
+describe('node-targeted cache administration', () => {
+  const cached = {
+    key: 'session-1/profile-r1/0.ts',
+    size: 42,
+    contentType: 'video/mp2t',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    createdAt: '2026-07-15T00:00:00.000Z',
+    lastAccessedAt: '2026-07-15T00:00:00.000Z'
+  };
+
+  it('routes inventory and eviction to a connected node when nodeId is supplied', async () => {
+    const calls: string[] = [];
+    const services = {
+      sessions: {
+        cacheInventory: async () => {
+          calls.push('local-inventory');
+          return [];
+        },
+        evictCache: async () => {
+          calls.push('local-evict');
+          return 0;
+        }
+      },
+      agentController: {
+        connected: (nodeId: string) => {
+          calls.push(`connected:${nodeId}`);
+          return true;
+        },
+        cacheInventory: async (nodeId: string) => {
+          calls.push(`remote-inventory:${nodeId}`);
+          return { items: [cached], totalBytes: cached.size };
+        },
+        evictCache: async (
+          nodeId: string,
+          filter: { sessionId?: string; profileId?: string; all?: boolean }
+        ) => {
+          calls.push(`remote-evict:${nodeId}:${JSON.stringify(filter)}`);
+          return { removed: 1 };
+        }
+      }
+    };
+
+    await expect(cacheInventoryWithNodeTarget(services, 'edge-1')).resolves.toEqual({
+      items: [cached],
+      totalBytes: cached.size
+    });
+    await expect(
+      evictCacheWithNodeTarget(services, { nodeId: 'edge-1', sessionId: 'session-1' })
+    ).resolves.toEqual({ removed: 1 });
+    expect(calls).toEqual([
+      'connected:edge-1',
+      'remote-inventory:edge-1',
+      'connected:edge-1',
+      'remote-evict:edge-1:{"sessionId":"session-1"}'
+    ]);
+  });
+
+  it('fails closed instead of falling back locally for a disconnected node target', async () => {
+    let localEvicted = false;
+    const services = {
+      sessions: {
+        cacheInventory: async () => [],
+        evictCache: async () => {
+          localEvicted = true;
+          return 1;
+        }
+      },
+      agentController: {
+        connected: () => false,
+        cacheInventory: async () => ({ items: [], totalBytes: 0 }),
+        evictCache: async () => ({ removed: 0 })
+      }
+    };
+
+    await expect(cacheInventoryWithNodeTarget(services, 'offline-edge')).rejects.toMatchObject({
+      code: 'node_unavailable',
+      statusCode: 409
+    });
+    await expect(
+      evictCacheWithNodeTarget(services, { nodeId: 'offline-edge', all: true })
+    ).rejects.toMatchObject({
+      code: 'node_unavailable',
+      statusCode: 409
+    });
+    expect(localEvicted).toBe(false);
   });
 });
 

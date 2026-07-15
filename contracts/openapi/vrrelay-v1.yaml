@@ -386,6 +386,11 @@ paths:
     get:
       operationId: listCacheInventory
       tags: [Operations]
+      parameters:
+        - name: nodeId
+          in: query
+          required: false
+          schema: { type: string }
       responses:
         '200': { $ref: '#/components/responses/CacheList' }
     delete:
@@ -1588,6 +1593,7 @@ components:
       type: object
       minProperties: 1
       properties:
+        nodeId: { type: string }
         all: { type: boolean }
         sessionId: { type: string }
         profileId: { type: string }

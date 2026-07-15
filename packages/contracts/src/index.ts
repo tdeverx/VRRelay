@@ -193,8 +193,13 @@ export type DeleteProviderBindingQuery = z.infer<typeof DeleteProviderBindingQue
 
 export const RotateNodeCertificateRequestSchema = z.object({}).strict();
 export type RotateNodeCertificateRequest = z.infer<typeof RotateNodeCertificateRequestSchema>;
+export const CacheInventoryQuerySchema = z.object({
+  nodeId: z.string().min(1).optional()
+});
+export type CacheInventoryQuery = z.infer<typeof CacheInventoryQuerySchema>;
 export const CacheEvictionRequestSchema = z
   .object({
+    nodeId: z.string().min(1).optional(),
     all: z.boolean().optional(),
     sessionId: z.string().optional(),
     profileId: z.string().optional()

@@ -161,6 +161,9 @@ edge-delivery and live-fan-out verification is still pending.
 - Live channel creation now records the selected online ingest-origin node and
   region when cluster state is available, while preserving standalone/local
   channel creation when no cluster origin is recorded.
+- The cache administration API can target a connected node for inventory and
+  eviction via strict agent envelopes and fails closed for disconnected targets
+  instead of falling back to controller-local cache mutation.
 - Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
   format check, generated-contract and TypeScript checks, lint, package builds,
   and relay build passed. See
@@ -188,12 +191,12 @@ edge-delivery and live-fan-out verification is still pending.
   profile creation, but hardware pipelines, H.265, AV1, copy codecs, subtitles,
   tone mapping, fMP4 concurrency, dual PC/Quest outputs, and corrupt-input
   handling still lack the required matrix evidence.
-- Edge grants and coordination-backed viewer aggregation now have an
-  implementation checkpoint, and object-store backend application is tracked per
-  node. Live channel creation records selected origin metadata when an online
-  ingest-origin is available, but targeted cache administration,
-  profile-driven normalization, live backup/replacement behavior, origin
-  recovery, and one-pull-per-edge guarantees remain Phase 6 work.
+- Edge grants, coordination-backed viewer aggregation, selected-origin
+  metadata, node-targeted cache administration, and per-node backend
+  application tracking now have implementation checkpoints. Cache restore and
+  disk-pressure behavior, profile-driven normalization, live backup/replacement
+  behavior, origin recovery, and one-pull-per-edge guarantees remain Phase 6
+  work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

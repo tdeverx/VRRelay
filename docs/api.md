@@ -15,6 +15,8 @@ Public responses must not contain provider secrets, private source URLs, FFmpeg 
 
 Node capability responses report cache usage in bytes, the configured cache limit when present, and `egressMbps` as the trailing 30-second average of media payload bytes actually consumed by clients. Viewer counts remain explicitly estimated; cumulative media byte counters are exact.
 
+`GET /api/v1/cache` and `DELETE /api/v1/cache` operate on the local controller or standalone cache by default. Supplying `nodeId` targets a connected node instead; disconnected targets fail closed rather than falling back to local cache state.
+
 ## Changing the API
 
 1. Change or add the request schema in `packages/contracts`.

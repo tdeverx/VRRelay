@@ -195,6 +195,22 @@ function providerAgentHandler(providers: ProviderService): NodeAgentOptions['onP
   };
 }
 
+function cacheAgentHandler(sessions: SessionService): NodeAgentOptions['onCache'] {
+  return async (operation, payload) => {
+    if (operation === 'cache.inventory') {
+      const items = await sessions.cacheInventory();
+      return { items, totalBytes: items.reduce((sum, item) => sum + item.size, 0) };
+    }
+    return {
+      removed: await sessions.evictCache({
+        ...(payload.all !== undefined ? { all: Boolean(payload.all) } : {}),
+        ...(typeof payload.sessionId === 'string' ? { sessionId: payload.sessionId } : {}),
+        ...(typeof payload.profileId === 'string' ? { profileId: payload.profileId } : {})
+      })
+    };
+  };
+}
+
 export function nodeRoutingPublicUrl(config: Pick<RelayConfig, 'playbackUrl'>): string {
   return config.playbackUrl;
 }
@@ -203,7 +219,7 @@ export function configuredNodeAgentOptions(
   config: RelayConfig,
   secrets: NodeAgentOptions['secretStore'],
   capabilities: () => Promise<NodeCapability>,
-  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider'>,
+  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider' | 'onCache'>,
   internalUrl?: string
 ): NodeAgentOptions | undefined {
   if (!config.controllerAgentUrl || !config.controllerEnrollmentUrl) return undefined;
@@ -224,7 +240,7 @@ function configuredNodeAgent(
   config: RelayConfig,
   secrets: NodeAgentOptions['secretStore'],
   capabilities: () => Promise<NodeCapability>,
-  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider'>,
+  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider' | 'onCache'>,
   internalUrl?: string
 ): NodeAgent | undefined {
   const options = configuredNodeAgentOptions(config, secrets, capabilities, handlers, internalUrl);
@@ -552,7 +568,8 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     {
       onSegment: (command, signal) => sessions.executeRemoteSegment(command, signal),
       onCancel: (jobId) => sessions.cancelJob(jobId),
-      onProvider: providerAgentHandler(providers)
+      onProvider: providerAgentHandler(providers),
+      onCache: cacheAgentHandler(sessions)
     },
     `http://127.0.0.1:${listen.port}`
   );
@@ -626,6 +643,9 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
     onCancel: async () => undefined,
     onProvider: async () => {
       throw new Error('Provider operations are unavailable on an ingest origin');
+    },
+    onCache: async () => {
+      throw new Error('Cache operations are unavailable on an ingest origin');
     }
   });
   await nodeAgent?.start();
@@ -722,7 +742,8 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
     onCancel: async () => undefined,
     onProvider: async () => {
       throw new Error('Provider operations are unavailable on an edge');
-    }
+    },
+    onCache: cacheAgentHandler(sessions)
   });
   await nodeAgent?.start();
 

@@ -45,6 +45,7 @@ import {
   CreateProviderBindingRequestSchema,
   DeleteProviderBindingQuerySchema,
   RotateNodeCertificateRequestSchema,
+  CacheInventoryQuerySchema,
   CacheEvictionRequestSchema,
   BackendValidationRequestSchema,
   BackendActivationRequestSchema
@@ -171,6 +172,54 @@ export async function rotateNodeCertificateWithDelivery(
   if (!node?.certificateExpiresAt)
     throw new ApplicationError('not_found', 'Rotated node certificate was not found', 404);
   return { certificateExpiresAt: node.certificateExpiresAt };
+}
+
+interface NodeCacheServices {
+  sessions: Pick<SessionService, 'cacheInventory' | 'evictCache'>;
+  agentController?: Pick<AgentController, 'connected' | 'cacheInventory' | 'evictCache'>;
+}
+
+export async function cacheInventoryWithNodeTarget(
+  services: NodeCacheServices,
+  nodeId?: string
+): Promise<{ items: Awaited<ReturnType<SessionService['cacheInventory']>>; totalBytes: number }> {
+  if (nodeId) {
+    if (!services.agentController?.connected(nodeId))
+      throw new ApplicationError(
+        'node_unavailable',
+        'The node must be connected before its cache inventory can be read',
+        409
+      );
+    return services.agentController.cacheInventory(nodeId);
+  }
+  const items = await services.sessions.cacheInventory();
+  return { items, totalBytes: items.reduce((sum, item) => sum + item.size, 0) };
+}
+
+export async function evictCacheWithNodeTarget(
+  services: NodeCacheServices,
+  filter: {
+    nodeId?: string | undefined;
+    sessionId?: string | undefined;
+    profileId?: string | undefined;
+    all?: boolean | undefined;
+  }
+): Promise<{ removed: number }> {
+  const eviction = {
+    ...(filter.all !== undefined ? { all: filter.all } : {}),
+    ...(filter.sessionId ? { sessionId: filter.sessionId } : {}),
+    ...(filter.profileId ? { profileId: filter.profileId } : {})
+  };
+  if (filter.nodeId) {
+    if (!services.agentController?.connected(filter.nodeId))
+      throw new ApplicationError(
+        'node_unavailable',
+        'The node must be connected before its cache can be evicted',
+        409
+      );
+    return services.agentController.evictCache(filter.nodeId, eviction);
+  }
+  return { removed: await services.sessions.evictCache(eviction) };
 }
 
 export function providerBindingDeletionAuditContext(result: ProviderBindingDeletionOutcome) {
@@ -1084,19 +1133,13 @@ export async function createServer(
   });
   app.get('/api/v1/cache', async (request) => {
     await authenticate(request, ['sessions:read']);
-    const items = await services.sessions.cacheInventory();
-    return { items, totalBytes: items.reduce((sum, item) => sum + item.size, 0) };
+    const query = parse(CacheInventoryQuerySchema, request.query);
+    return cacheInventoryWithNodeTarget(services, query.nodeId);
   });
   app.delete('/api/v1/cache', async (request) => {
     await mutate(request, ['sessions:control']);
     const body = parse(CacheEvictionRequestSchema, request.body);
-    return {
-      removed: await services.sessions.evictCache({
-        ...(body.all !== undefined ? { all: body.all } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
-        ...(body.profileId ? { profileId: body.profileId } : {})
-      })
-    };
+    return evictCacheWithNodeTarget(services, body);
   });
   app.get('/metrics', async (request, reply) => {
     if (!metricsAuthorized(request)) return reply.status(401).send();

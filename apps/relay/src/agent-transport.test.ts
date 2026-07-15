@@ -93,7 +93,8 @@ describe('mTLS node agent transport', () => {
       capabilities: async () => capabilities,
       onSegment: async () => {},
       onCancel: async () => {},
-      onProvider: async () => ({})
+      onProvider: async () => ({}),
+      onCache: async () => ({})
     };
     const first = new NodeAgent(options);
     await expect(first.start()).rejects.toThrow(/response was lost/);
@@ -228,7 +229,9 @@ describe('mTLS node agent transport', () => {
         await segmentRelease;
       },
       onCancel: async () => {},
-      onProvider: async () => ({})
+      onProvider: async () => ({}),
+      onCache: async (operation) =>
+        operation === 'cache.inventory' ? { items: [], totalBytes: 0 } : { removed: 0 }
     };
     const agent = new NodeAgent(agentOptions);
     await agent.start();
@@ -320,6 +323,13 @@ describe('mTLS node agent transport', () => {
       JSON.parse(await nodeSecrets.get('cluster:node-identity')) as { draining: boolean }
     ).toMatchObject({ draining: false });
     await controller.dispatch(enrollment.node.id, { ...command, jobId: 'job-after-undrain' });
+    expect(await controller.cacheInventory(enrollment.node.id)).toEqual({
+      items: [],
+      totalBytes: 0
+    });
+    expect(await controller.evictCache(enrollment.node.id, { all: true })).toEqual({
+      removed: 0
+    });
     await restartedAgent.stop();
 
     await cluster.revoke(enrollment.node.id);
@@ -621,7 +631,8 @@ describe('mTLS node agent transport', () => {
       maxMessagesPerMinute: 4,
       onSegment: async () => {},
       onCancel: async () => {},
-      onProvider: async () => ({})
+      onProvider: async () => ({}),
+      onCache: async () => ({})
     });
     await agent.start();
     for (let attempt = 0; attempt < 80 && !controller.connected(enrollment.node.id); attempt += 1)

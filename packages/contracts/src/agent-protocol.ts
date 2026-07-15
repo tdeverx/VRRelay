@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from 'zod';
-import { NodeCapabilitySchema } from '@vrrelay/domain';
+import { CachedObjectSchema, NodeCapabilitySchema } from '@vrrelay/domain';
 
 const StrictNodeCapabilitySchema = NodeCapabilitySchema.strict();
 
@@ -149,6 +149,29 @@ const JobFailedPayloadSchema = z
   })
   .strict();
 const JobCancelPayloadSchema = z.object({ jobId: JobIdentifierSchema }).strict();
+const CacheInventoryPayloadSchema = z.object({}).strict();
+const CacheEvictPayloadSchema = z
+  .object({
+    all: z.boolean().optional(),
+    sessionId: IdentifierSchema.optional(),
+    profileId: IdentifierSchema.optional()
+  })
+  .strict()
+  .refine(
+    (value) => value.all || value.sessionId || value.profileId,
+    'A cache eviction scope is required'
+  );
+export const AgentCacheInventoryResultSchema = z
+  .object({
+    items: z.array(CachedObjectSchema),
+    totalBytes: z.number().int().nonnegative()
+  })
+  .strict();
+export type AgentCacheInventoryResult = z.infer<typeof AgentCacheInventoryResultSchema>;
+export const AgentCacheEvictionResultSchema = z
+  .object({ removed: z.number().int().nonnegative() })
+  .strict();
+export type AgentCacheEvictionResult = z.infer<typeof AgentCacheEvictionResultSchema>;
 
 const ProviderBindInputBase = {
   nodeId: IdentifierSchema,
@@ -254,6 +277,8 @@ export const AgentEnvelopeSchema = z.discriminatedUnion('kind', [
   envelope('job.complete', JobCompletedPayloadSchema),
   envelope('job.fail', JobFailedPayloadSchema),
   envelope('job.cancel', JobCancelPayloadSchema),
+  envelope('cache.inventory', CacheInventoryPayloadSchema),
+  envelope('cache.evict', CacheEvictPayloadSchema),
   envelope('drain', z.object({ draining: z.boolean() }).strict()),
   envelope(
     'certificate.rotate',

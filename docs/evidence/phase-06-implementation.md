@@ -1,4 +1,4 @@
-# Phase 6 implementation checkpoint — edge grants and viewer aggregation
+# Phase 6 implementation checkpoint — edge delivery and node cache control
 
 Date: 2026-07-15
 
@@ -33,6 +33,11 @@ evidence.
   online ingest-origin nodes are present. Preferred-region requests choose a
   matching origin; standalone/local creation keeps working without cluster
   origin state.
+- The cache administration API can target a connected node with `nodeId` for
+  inventory and eviction. The controller routes those requests through strict
+  `cache.inventory` and `cache.evict` agent envelopes, validates typed node
+  responses, and fails closed instead of silently evicting the controller-local
+  cache when the requested node is disconnected.
 
 ## Lean guardrails run
 
@@ -52,6 +57,11 @@ npx vitest run apps/relay/src/server.test.ts -t "signed edge grants"
 npx vitest run packages/adapters/src/local-infrastructure.test.ts -t "viewer fingerprints"
 npx vitest run apps/relay/src/backend-service.test.ts -t "object store"
 npx vitest run packages/application/src/services.test.ts -t "selected ingest origin"
+npx vitest run packages/contracts/src/agent-protocol.test.ts apps/relay/src/agent-transport.test.ts apps/relay/src/server.test.ts apps/relay/src/composition/runtime.test.ts
+npm run check:agent-protocol-schema
+npm run check:api
+npm run check:tests
+npm run format:check -- --ignore-unknown
 npm run format:check
 npm run check
 npm run lint
@@ -63,8 +73,8 @@ Result: all commands passed.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
-- Node-targeted cache inventory, restore validation, eviction, disk-pressure
-  handling, and object-store lifecycle reconciliation.
+- Cache restore validation, disk-pressure handling, and object-store lifecycle
+  reconciliation.
 - Immutable-profile-driven normalization, primary/backup publisher states,
   origin recovery, and one upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and

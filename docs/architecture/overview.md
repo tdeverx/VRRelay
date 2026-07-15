@@ -73,7 +73,7 @@ Administrative mutations are wrapped in a durable, append-only audit sequence. A
 
 Plex or Emby support is added by implementing `MediaProvider`. New delivery engines implement `Transcoder` or a future delivery port without changing public provider models.
 
-Per-node acknowledgement of an activated object-store/backend configuration is not part of these persistence guarantees; it remains Phase 6 edge-delivery work. Likewise, the migration backup hook and its redaction/atomic-publication unit tests do not constitute a real PostgreSQL `pg_dump` plus restore drill. That evidence remains in Phases 9–11.
+Activated object-store/backend configuration records per-node application state so one restarted role cannot clear restart-required status for other roles. The migration backup hook and its redaction/atomic-publication unit tests still do not constitute a real PostgreSQL `pg_dump` plus restore drill. That evidence remains in Phases 9–11.
 
 ## VOD timeline
 

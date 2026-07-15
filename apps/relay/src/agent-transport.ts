@@ -8,13 +8,15 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { z } from 'zod';
 import { createCertificateSigningRequest } from '@vrrelay/adapters';
 import {
+  AgentCacheEvictionResultSchema,
+  AgentCacheInventoryResultSchema,
   AgentEnvelopeSchema,
   AgentSignedCertificateSchema,
   type AgentEnvelope,
   type AgentJsonObject,
   type AgentMessageKind
 } from '@vrrelay/contracts';
-import type { NodeCapability } from '@vrrelay/domain';
+import type { CachedObject, NodeCapability } from '@vrrelay/domain';
 import type {
   CertificateAuthority,
   RemoteProviderGateway,
@@ -447,6 +449,35 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
     signal?: AbortSignal
   ): Promise<T> {
     return (await this.request(nodeId, operation, payload, 60_000, signal)) as T;
+  }
+
+  async cacheInventory(
+    nodeId: string,
+    signal?: AbortSignal
+  ): Promise<{ items: CachedObject[]; totalBytes: number }> {
+    return AgentCacheInventoryResultSchema.parse(
+      await this.request(nodeId, 'cache.inventory', {}, 30_000, signal)
+    );
+  }
+
+  async evictCache(
+    nodeId: string,
+    filter: { sessionId?: string; profileId?: string; all?: boolean },
+    signal?: AbortSignal
+  ): Promise<{ removed: number }> {
+    return AgentCacheEvictionResultSchema.parse(
+      await this.request(
+        nodeId,
+        'cache.evict',
+        {
+          ...(filter.all !== undefined ? { all: filter.all } : {}),
+          ...(filter.sessionId ? { sessionId: filter.sessionId } : {}),
+          ...(filter.profileId ? { profileId: filter.profileId } : {})
+        },
+        30_000,
+        signal
+      )
+    );
   }
 
   async request(
@@ -1085,6 +1116,10 @@ export interface NodeAgentOptions {
       | 'provider.activity',
     payload: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  onCache: (
+    operation: 'cache.inventory' | 'cache.evict',
+    payload: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
 }
 
 export class NodeAgent {
@@ -1607,6 +1642,25 @@ export class NodeAgent {
               message,
               'provider_operation_failed',
               errorMessage(error, 'Provider operation failed')
+            );
+        });
+      return;
+    }
+
+    if (message.kind === 'cache.inventory' || message.kind === 'cache.evict') {
+      void this.options
+        .onCache(message.kind, message.payload)
+        .then((result) => {
+          if (!connection.closed)
+            this.#replySuccess(connection, message, result as AgentJsonObject);
+        })
+        .catch((error) => {
+          if (!connection.closed)
+            this.#replyError(
+              connection,
+              message,
+              'cache_operation_failed',
+              errorMessage(error, 'Cache operation failed')
             );
         });
       return;

@@ -559,6 +559,7 @@ export type BackendList = {
 };
 
 export type CacheEvictionRequest = {
+    nodeId?: string;
     all?: boolean;
     sessionId?: string;
     profileId?: string;
@@ -1651,7 +1652,9 @@ export type EvictCacheResponse = EvictCacheResponses[keyof EvictCacheResponses];
 export type ListCacheInventoryData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        nodeId?: string;
+    };
     url: '/cache';
 };
 

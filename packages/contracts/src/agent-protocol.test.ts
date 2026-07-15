@@ -51,6 +51,10 @@ const payloads: Array<readonly [AgentEnvelope['kind'], Record<string, unknown>]>
     }
   ],
   ['job.cancel', { jobId: 'job-1' }],
+  ['cache.inventory', {}],
+  ['cache.evict', { all: true }],
+  ['cache.evict', { sessionId: 'session-1' }],
+  ['cache.evict', { profileId: 'profile-1' }],
   ['drain', { draining: true }],
   ['certificate.rotate', { reason: 'administrative' }],
   ['certificate.rotate', { csrPem: '-----BEGIN CERTIFICATE REQUEST-----' }],

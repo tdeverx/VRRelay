@@ -26,10 +26,11 @@ describe('runtime public routing configuration', () => {
       VRRELAY_CONTROLLER_AGENT_URL: 'wss://controller.example.test/agent',
       VRRELAY_CONTROLLER_ENROLLMENT_URL: 'https://controller.example.test/enroll'
     });
-    const handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider'> = {
+    const handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider' | 'onCache'> = {
       onSegment: async () => undefined,
       onCancel: async () => undefined,
-      onProvider: async () => ({})
+      onProvider: async () => ({}),
+      onCache: async () => ({})
     };
     const options = configuredNodeAgentOptions(
       config,
