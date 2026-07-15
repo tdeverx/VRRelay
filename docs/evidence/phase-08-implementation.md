@@ -19,6 +19,11 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   other operational details do not become public health output.
 - The OpenAPI contract and generated dashboard client now include
   `getReadiness`.
+- Prometheus egress and viewer metrics no longer use unbounded `session`
+  labels. Egress is emitted as a total counter, `viewers_active` is emitted as
+  an aggregate gauge during cleanup, and exact per-session viewer/egress state
+  remains in repository state, events, and playback accounting rather than
+  long-lived metric labels.
 
 ## Lean guardrails run
 
@@ -35,8 +40,10 @@ Commands:
 ```text
 npm run generate:api
 npx vitest run apps/relay/src/server.test.ts -t "readiness"
+npx vitest run packages/application/src/services.test.ts
 npm run check:api
 npm run check --workspace @vrrelay/relay
+npm run check --workspace @vrrelay/application
 npm run ci
 ```
 
@@ -45,8 +52,9 @@ intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
 
-- Low-cardinality queue, cache, object-latency, ingest, reconnect, node-egress,
-  and session-bandwidth metrics.
+- Queue, cache, object-latency, ingest, reconnect, node-egress, and
+  session-bandwidth metrics beyond the current aggregate viewer/egress
+  counters.
 - Bounded structured node/job log streaming and retention controls.
 - Static routing adapter, benchmark scenarios, and retained benchmark metadata.
 - Destructive operations evidence under real repository, coordination, object

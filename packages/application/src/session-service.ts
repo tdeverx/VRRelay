@@ -582,6 +582,7 @@ export class SessionService {
     for (const [token, grant] of this.#sourceGrants) {
       if (grant.expiresAt <= now) this.#sourceGrants.delete(token);
     }
+    let activeViewers = 0;
     if (this.infrastructure.coordination) {
       for (const session of await this.repository.listSessions()) {
         const { totalViewers } = await this.infrastructure.coordination.countViewers({
@@ -589,24 +590,23 @@ export class SessionService {
           observedAtMs: now,
           windowMs: VIEWER_WINDOW_MS
         });
+        activeViewers += totalViewers;
         if (session.viewers !== totalViewers) {
           await this.#setSessionViewers(session.id, totalViewers, true);
         }
-        this.infrastructure.metrics?.gauge('viewers_active', totalViewers, {
-          session: session.id
-        });
       }
     } else {
       for (const [sessionId, viewers] of this.#viewers) {
         for (const [viewer, seenAt] of viewers)
           if (now - seenAt > VIEWER_WINDOW_MS) viewers.delete(viewer);
+        activeViewers += viewers.size;
         const session = await this.repository.getSession(sessionId);
         if (session && session.viewers !== viewers.size) {
           await this.#setSessionViewers(sessionId, viewers.size, true);
         }
-        this.infrastructure.metrics?.gauge('viewers_active', viewers.size, { session: sessionId });
       }
     }
+    this.infrastructure.metrics?.gauge('viewers_active', activeViewers);
     return this.#cache.cleanupExpired();
   }
 
@@ -652,13 +652,6 @@ export class SessionService {
             )
           );
       }
-      this.infrastructure.metrics?.gauge('viewers_active', aggregation.totalViewers, {
-        session: session.id
-      });
-      this.infrastructure.metrics?.gauge('viewers_active_by_edge', aggregation.edgeViewers, {
-        session: session.id,
-        edge: edgeNodeId
-      });
       return session;
     }
     const viewers = this.#viewers.get(session.id) ?? new Map<string, number>();
@@ -672,15 +665,11 @@ export class SessionService {
     return session;
   }
 
-  recordEgress(bytes: number, sessionId?: string): void {
+  recordEgress(bytes: number, _sessionId?: string): void {
     if (!Number.isFinite(bytes) || bytes <= 0) return;
     this.#egressSamples.push({ bytes, observedAt: Date.now() });
     this.#pruneEgressSamples(Date.now());
-    this.infrastructure.metrics?.increment(
-      'egress_bytes_total',
-      { session: sessionId ?? 'unattributed' },
-      bytes
-    );
+    this.infrastructure.metrics?.increment('egress_bytes_total', {}, bytes);
   }
 
   egressMbps(now = Date.now(), windowMs = 30_000): number {

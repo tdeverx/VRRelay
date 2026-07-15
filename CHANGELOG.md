@@ -35,6 +35,8 @@ retained evidence belong in the
   and obsolete generated files without silently repairing CI state.
 - A separate unauthenticated `/api/v1/ready` endpoint that reports redacted,
   dependency-aware readiness distinct from `/api/v1/health` liveness.
+- Low-cardinality aggregate viewer and egress metrics that avoid per-session
+  Prometheus labels while keeping exact per-session state in the repository.
 - Configurable object-store activation and an authenticated metrics webhook
   exporter with lifecycle, persistence-order, and delivery-health tests.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone

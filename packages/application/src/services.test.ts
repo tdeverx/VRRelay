@@ -669,7 +669,8 @@ describe('VOD relay service', () => {
     expect(service.egressMbps(Date.now() + 30_001)).toBe(0);
     const renderedMetrics = await metrics.render();
     expect(renderedMetrics).toContain('vrrelay_egress_bytes_total');
-    expect(renderedMetrics).toContain('vrrelay_egress_bytes_total{session="unattributed"} 20');
+    expect(renderedMetrics).toContain('vrrelay_egress_bytes_total 30');
+    expect(renderedMetrics).not.toContain('session=');
 
     repo.injectViewersBeforeNextSessionUpdate(7);
     await expect(service.control(session.id, { pinned: true })).resolves.toMatchObject({
@@ -682,6 +683,9 @@ describe('VOD relay service', () => {
     );
     repo.injectStopBeforeNextViewerUpdate();
     await service.touchViewer(token, 'viewer-a');
+    await service.cleanupExpiredCache();
+    expect(await metrics.render()).toContain('vrrelay_viewers_active 1');
+    expect(await metrics.render()).not.toContain('session=');
     await expect(repo.getSession(session.id)).resolves.toMatchObject({
       pinned: true,
       state: 'stopped',

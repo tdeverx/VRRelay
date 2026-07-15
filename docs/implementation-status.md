@@ -225,6 +225,10 @@ pending.
 - The generated OpenAPI client includes the readiness operation and the route
   is covered by HTTP tests that verify status codes and redaction. See
   [Phase 8 implementation evidence](evidence/phase-08-implementation.md).
+- Prometheus viewer and egress metrics no longer use unbounded session labels:
+  egress is a total counter, viewer activity is an aggregate gauge, and
+  per-session truth remains in repository state/events instead of long-lived
+  metric labels.
 
 ## Known gaps in the audited checkout
 
@@ -258,9 +262,9 @@ pending.
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
-- Low-cardinality operational metrics, bounded structured logs, adapter
-  contracts, browser coverage, destructive cluster scenarios, and reproducible
-  benchmark evidence remain release work.
+- Additional low-cardinality operational metrics, bounded structured logs,
+  adapter contracts, browser coverage, destructive cluster scenarios, and
+  reproducible benchmark evidence remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM
   provisioning, native installers, signing/notarization, supply-chain evidence,
   upgrade/rollback, and clean-target installation have not passed their release
