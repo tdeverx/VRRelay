@@ -107,12 +107,18 @@ describe('data-plane role servers', () => {
     await app.close();
   });
 
-  it('reconfigures a live edge origin path after an upstream HLS failure', async () => {
+  it('retries a live edge request after reconfiguring a failed origin path', async () => {
+    let hlsAttempts = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/v3/config/paths/add/live-fixture'))
         return new Response(null, { status: 200 });
-      if (url.endsWith('/live-fixture/index.m3u8')) return new Response('', { status: 502 });
+      if (url.endsWith('/live-fixture/index.m3u8')) {
+        hlsAttempts += 1;
+        return new Response(hlsAttempts === 1 ? '' : '#EXTM3U\nsegment.ts\n', {
+          status: hlsAttempts === 1 ? 502 : 200
+        });
+      }
       return new Response('', { status: 500 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -131,17 +137,65 @@ describe('data-plane role servers', () => {
       }
     );
 
-    await expect(
-      app.inject({ method: 'GET', url: '/play/live-token/live.m3u8' })
-    ).resolves.toMatchObject({ statusCode: 502 });
-    await expect(
-      app.inject({ method: 'GET', url: '/play/live-token/live.m3u8' })
-    ).resolves.toMatchObject({ statusCode: 502 });
+    const response = await app.inject({ method: 'GET', url: '/play/live-token/live.m3u8' });
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toContain('/play/live-token/live/segment.ts');
     expect(
       fetchMock.mock.calls.filter(([input]) =>
         String(input).includes('/v3/config/paths/add/live-fixture')
       )
     ).toHaveLength(2);
+    expect(hlsAttempts).toBe(2);
+    await app.close();
+  });
+
+  it('coalesces concurrent live edge path setup across viewers', async () => {
+    let releaseAdd!: () => void;
+    const addGate = new Promise<Response>((resolve) => {
+      releaseAdd = () => resolve(new Response(null, { status: 200 }));
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v3/config/paths/add/live-fixture')) return addGate;
+      if (url.endsWith('/live-fixture/index.m3u8'))
+        return new Response('#EXTM3U\nsegment.ts\n', { status: 200 });
+      return new Response('', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const sessions = {
+      touchViewer: async () => ({ id: 'live-session' }),
+      resolveLive: async () => ({ path: 'live-fixture' }),
+      recordEgress: () => undefined
+    } as unknown as SessionService;
+    const app = await createRoleServer(
+      loadConfig({ VRRELAY_LIVE_ORIGIN_URL: 'rtsp://origin.example:8554' }),
+      {
+        kind: 'edge',
+        sessions,
+        capabilities,
+        metrics
+      }
+    );
+
+    const first = app.inject({ method: 'GET', url: '/play/live-token-a/live.m3u8' });
+    const second = app.inject({ method: 'GET', url: '/play/live-token-b/live.m3u8' });
+    await vi.waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).includes('/v3/config/paths/add/live-fixture')
+        )
+      ).toHaveLength(1)
+    );
+    releaseAdd();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ statusCode: 200 }),
+      expect.objectContaining({ statusCode: 200 })
+    ]);
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/v3/config/paths/add/live-fixture')
+      )
+    ).toHaveLength(1);
     await app.close();
   });
 

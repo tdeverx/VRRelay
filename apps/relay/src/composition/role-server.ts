@@ -248,6 +248,19 @@ export async function createRoleServer(
     const forgetLiveEdgePath = (path: string): void => {
       configuredLivePaths.delete(path);
     };
+    const liveReadHeaders = () => ({
+      Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
+    });
+    const fetchLiveHlsWithPathRecovery = async (path: string, url: string): Promise<Response> => {
+      await ensureLiveEdgePath(path);
+      let response = await fetch(url, { headers: liveReadHeaders() });
+      if (response.ok) return response;
+      forgetLiveEdgePath(path);
+      await ensureLiveEdgePath(path);
+      response = await fetch(url, { headers: liveReadHeaders() });
+      if (!response.ok) forgetLiveEdgePath(path);
+      return response;
+    };
 
     app.get('/play/:token/index.m3u8', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -321,16 +334,11 @@ export async function createRoleServer(
       const token = (request.params as { token: string }).token;
       const session = await services.sessions.touchViewer(token, viewerIdentity(request));
       const channel = await services.sessions.resolveLive(token);
-      await ensureLiveEdgePath(channel.path);
-      const response = await fetch(`${config.mediaMtxHlsUrl}/${channel.path}/index.m3u8`, {
-        headers: {
-          Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
-        }
-      });
-      if (!response.ok) {
-        forgetLiveEdgePath(channel.path);
-        return reply.status(response.status).send();
-      }
+      const response = await fetchLiveHlsWithPathRecovery(
+        channel.path,
+        `${config.mediaMtxHlsUrl}/${channel.path}/index.m3u8`
+      );
+      if (!response.ok) return reply.status(response.status).send();
       const playlist = (await response.text())
         .split('\n')
         .map((line) =>
@@ -348,19 +356,14 @@ export async function createRoleServer(
         return reply.status(400).send();
       const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
       const channel = await services.sessions.resolveLive(params.token);
-      await ensureLiveEdgePath(channel.path);
-      const response = await fetch(
+      const response = await fetchLiveHlsWithPathRecovery(
+        channel.path,
         liveHlsUpstreamUrl(
           config.mediaMtxHlsUrl,
           channel.path,
           params['*'],
           request.query as Record<string, unknown>
-        ),
-        {
-          headers: {
-            Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
-          }
-        }
+        )
       );
       if (!response.ok || !response.body) {
         forgetLiveEdgePath(channel.path);

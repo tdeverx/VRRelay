@@ -52,8 +52,11 @@ evidence.
   segment just requested is protected while older cached objects are evicted to
   bring disk usage back under the configured limit where possible.
 - Edge live playback forgets cached MediaMTX path configuration after a failed
-  HLS upstream response, so the next viewer request reapplies the origin pull
-  source instead of pinning a stale path configuration indefinitely.
+  HLS upstream response, reapplies the origin pull source, and retries the
+  current request once instead of pinning a stale path configuration
+  indefinitely. Concurrent viewer requests share the same in-process path setup
+  promise, preserving one configured MediaMTX on-demand origin path per active
+  edge rather than issuing setup work per viewer.
 - Normalized live channels now pin the first selected live-session profile on
   the channel document, reject later conflicting normalized-profile choices, and
   start FFmpeg normalization only with that immutable profile. The FFmpeg live
@@ -96,7 +99,7 @@ npx vitest run packages/application/src/services.test.ts
 npx vitest run packages/application/src/services.test.ts -t "corrupt object-store restores"
 npx vitest run packages/application/src/services.test.ts -t "disk cache pressure"
 npx vitest run apps/relay/src/composition/role-server.test.ts
-npx vitest run apps/relay/src/composition/role-server.test.ts -t "reconfigures a live edge origin path"
+npx vitest run apps/relay/src/composition/role-server.test.ts -t "live edge"
 npx vitest run packages/application/src/services.test.ts -t "live"
 npx vitest run packages/application/src/services.test.ts -t "Live relay service"
 npx vitest run packages/application/src/services.test.ts -t "administrator-issued publisher replacement"
@@ -117,13 +120,12 @@ npm run build --workspace @vrrelay/relay
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 360 tests with 23
+Result: all commands passed. The local full CI gate passed 361 tests with 23
 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
 - Broader external object-store lifecycle and destructive outage evidence.
-- Destructive origin recovery evidence and one upstream pull per active edge
-  evidence.
+- Destructive multi-process origin recovery evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

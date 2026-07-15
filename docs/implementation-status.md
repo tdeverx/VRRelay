@@ -186,7 +186,9 @@ edge-delivery and live-fan-out verification is still pending.
   limit immediately while protecting the requested segment from same-request
   eviction.
 - Edge live playback drops cached MediaMTX path configuration after failed HLS
-  upstream responses so the next request can reapply origin pull configuration.
+  upstream responses, reapplies the origin pull configuration, and retries the
+  current request once. Concurrent viewers share one path setup promise for the
+  active edge path instead of creating per-viewer setup operations.
 - Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
   format check, generated-contract and TypeScript checks, lint, package builds,
   and relay build passed. See
@@ -231,8 +233,8 @@ still pending.
   metadata, node-targeted cache administration, corrupt object-store restore
   recovery, immediate disk-pressure enforcement, and per-node backend
   application tracking now have implementation checkpoints. Broader external
-  object-store lifecycle evidence, destructive origin recovery evidence, and
-  one-pull-per-edge guarantees remain Phase 6 work.
+  object-store lifecycle evidence and destructive multi-process origin recovery
+  evidence remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,

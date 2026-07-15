@@ -103,8 +103,10 @@ retained evidence belong in the
   matching temporary cache objects.
 - Enforce disk cache limits immediately after segment writes and object-store
   restores while protecting the segment currently being served.
-- Reconfigure live edge origin pull paths after failed HLS upstream responses
-  instead of keeping stale MediaMTX path state pinned indefinitely.
+- Reconfigure and retry live edge origin pull paths once after failed HLS
+  upstream responses instead of keeping stale MediaMTX path state pinned
+  indefinitely, while coalescing concurrent viewer setup onto one edge path
+  operation.
 - Drive normalized live ingest from the selected immutable live profile and
   reject conflicting normalized profiles for the same live channel.
 - Claim live publisher slots during MediaMTX publish authorization so duplicate
