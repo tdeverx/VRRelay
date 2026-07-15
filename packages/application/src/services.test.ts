@@ -769,6 +769,88 @@ describe('VOD relay service', () => {
     });
   });
 
+  it('enforces disk cache pressure after segment generation without evicting the requested file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-cache-pressure-'));
+    dirs.push(dir);
+    const repo = new SessionConflictRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p1',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 's1',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('s1', 'token');
+    const registry = new DefaultProviderRegistry();
+    registry.register(provider);
+    const profiles = new ProfileService(repo);
+    await profiles.seed({
+      ffmpegVersion: 'test',
+      encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
+      muxers: ['mpegts'],
+      filters: [],
+      pixelFormats: ['yuv420p']
+    });
+    const service = new SessionService(
+      repo,
+      secrets,
+      registry,
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async (_request, destination) => {
+          await mkdir(dirname(destination), { recursive: true });
+          await writeFile(destination, 'segment');
+        },
+        streamFragmentedMp4: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 60_000,
+        cacheLimitBytes: Buffer.byteLength('segment'),
+        maxWorkers: 1
+      },
+      { clusterRepository: repo }
+    );
+    const session = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p1', itemId: 'm1' },
+      profileId: 'universal-h264-hls-vod',
+      profileRevision: 1,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
+
+    const firstPath = await service.segment(token, 0);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const secondPath = await service.segment(token, 1);
+
+    await expect(access(firstPath)).rejects.toThrow();
+    await expect(readFile(secondPath, 'utf8')).resolves.toBe('segment');
+    await expect(service.cacheUsageBytes()).resolves.toBe(Buffer.byteLength('segment'));
+  });
+
   it('issues edge-scoped playback grants that honor session revocation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-edge-grant-'));
     dirs.push(dir);

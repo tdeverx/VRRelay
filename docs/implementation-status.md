@@ -167,6 +167,9 @@ edge-delivery and live-fan-out verification is still pending.
 - Corrupt object-store restores now invalidate the bad remote object and fall
   back to regeneration/origin refill, including completed segment jobs whose
   local output was evicted.
+- Segment generation and object-store restore enforce the configured disk cache
+  limit immediately while protecting the requested segment from same-request
+  eviction.
 - Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
   format check, generated-contract and TypeScript checks, lint, package builds,
   and relay build passed. See
@@ -196,11 +199,11 @@ edge-delivery and live-fan-out verification is still pending.
   handling still lack the required matrix evidence.
 - Edge grants, coordination-backed viewer aggregation, selected-origin
   metadata, node-targeted cache administration, corrupt object-store restore
-  recovery, and per-node backend application tracking now have implementation
-  checkpoints. Disk-pressure behavior, broader object-store lifecycle
-  reconciliation, profile-driven normalization, live backup/replacement
-  behavior, origin recovery, and one-pull-per-edge guarantees remain Phase 6
-  work.
+  recovery, immediate disk-pressure enforcement, and per-node backend
+  application tracking now have implementation checkpoints. Broader
+  object-store lifecycle reconciliation, profile-driven normalization, live
+  backup/replacement behavior, origin recovery, and one-pull-per-edge
+  guarantees remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

@@ -64,38 +64,44 @@ export class SessionCache {
     destination: string,
     contentKey: string
   ): Promise<void> {
-    if (!this.objectStore) return;
-    const segmentSha256 = await this.#fileSha256(destination);
-    await this.objectStore.put(contentKey, createReadStream(destination), {
-      contentType: profile.delivery.segmentType === 'fmp4' ? 'video/iso.segment' : 'video/mp2t',
-      expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
-      sha256: segmentSha256,
-      metadata: {
-        sessionId: session.id,
-        profileId: profile.profileId,
-        revision: String(profile.revision)
-      }
-    });
-    if (profile.delivery.segmentType === 'fmp4') {
-      const initPath = join(dirname(destination), 'init.mp4');
-      const initSha256 = await this.#fileSha256(initPath);
-      await this.objectStore.put(
-        contentKey.replace(/\.m4s$/, '.init.mp4'),
-        createReadStream(initPath),
-        {
-          contentType: 'video/mp4',
-          expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
-          sha256: initSha256,
-          metadata: {
-            sessionId: session.id,
-            profileId: profile.profileId,
-            revision: String(profile.revision),
-            initialization: 'true'
-          }
+    const protectedPaths = [destination];
+    try {
+      if (!this.objectStore) return;
+      const segmentSha256 = await this.#fileSha256(destination);
+      await this.objectStore.put(contentKey, createReadStream(destination), {
+        contentType: profile.delivery.segmentType === 'fmp4' ? 'video/iso.segment' : 'video/mp2t',
+        expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
+        sha256: segmentSha256,
+        metadata: {
+          sessionId: session.id,
+          profileId: profile.profileId,
+          revision: String(profile.revision)
         }
-      );
+      });
+      if (profile.delivery.segmentType === 'fmp4') {
+        const initPath = join(dirname(destination), 'init.mp4');
+        protectedPaths.push(initPath);
+        const initSha256 = await this.#fileSha256(initPath);
+        await this.objectStore.put(
+          contentKey.replace(/\.m4s$/, '.init.mp4'),
+          createReadStream(initPath),
+          {
+            contentType: 'video/mp4',
+            expiresAt: new Date(Date.now() + this.options.cacheTtlMs).toISOString(),
+            sha256: initSha256,
+            metadata: {
+              sessionId: session.id,
+              profileId: profile.profileId,
+              revision: String(profile.revision),
+              initialization: 'true'
+            }
+          }
+        );
+      }
+      this.events.publish(event('storage.uploaded', { contentKey, segment: index }, session.id));
+    } finally {
+      await this.cleanupExpired(protectedPaths);
     }
-    this.events.publish(event('storage.uploaded', { contentKey, segment: index }, session.id));
   }
 
   contentKey(session: RelaySession, profile: ProfileRevision, index: number): string {
@@ -142,6 +148,7 @@ export class SessionCache {
       if (object.sha256 && sha256 !== object.sha256)
         throw new CacheRestoreValidationError(`Cached object hash mismatch for ${contentKey}`);
       await rename(temporary, destination);
+      await this.cleanupExpired([destination]);
     } catch (error) {
       await rm(temporary, { force: true });
       if (error instanceof CacheRestoreValidationError) {
@@ -159,7 +166,8 @@ export class SessionCache {
     return true;
   }
 
-  async cleanupExpired(): Promise<number> {
+  async cleanupExpired(protectedPaths: readonly string[] = []): Promise<number> {
+    const protectedSet = new Set(protectedPaths);
     const now = Date.now();
     const root = join(this.options.cacheDir, 'vod');
     let removed = 0;
@@ -176,7 +184,7 @@ export class SessionCache {
         if (entry.isDirectory()) await visit(child);
         else {
           const info = await stat(child);
-          if (now - info.mtimeMs > this.options.cacheTtlMs) {
+          if (!protectedSet.has(child) && now - info.mtimeMs > this.options.cacheTtlMs) {
             await rm(child, { force: true });
             removed += 1;
           } else files.push({ path: child, size: info.size, mtimeMs: info.mtimeMs });
@@ -189,6 +197,7 @@ export class SessionCache {
       let total = files.reduce((sum, file) => sum + file.size, 0);
       for (const file of files.sort((left, right) => left.mtimeMs - right.mtimeMs)) {
         if (total <= limit) break;
+        if (protectedSet.has(file.path)) continue;
         await rm(file.path, { force: true });
         total -= file.size;
         removed += 1;

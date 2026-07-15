@@ -43,6 +43,10 @@ evidence.
   jobs can be re-leased when their cached output has been evicted or rejected,
   allowing the normal generation/origin path to refill the object instead of
   failing playback on stale job state.
+- Segment generation and object-store restore now enforce the configured disk
+  cache limit immediately instead of waiting for the periodic cleanup loop. The
+  segment just requested is protected while older cached objects are evicted to
+  bring disk usage back under the configured limit where possible.
 
 ## Lean guardrails run
 
@@ -65,6 +69,7 @@ npx vitest run packages/application/src/services.test.ts -t "selected ingest ori
 npx vitest run packages/contracts/src/agent-protocol.test.ts apps/relay/src/agent-transport.test.ts apps/relay/src/server.test.ts apps/relay/src/composition/runtime.test.ts
 npx vitest run packages/application/src/services.test.ts
 npx vitest run packages/application/src/services.test.ts -t "corrupt object-store restores"
+npx vitest run packages/application/src/services.test.ts -t "disk cache pressure"
 npm run check:agent-protocol-schema
 npm run check:api
 npm run check:tests
@@ -81,7 +86,7 @@ Result: all commands passed.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
-- Disk-pressure handling and broader object-store lifecycle reconciliation.
+- Broader object-store lifecycle reconciliation.
 - Immutable-profile-driven normalization, primary/backup publisher states,
   origin recovery, and one upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and

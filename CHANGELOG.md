@@ -97,6 +97,8 @@ retained evidence belong in the
 - Invalidate corrupt object-store segment restores and refill them through the
   normal generation/origin path instead of failing playback on stale completed
   job state.
+- Enforce disk cache limits immediately after segment writes and object-store
+  restores while protecting the segment currently being served.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.
