@@ -1,4 +1,4 @@
-# Phase 6 implementation checkpoint — edge delivery and node cache control
+# Phase 6 implementation checkpoint — edge delivery, node cache control, and live normalization
 
 Date: 2026-07-15
 
@@ -50,6 +50,13 @@ evidence.
 - Edge live playback forgets cached MediaMTX path configuration after a failed
   HLS upstream response, so the next viewer request reapplies the origin pull
   source instead of pinning a stale path configuration indefinitely.
+- Normalized live channels now pin the first selected live-session profile on
+  the channel document, reject later conflicting normalized-profile choices, and
+  start FFmpeg normalization only with that immutable profile. The FFmpeg live
+  normalizer now derives encoder, dimensions, frame rate, pixel format, bitrate,
+  maxrate, buffer, GOP/keyframe interval, B-frames, audio codec, channels, sample
+  rate, and audio bitrate from the selected profile instead of process-level
+  defaults.
 
 ## Lean guardrails run
 
@@ -75,25 +82,31 @@ npx vitest run packages/application/src/services.test.ts -t "corrupt object-stor
 npx vitest run packages/application/src/services.test.ts -t "disk cache pressure"
 npx vitest run apps/relay/src/composition/role-server.test.ts
 npx vitest run apps/relay/src/composition/role-server.test.ts -t "reconfigures a live edge origin path"
+npx vitest run packages/application/src/services.test.ts -t "live"
+npx vitest run packages/adapters/src/ffmpeg-live-normalizer.test.ts
+npm run generate:api
 npm run check:agent-protocol-schema
 npm run check:api
 npm run check:tests
 npm run check --workspace @vrrelay/application
+npm run check --workspace @vrrelay/adapters
+npm run check --workspace @vrrelay/relay
 npm run format:check -- --ignore-unknown
 npm run format:check
 npm run check
 npm run lint
 npm run build:packages
 npm run build --workspace @vrrelay/relay
+npm run ci
 ```
 
-Result: all commands passed.
+Result: all commands passed. The local full CI gate passed 359 tests with 23
+intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
 - Broader object-store lifecycle reconciliation.
-- Immutable-profile-driven normalization, primary/backup publisher states,
-  destructive origin recovery evidence, and one upstream pull per active edge
-  evidence.
+- Primary/backup publisher states, destructive origin recovery evidence, and one
+  upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

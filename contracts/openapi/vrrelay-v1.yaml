@@ -1128,8 +1128,14 @@ components:
         id: { type: string }
         name: { type: string }
         path: { type: string }
+        ingestPath: { type: string }
+        originNodeId: { type: string }
+        region: { type: string }
+        normalizationProfileId: { type: string }
+        normalizationProfileRevision: { type: integer, minimum: 1 }
         normalize: { type: boolean }
         publisherState: { type: string, enum: [offline, online, reconnecting, error] }
+        publisherUpdatedAt: { type: string, format: date-time }
         rtmpUrl: { type: string, format: uri }
         srtUrl: { type: string, format: uri }
         whipUrl: { type: string, format: uri }

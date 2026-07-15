@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto';
-import type { LiveChannel, PublicLiveChannel } from '@vrrelay/domain';
+import type {
+  LiveChannel,
+  ProfileRevision,
+  PublicLiveChannel,
+  RelaySession
+} from '@vrrelay/domain';
 import { publicLiveChannel } from '@vrrelay/domain';
 import type { CreateLiveChannelRequest } from '@vrrelay/contracts';
 import type { ClusterRepository, EventBus, LiveNormalizer, Repository } from './index.js';
@@ -54,6 +59,12 @@ function sanitizeLiveChannel(channel: LiveChannel): LiveChannel {
       ? { backupSrtUrl: removePublisherCredential(channel.backupSrtUrl) }
       : {})
   };
+}
+
+function liveSessionOwnsChannel(session: RelaySession, channelId: string): boolean {
+  return (
+    session.kind === 'live' && session.liveChannelId === channelId && session.state !== 'stopped'
+  );
 }
 
 export class LiveService {
@@ -206,16 +217,36 @@ export class LiveService {
         );
       }
       if (!channel.normalize || !this.normalizer) continue;
+      const profile = await this.#normalizationProfile(channel);
+      if (!profile) {
+        if (this.normalizer.running(channel.id)) await this.normalizer.stop(channel.id);
+        continue;
+      }
       if (online && !this.normalizer.running(channel.id)) {
         await this.normalizer.start(
           channel.id,
           `${this.options.internalRtspUrl}/${ingestPath}`,
-          `${this.options.internalRtspUrl}/${channel.path}`
+          `${this.options.internalRtspUrl}/${channel.path}`,
+          profile
         );
       } else if (!online && this.normalizer.running(channel.id)) {
         await this.normalizer.stop(channel.id);
       }
     }
+  }
+
+  async #normalizationProfile(channel: LiveChannel): Promise<ProfileRevision | undefined> {
+    if (channel.normalizationProfileId && channel.normalizationProfileRevision) {
+      return this.repository.getProfile(
+        channel.normalizationProfileId,
+        channel.normalizationProfileRevision
+      );
+    }
+    const session = (await this.repository.listSessions()).find((candidate) =>
+      liveSessionOwnsChannel(candidate, channel.id)
+    );
+    if (!session) return undefined;
+    return this.repository.getProfile(session.profileId, session.profileRevision);
   }
 
   async stop(): Promise<void> {

@@ -1,12 +1,73 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { LiveNormalizer } from '@vrrelay/application';
+import type { ProfileRevision } from '@vrrelay/domain';
 
 export interface FFmpegLiveNormalizerOptions {
   ffmpegPath: string;
-  videoEncoder: string;
-  videoBitrateKbps?: number;
-  audioBitrateKbps?: number;
+}
+
+function optionalArgs(condition: unknown, args: string[]): string[] {
+  return condition ? args : [];
+}
+
+export function liveNormalizerArgs(
+  sourceUrl: string,
+  destinationUrl: string,
+  profile: ProfileRevision
+): string[] {
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'warning',
+    '-rtsp_transport',
+    'tcp',
+    '-i',
+    sourceUrl,
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0?',
+    '-vf',
+    [
+      `scale=${profile.video.width}:${profile.video.height}:force_original_aspect_ratio=decrease`,
+      `pad=${profile.video.width}:${profile.video.height}:(ow-iw)/2:(oh-ih)/2`,
+      `fps=${profile.video.frameRate}`,
+      `format=${profile.video.pixelFormat}`
+    ].join(','),
+    '-c:v',
+    profile.video.encoder,
+    ...optionalArgs(profile.video.profile, ['-profile:v', profile.video.profile!]),
+    ...optionalArgs(profile.video.level, ['-level:v', profile.video.level!]),
+    ...optionalArgs(profile.video.preset, ['-preset', profile.video.preset!]),
+    '-b:v',
+    `${profile.video.bitrateKbps}k`,
+    '-maxrate',
+    `${profile.video.maxrateKbps}k`,
+    '-bufsize',
+    `${profile.video.bufferKbps}k`,
+    '-g',
+    String(profile.video.gop),
+    '-keyint_min',
+    String(profile.video.gop),
+    '-bf',
+    String(profile.video.bFrames),
+    '-sc_threshold',
+    '0',
+    '-c:a',
+    profile.audio.codec,
+    '-b:a',
+    `${profile.audio.bitrateKbps}k`,
+    '-ar',
+    String(profile.audio.sampleRate),
+    '-ac',
+    String(profile.audio.channels),
+    '-f',
+    'rtsp',
+    '-rtsp_transport',
+    'tcp',
+    destinationUrl
+  ];
 }
 
 export class FFmpegLiveNormalizer implements LiveNormalizer {
@@ -22,51 +83,11 @@ export class FFmpegLiveNormalizer implements LiveNormalizer {
     channelId: string,
     sourceUrl: string,
     destinationUrl: string,
+    profile: ProfileRevision,
     signal?: AbortSignal
   ): Promise<void> {
     await this.stop(channelId);
-    const args = [
-      '-hide_banner',
-      '-loglevel',
-      'warning',
-      '-rtsp_transport',
-      'tcp',
-      '-i',
-      sourceUrl,
-      '-map',
-      '0:v:0',
-      '-map',
-      '0:a:0?',
-      '-c:v',
-      this.options.videoEncoder,
-      '-pix_fmt',
-      'yuv420p',
-      '-b:v',
-      `${this.options.videoBitrateKbps ?? 6000}k`,
-      '-maxrate',
-      `${this.options.videoBitrateKbps ?? 6000}k`,
-      '-bufsize',
-      `${(this.options.videoBitrateKbps ?? 6000) * 2}k`,
-      '-g',
-      '60',
-      '-keyint_min',
-      '60',
-      '-sc_threshold',
-      '0',
-      '-c:a',
-      'aac',
-      '-b:a',
-      `${this.options.audioBitrateKbps ?? 192}k`,
-      '-ar',
-      '48000',
-      '-ac',
-      '2',
-      '-f',
-      'rtsp',
-      '-rtsp_transport',
-      'tcp',
-      destinationUrl
-    ];
+    const args = liveNormalizerArgs(sourceUrl, destinationUrl, profile);
     const child = spawn(this.options.ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     this.#processes.set(channelId, child);
     child.once('exit', () => this.#processes.delete(channelId));

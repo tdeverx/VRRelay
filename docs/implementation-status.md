@@ -161,6 +161,9 @@ edge-delivery and live-fan-out verification is still pending.
 - Live channel creation now records the selected online ingest-origin node and
   region when cluster state is available, while preserving standalone/local
   channel creation when no cluster origin is recorded.
+- Normalized live channels now pin the selected live-session profile, reject
+  conflicting normalized profile choices for the same channel, and drive FFmpeg
+  normalization from that profile's video and audio settings.
 - The cache administration API can target a connected node for inventory and
   eviction via strict agent envelopes and fails closed for disconnected targets
   instead of falling back to controller-local cache mutation.
@@ -215,10 +218,9 @@ still pending.
 - Edge grants, coordination-backed viewer aggregation, selected-origin
   metadata, node-targeted cache administration, corrupt object-store restore
   recovery, immediate disk-pressure enforcement, and per-node backend
-  application tracking now have implementation checkpoints. Broader
-  object-store lifecycle reconciliation, profile-driven normalization, live
-  backup/replacement behavior, destructive origin recovery evidence, and
-  one-pull-per-edge guarantees remain Phase 6 work.
+  application tracking now have implementation checkpoints. Broader object-store
+  lifecycle reconciliation, live backup/replacement behavior, destructive origin
+  recovery evidence, and one-pull-per-edge guarantees remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,

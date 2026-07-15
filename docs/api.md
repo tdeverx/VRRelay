@@ -17,6 +17,10 @@ Node capability responses report cache usage in bytes, the configured cache limi
 
 `GET /api/v1/cache` and `DELETE /api/v1/cache` operate on the local controller or standalone cache by default. Supplying `nodeId` targets a connected node instead; disconnected targets fail closed rather than falling back to local cache state.
 
+Live channel responses include selected ingest-origin metadata when available
+and include `normalizationProfileId`/`normalizationProfileRevision` after a
+normalized channel is pinned to the first live-session profile.
+
 ## Changing the API
 
 1. Change or add the request schema in `packages/contracts`.

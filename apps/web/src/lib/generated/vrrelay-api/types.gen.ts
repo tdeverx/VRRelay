@@ -282,8 +282,14 @@ export type LiveChannel = {
     id: string;
     name: string;
     path: string;
+    ingestPath?: string;
+    originNodeId?: string;
+    region?: string;
+    normalizationProfileId?: string;
+    normalizationProfileRevision?: number;
     normalize: boolean;
     publisherState: 'offline' | 'online' | 'reconnecting' | 'error';
+    publisherUpdatedAt?: string;
     rtmpUrl: string;
     srtUrl: string;
     whipUrl: string;

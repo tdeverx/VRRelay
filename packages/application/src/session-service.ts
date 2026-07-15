@@ -185,11 +185,9 @@ export class SessionService {
         throw new Error('Selected media does not expose a finite duration');
       name ??= item.name;
     } else {
-      const channel = await this.repository.getVersionedLiveChannel(input.liveChannelId);
-      if (!channel) throw new NotFoundError('Live channel was not found');
-      liveChannelRevision = channel.revision;
       if (profile.delivery.method !== 'hls' || profile.delivery.playlistType !== 'live')
         throw new ConflictError('Live sessions require a live HLS profile');
+      liveChannelRevision = await this.#claimLiveNormalizationProfile(input.liveChannelId, profile);
     }
     const path =
       input.kind === 'live'
@@ -250,6 +248,42 @@ export class SessionService {
     }
     this.events.publish(event('session.created', { name: session.name, kind: session.kind }, id));
     return session;
+  }
+
+  async #claimLiveNormalizationProfile(
+    channelId: string,
+    profile: ProfileRevision
+  ): Promise<number> {
+    let stored = await this.repository.getVersionedLiveChannel(channelId);
+    if (!stored) throw new NotFoundError('Live channel was not found');
+    if (!stored.value.normalize) return stored.revision;
+    for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      const channel = stored.value;
+      const claimedId = channel.normalizationProfileId;
+      const claimedRevision = channel.normalizationProfileRevision;
+      if (claimedId || claimedRevision) {
+        if (claimedId !== profile.profileId || claimedRevision !== profile.revision)
+          throw new ConflictError(
+            'Live channel already has a different normalization profile; create a separate channel for that profile'
+          );
+        return stored.revision;
+      }
+      const result = await this.repository.compareAndSetLiveChannel(
+        {
+          ...channel,
+          normalizationProfileId: profile.profileId,
+          normalizationProfileRevision: profile.revision
+        },
+        stored.revision
+      );
+      if (result.applied) return result.record.revision;
+      if (result.reason === 'not-found') throw new NotFoundError('Live channel was not found');
+      stored = result.current ?? (await this.repository.getVersionedLiveChannel(channelId));
+      if (!stored) throw new NotFoundError('Live channel was not found');
+    }
+    throw new ConflictError(
+      'Live channel changed while the normalization profile was being selected; try again'
+    );
   }
 
   async list(): Promise<RelaySession[]> {

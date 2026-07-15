@@ -103,6 +103,8 @@ retained evidence belong in the
   restores while protecting the segment currently being served.
 - Reconfigure live edge origin pull paths after failed HLS upstream responses
   instead of keeping stale MediaMTX path state pinned indefinitely.
+- Drive normalized live ingest from the selected immutable live profile and
+  reject conflicting normalized profiles for the same live channel.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

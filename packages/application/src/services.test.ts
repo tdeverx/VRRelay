@@ -9,6 +9,7 @@ import {
   DefaultProviderRegistry,
   InMemoryEventBus,
   type MediaProvider,
+  type LiveNormalizer,
   type ObjectStore,
   type RemoteProviderGateway,
   type SecretStore,
@@ -21,7 +22,7 @@ import {
   PrometheusMetricsSink,
   SqliteRepository
 } from '@vrrelay/adapters';
-import type { BackendStatus, CachedObject, ClusterNode } from '@vrrelay/domain';
+import type { BackendStatus, CachedObject, ClusterNode, ProfileRevision } from '@vrrelay/domain';
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
 const dirs: string[] = [];
@@ -54,6 +55,34 @@ const provider: MediaProvider = {
   },
   reportPlayback: async () => {}
 };
+
+class CapturingLiveNormalizer implements LiveNormalizer {
+  readonly starts: Array<{
+    channelId: string;
+    sourceUrl: string;
+    destinationUrl: string;
+    profile: ProfileRevision;
+  }> = [];
+  readonly runningChannels = new Set<string>();
+
+  async start(
+    channelId: string,
+    sourceUrl: string,
+    destinationUrl: string,
+    profile: ProfileRevision
+  ): Promise<void> {
+    this.starts.push({ channelId, sourceUrl, destinationUrl, profile });
+    this.runningChannels.add(channelId);
+  }
+
+  async stop(channelId: string): Promise<void> {
+    this.runningChannels.delete(channelId);
+  }
+
+  running(channelId: string): boolean {
+    return this.runningChannels.has(channelId);
+  }
+}
 
 class TrackingSecretStore implements SecretStore {
   readonly values = new Map<string, string>();
@@ -1497,6 +1526,183 @@ describe('Live relay service', () => {
       originNodeId: 'origin-eu',
       region: 'eu-west'
     });
+  });
+
+  it('normalizes live ingest with the selected live session profile', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-profile-normalization-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const profileService = new ProfileService(repo);
+    await profileService.seed({
+      ffmpegVersion: 'test',
+      encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
+      muxers: ['mpegts'],
+      filters: [],
+      pixelFormats: ['yuv420p']
+    });
+    const liveProfile = await profileService.createRevision(
+      profileInput({
+        profileId: 'live-custom',
+        delivery: { playlistType: 'live' },
+        video: {
+          width: 1280,
+          height: 720,
+          frameRate: 60,
+          bitrateKbps: 5_000,
+          maxrateKbps: 5_500,
+          bufferKbps: 11_000,
+          gop: 120
+        },
+        audio: { channels: 1, layout: 'mono', sampleRate: 44_100, bitrateKbps: 128 }
+      })
+    );
+    const normalizer = new CapturingLiveNormalizer();
+    const live = new LiveService(
+      repo,
+      {
+        publicUrl: 'https://relay.example',
+        rtmpUrl: 'rtmp://ingest.example/live',
+        srtUrl: 'srt://ingest.example:8890',
+        whipUrl: 'https://ingest.example',
+        hlsUrl: 'https://edge.example',
+        internalRtspUrl: 'rtsp://mediamtx:8554'
+      },
+      normalizer
+    );
+    const created = await live.create({ name: 'Profiled OBS', normalize: true });
+    const sessions = new SessionService(
+      repo,
+      new MemorySecretStore(),
+      new DefaultProviderRegistry(),
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async () => {},
+        streamFragmentedMp4: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 1000,
+        maxWorkers: 1
+      }
+    );
+    await sessions.create({
+      kind: 'live',
+      name: 'Profiled OBS session',
+      liveChannelId: created.channel.id,
+      profileId: liveProfile.profileId,
+      profileRevision: liveProfile.revision,
+      platformMode: 'universal',
+      pinned: true,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const stored = (await repo.getLiveChannel(created.channel.id))!;
+    expect(stored).toMatchObject({
+      normalizationProfileId: liveProfile.profileId,
+      normalizationProfileRevision: liveProfile.revision
+    });
+
+    await live.reconcilePublisherPaths(new Set([stored.ingestPath!]));
+
+    expect(normalizer.starts).toHaveLength(1);
+    expect(normalizer.starts[0]).toMatchObject({
+      channelId: created.channel.id,
+      sourceUrl: `rtsp://mediamtx:8554/${stored.ingestPath}`,
+      destinationUrl: `rtsp://mediamtx:8554/${stored.path}`
+    });
+    expect(normalizer.starts[0]!.profile).toMatchObject({
+      profileId: 'live-custom',
+      video: { width: 1280, height: 720, frameRate: 60, gop: 120 },
+      audio: { channels: 1, sampleRate: 44_100, bitrateKbps: 128 }
+    });
+  });
+
+  it('rejects conflicting normalization profiles for the same live channel', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-profile-conflict-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const profileService = new ProfileService(repo);
+    const firstProfile = await profileService.createRevision(
+      profileInput({ profileId: 'live-a', delivery: { playlistType: 'live' } })
+    );
+    const secondProfile = await profileService.createRevision(
+      profileInput({
+        profileId: 'live-b',
+        delivery: { playlistType: 'live' },
+        video: { width: 1280, height: 720 }
+      })
+    );
+    const live = new LiveService(repo, {
+      publicUrl: 'https://relay.example',
+      rtmpUrl: 'rtmp://ingest.example/live',
+      srtUrl: 'srt://ingest.example:8890',
+      whipUrl: 'https://ingest.example',
+      hlsUrl: 'https://edge.example',
+      internalRtspUrl: 'rtsp://mediamtx:8554'
+    });
+    const created = await live.create({ name: 'Profile conflict OBS', normalize: true });
+    const sessions = new SessionService(
+      repo,
+      new MemorySecretStore(),
+      new DefaultProviderRegistry(),
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async () => {},
+        streamFragmentedMp4: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 1000,
+        maxWorkers: 1
+      }
+    );
+    const baseRequest = {
+      kind: 'live' as const,
+      liveChannelId: created.channel.id,
+      platformMode: 'universal' as const,
+      pinned: true,
+      reportActivity: false as const,
+      placementPolicy: 'local' as const,
+      placementLocked: false,
+      playbackTtlSeconds: null
+    };
+    await sessions.create({
+      ...baseRequest,
+      name: 'First profile',
+      profileId: firstProfile.profileId,
+      profileRevision: firstProfile.revision
+    });
+
+    await expect(
+      sessions.create({
+        ...baseRequest,
+        name: 'Second profile',
+        profileId: secondProfile.profileId,
+        profileRevision: secondProfile.revision
+      })
+    ).rejects.toThrow('different normalization profile');
   });
 });
 

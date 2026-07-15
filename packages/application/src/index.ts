@@ -541,6 +541,7 @@ export interface LiveNormalizer {
     channelId: string,
     sourceUrl: string,
     destinationUrl: string,
+    profile: ProfileRevision,
     signal?: AbortSignal
   ): Promise<void>;
   stop(channelId: string): Promise<void>;

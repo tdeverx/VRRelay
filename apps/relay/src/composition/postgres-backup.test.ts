@@ -79,19 +79,17 @@ describe('PostgreSQL migration backup', () => {
   });
 
   it('waits for a timed-out child to terminate before rejecting', async () => {
-    const startedAt = Date.now();
     await expect(
       runPgDump({
         executable: process.execPath,
         arguments: [
           '-e',
-          "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),75));setInterval(()=>{},1000)"
+          "process.on('SIGTERM',()=>setTimeout(()=>{process.stderr.write('terminated after cleanup');process.exit(0);},75));setInterval(()=>{},1000)"
         ],
         environment: { PATH: process.env.PATH },
         timeoutMs: 500
       })
-    ).rejects.toThrow('pg_dump exceeded its 500ms deadline');
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(550);
+    ).rejects.toThrow('pg_dump exceeded its 500ms deadline: terminated after cleanup');
   });
 
   it('redacts database credentials from pg_dump failures', async () => {

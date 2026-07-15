@@ -246,6 +246,8 @@ export const LiveChannelSchema = z.object({
   ingestPath: z.string().optional(),
   originNodeId: z.string().optional(),
   region: z.string().optional(),
+  normalizationProfileId: z.string().optional(),
+  normalizationProfileRevision: z.number().int().min(1).optional(),
   normalize: z.boolean().default(true),
   publisherState: z.enum(['offline', 'online', 'reconnecting', 'error']).default('offline'),
   publisherUpdatedAt: z.iso.datetime().optional(),

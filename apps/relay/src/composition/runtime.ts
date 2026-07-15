@@ -82,20 +82,6 @@ const EDGE_TRANSCODER: Transcoder = {
   }
 };
 
-function liveEncoder(capabilities: MediaCapabilities): string {
-  const preference =
-    process.platform === 'darwin'
-      ? ['h264_videotoolbox', 'libx264']
-      : process.platform === 'win32'
-        ? ['h264_nvenc', 'h264_qsv', 'h264_amf', 'libx264']
-        : ['h264_nvenc', 'h264_qsv', 'h264_vaapi', 'libx264'];
-  return (
-    preference.find((name) =>
-      capabilities.encoders.some((encoder) => encoder.name === name && encoder.available)
-    ) ?? 'libx264'
-  );
-}
-
 function liveService(
   config: RelayConfig,
   repository: ReturnType<typeof createRepository>,
@@ -344,8 +330,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
 
   const liveNormalizer = plan.managesLiveIngest
     ? new FFmpegLiveNormalizer({
-        ffmpegPath: config.ffmpegPath,
-        videoEncoder: liveEncoder(capabilities)
+        ffmpegPath: config.ffmpegPath
       })
     : undefined;
   const live = liveService(config, repository, events, liveNormalizer);
@@ -601,8 +586,7 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
   const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
   const capabilities = await transcoder.discover();
   const normalizer = new FFmpegLiveNormalizer({
-    ffmpegPath: config.ffmpegPath,
-    videoEncoder: liveEncoder(capabilities)
+    ffmpegPath: config.ffmpegPath
   });
   const live = liveService(config, repository, events, normalizer);
   await live.scrubPersistedPublisherCredentials();
