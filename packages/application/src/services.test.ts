@@ -1196,6 +1196,68 @@ describe('Live relay service', () => {
     await service.delete(created.channel.id);
     await expect(service.delete(created.channel.id)).rejects.toThrow('Live channel was not found');
   });
+
+  it('records the selected ingest origin and region when creating a live channel', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-origin-'));
+    dirs.push(dir);
+    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    const origin = (id: string, region: string): ClusterNode => ({
+      id,
+      name: id,
+      roles: ['ingest-origin'],
+      region,
+      publicUrl: `https://${id}.example`,
+      state: 'online',
+      capabilities: {
+        encoders: [],
+        hardwareDevices: [],
+        maxWorkers: 1,
+        activeWorkers: 0,
+        queuedWorkers: 0,
+        cacheBytes: 0,
+        cacheLimitBytes: null,
+        egressMbps: 0,
+        providerIds: []
+      },
+      weight: 100,
+      lastHeartbeatAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    await repo.createNode(origin('origin-us', 'us-east'));
+    await repo.createNode(origin('origin-eu', 'eu-west'));
+    const service = new LiveService(
+      repo,
+      {
+        publicUrl: 'https://relay.example',
+        rtmpUrl: 'rtmp://ingest.example/live',
+        srtUrl: 'srt://ingest.example:8890',
+        whipUrl: 'https://ingest.example',
+        hlsUrl: 'https://edge.example',
+        internalRtspUrl: 'rtsp://mediamtx:8554'
+      },
+      undefined,
+      undefined,
+      repo
+    );
+
+    const created = await service.create({
+      name: 'Regional OBS',
+      preferredRegion: 'eu-west',
+      normalize: true
+    });
+
+    expect(created.channel).toMatchObject({
+      originNodeId: 'origin-eu',
+      region: 'eu-west'
+    });
+    await expect(repo.getLiveChannel(created.channel.id)).resolves.toMatchObject({
+      originNodeId: 'origin-eu',
+      region: 'eu-west'
+    });
+  });
 });
 
 describe('provider failover bindings', () => {

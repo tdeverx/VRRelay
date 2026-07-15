@@ -89,6 +89,8 @@ retained evidence belong in the
   egress bytes as exact counters.
 - Track staged object-store backend application per node so one restarted role
   cannot clear restart-required status for the rest of the cluster.
+- Record selected ingest-origin node and region metadata when creating live
+  channels from available online origin nodes.
 - Require a revoked, binding-free node for physical removal and serialize
   provider-binding creation on a usable source-worker node plus the expected
   provider revision.

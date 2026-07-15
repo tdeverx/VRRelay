@@ -158,9 +158,12 @@ edge-delivery and live-fan-out verification is still pending.
 - Object-store backend application is now recorded per node, so one restarted
   node no longer clears restart-required state for other roles that have not
   applied the staged backend configuration.
-- Focused application, adapter, backend, and HTTP-boundary tests, format check,
-  generated-contract and TypeScript checks, lint, package builds, and relay
-  build passed. See
+- Live channel creation now records the selected online ingest-origin node and
+  region when cluster state is available, while preserving standalone/local
+  channel creation when no cluster origin is recorded.
+- Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
+  format check, generated-contract and TypeScript checks, lint, package builds,
+  and relay build passed. See
   [Phase 6 implementation evidence](evidence/phase-06-implementation.md).
 
 ## Known gaps in the audited checkout
@@ -187,8 +190,10 @@ edge-delivery and live-fan-out verification is still pending.
   handling still lack the required matrix evidence.
 - Edge grants and coordination-backed viewer aggregation now have an
   implementation checkpoint, and object-store backend application is tracked per
-  node, but targeted cache administration, live backup/replacement behavior,
-  origin recovery, and one-pull-per-edge guarantees remain Phase 6 work.
+  node. Live channel creation records selected origin metadata when an online
+  ingest-origin is available, but targeted cache administration,
+  profile-driven normalization, live backup/replacement behavior, origin
+  recovery, and one-pull-per-edge guarantees remain Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, cache, metrics, realtime,

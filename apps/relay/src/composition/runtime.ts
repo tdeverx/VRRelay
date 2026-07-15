@@ -116,7 +116,8 @@ function liveService(
       ...(config.backupSrtUrl ? { backupSrtUrl: config.backupSrtUrl } : {})
     },
     normalizer,
-    events
+    events,
+    repository
   );
 }
 

@@ -29,6 +29,10 @@ evidence.
   node records `backend.object-store.applied.<nodeId>`, and backend health no
   longer treats one node's restart as cluster-wide application of a staged
   object-store change.
+- Live channel creation now records the selected ingest origin and region when
+  online ingest-origin nodes are present. Preferred-region requests choose a
+  matching origin; standalone/local creation keeps working without cluster
+  origin state.
 
 ## Lean guardrails run
 
@@ -47,6 +51,7 @@ npx vitest run packages/application/src/services.test.ts -t "edge-scoped playbac
 npx vitest run apps/relay/src/server.test.ts -t "signed edge grants"
 npx vitest run packages/adapters/src/local-infrastructure.test.ts -t "viewer fingerprints"
 npx vitest run apps/relay/src/backend-service.test.ts -t "object store"
+npx vitest run packages/application/src/services.test.ts -t "selected ingest origin"
 npm run format:check
 npm run check
 npm run lint
@@ -60,8 +65,7 @@ Result: all commands passed.
 
 - Node-targeted cache inventory, restore validation, eviction, disk-pressure
   handling, and object-store lifecycle reconciliation.
-- Live ingest-origin/region selection, immutable-profile-driven normalization,
-  primary/backup publisher states, origin recovery, and one upstream pull per
-  active edge evidence.
+- Immutable-profile-driven normalization, primary/backup publisher states,
+  origin recovery, and one upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

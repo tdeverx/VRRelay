@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { LiveChannel, PublicLiveChannel } from '@vrrelay/domain';
 import { publicLiveChannel } from '@vrrelay/domain';
 import type { CreateLiveChannelRequest } from '@vrrelay/contracts';
-import type { EventBus, LiveNormalizer, Repository } from './index.js';
+import type { ClusterRepository, EventBus, LiveNormalizer, Repository } from './index.js';
 import { ConflictError, NotFoundError } from './errors.js';
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 
@@ -61,7 +61,8 @@ export class LiveService {
     private readonly repository: Repository,
     private readonly options: LiveServiceOptions,
     private readonly normalizer?: LiveNormalizer,
-    private readonly events?: EventBus
+    private readonly events?: EventBus,
+    private readonly clusterRepository?: ClusterRepository
   ) {}
 
   async create(
@@ -70,6 +71,7 @@ export class LiveService {
     const id = randomUUID();
     const path = `live-${opaqueToken(10)}`;
     const ingestPath = input.normalize ? `${path}-ingest` : path;
+    const origin = await this.#selectOrigin(input.preferredRegion);
     const publishToken = opaqueToken(24);
     const user = 'vrrelay-publish';
     const publisher: PublisherConnectionDetails = {
@@ -93,6 +95,8 @@ export class LiveService {
       name: input.name,
       path,
       ...(input.normalize ? { ingestPath } : {}),
+      ...(origin.originNodeId ? { originNodeId: origin.originNodeId } : {}),
+      ...(origin.region ? { region: origin.region } : {}),
       normalize: input.normalize,
       publisherState: 'offline',
       publishTokenHash: hashToken(publishToken),
@@ -113,6 +117,22 @@ export class LiveService {
     };
     await this.repository.createLiveChannel(channel);
     return { channel: publicLiveChannel(channel), publisher };
+  }
+
+  async #selectOrigin(
+    preferredRegion?: string
+  ): Promise<{ originNodeId?: string; region?: string }> {
+    const nodes = (await this.clusterRepository?.listNodes()) ?? [];
+    const origins = nodes.filter(
+      (node) => node.roles.includes('ingest-origin') && node.state === 'online'
+    );
+    const selected =
+      (preferredRegion ? origins.find((node) => node.region === preferredRegion) : undefined) ??
+      origins[0];
+    return {
+      ...(selected ? { originNodeId: selected.id, region: selected.region } : {}),
+      ...(!selected && preferredRegion ? { region: preferredRegion } : {})
+    };
   }
 
   async list(): Promise<PublicLiveChannel[]> {
