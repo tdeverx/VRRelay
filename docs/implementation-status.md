@@ -242,6 +242,9 @@ pending.
 - Agent logs are redacted on receipt, retained per node with configurable row
   caps, bounded on list queries, and emitted as `node.log` events on the
   authenticated operations stream.
+- The benchmark runner now has explicit playlist, cached-egress,
+  uncached-encode, live-fan-out, cache-ratio, and resource-snapshot scenarios
+  with sanitized target metadata and host resource snapshots.
 
 ## Known gaps in the audited checkout
 
@@ -276,8 +279,8 @@ pending.
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
 - Per-node egress metrics, job-log streaming, adapter contracts, browser
-  coverage, destructive cluster scenarios, and reproducible benchmark evidence
-  remain release work.
+  coverage, destructive cluster scenarios, and retained target-environment
+  benchmark evidence remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM
   provisioning, native installers, signing/notarization, supply-chain evidence,
   upgrade/rollback, and clean-target installation have not passed their release

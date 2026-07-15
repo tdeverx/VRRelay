@@ -114,6 +114,29 @@ reconciles publisher disconnect, revokes playback, and deletes the live channel.
 
 When testing media behavior, record the source properties, immutable profile revision, platform, player, startup, duration, pause, seeks, late join, completion, audio/video, and HTTPS/URL-permission result. Do not infer VRChat compatibility from FFmpeg success alone.
 
+## Benchmark scenarios
+
+The benchmark runner emits scenario-scoped JSON with sanitized target metadata,
+CPU/RAM/GPU snapshots before and after the run, request throughput, transfer
+rate, status counts, failures, and latency percentiles. Results describe the
+exact environment under test only; they are not universal viewer-limit claims.
+
+```sh
+npm run benchmark -- --scenario playlist --url https://relay.example/play/DISPOSABLE_GRANT/index.m3u8
+npm run benchmark -- --scenario cached-egress --url https://relay.example/play/DISPOSABLE_GRANT/segment0.ts
+npm run benchmark -- --scenario uncached-encode --url-template 'https://relay.example/play/DISPOSABLE_GRANT/segment-{i}.ts'
+npm run benchmark -- --scenario live-fan-out --url https://relay.example/play/DISPOSABLE_GRANT/live.m3u8
+npm run benchmark -- --scenario cache-ratio --url https://relay.example/play/DISPOSABLE_GRANT/hot.ts --url-template 'https://relay.example/play/DISPOSABLE_GRANT/cold-{i}.ts' --hot-ratio 0.8
+npm run benchmark -- --scenario resource-snapshot
+```
+
+Use real retained benchmark evidence only from disposable grants and test media
+created for the target environment. Do not paste private relay URLs, playback
+tokens, provider URLs, or customer media names into issues, logs, screenshots,
+or documentation. The runner redacts common token-bearing URL shapes in its
+metadata, but operators are still responsible for keeping raw command history
+and terminal captures private.
+
 ## Deployment validation
 
 Use the checks that match the changed area:

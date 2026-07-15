@@ -20,6 +20,7 @@
     }
   },
   "scripts": {
+    "benchmark": "node script/benchmark.mjs",
     "build": "npm run build:packages && npm run build --workspace @vrrelay/relay && npm run build --workspace @vrrelay/web && node script/sync-web.mjs",
     "build:packages": "npm run build --workspace @vrrelay/domain && npm run build --workspace @vrrelay/contracts && npm run build --workspace @vrrelay/application && npm run build --workspace @vrrelay/adapters",
     "clean": "node script/clean.mjs",

@@ -40,3 +40,12 @@ and emitted as `node.log` messages on the authenticated operations event stream.
 `VRRELAY_AGENT_LOG_RETENTION_ROWS` controls how many recent log rows are kept per
 node, and `VRRELAY_AGENT_LOG_QUERY_LIMIT` caps `/api/v1/nodes/{nodeId}/logs`
 responses even when callers request a larger `limit`.
+
+## Benchmark runs
+
+Use `npm run benchmark -- --scenario <name>` for reproducible playlist,
+cached-egress, uncached-encode, live-fan-out, cache-ratio, and resource-snapshot
+checks. Benchmark output includes sanitized target metadata and CPU/RAM/GPU
+resource snapshots so retained evidence can be compared against the exact host
+and scenario that produced it. Treat the numbers as environment evidence, not a
+portable viewer-limit guarantee.

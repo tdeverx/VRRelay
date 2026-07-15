@@ -42,6 +42,11 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   `VRRELAY_AGENT_LOG_RETENTION_ROWS` and `VRRELAY_AGENT_LOG_QUERY_LIMIT`.
   Redacted node logs are persisted, exposed through bounded list responses, and
   emitted as `node.log` events on the authenticated operations stream.
+- `script/benchmark.mjs` now provides reproducible playlist, cached-egress,
+  uncached-encode, live-fan-out, cache-ratio, and resource-snapshot scenarios.
+  Each report includes sanitized target metadata plus CPU/RAM/GPU resource
+  snapshots so later retained benchmark runs can be tied to their host and
+  workload.
 
 ## Lean guardrails run
 
@@ -63,6 +68,8 @@ npx vitest run packages/application/src/cluster-service.test.ts -t "static edge"
 npx vitest run packages/application/src/cluster-service.test.ts -t "agent log retention"
 npx vitest run apps/relay/src/config.test.ts -t "agent log retention"
 npx vitest run packages/application/src/services.test.ts
+npx vitest run script/benchmark.test.mjs
+node script/benchmark.mjs --scenario resource-snapshot
 npm run check:api
 npm run check:agent-protocol-schema
 npm run check --workspace @vrrelay/contracts
@@ -72,7 +79,7 @@ npm run check --workspace @vrrelay/web
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 367 tests with 23
+Result: all commands passed. The local full CI gate passed 371 tests with 23
 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
@@ -82,6 +89,7 @@ intentional skips and reported zero npm vulnerabilities.
   normalizer counters.
 - Job-level log streaming and retention controls beyond the current bounded
   node-agent log stream.
-- Benchmark scenarios and retained benchmark metadata.
+- Retained benchmark runs against target environments, using the scenario
+  runner and metadata now checked in.
 - Destructive operations evidence under real repository, coordination, object
   storage, MediaMTX, and agent-listener failures.
