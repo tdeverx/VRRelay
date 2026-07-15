@@ -1301,6 +1301,36 @@ describe('Live relay service', () => {
         'read-token'
       )
     ).resolves.toBe(true);
+    await expect(repo.getLiveChannel(created.channel.id)).resolves.toMatchObject({
+      publisherState: 'reconnecting'
+    });
+    await expect(
+      service.authorizeMediaMtx(
+        {
+          action: 'publish',
+          path: stored?.ingestPath ?? stored!.path,
+          user: 'vrrelay-publish',
+          password: created.publisher.publishToken
+        },
+        'read-token'
+      )
+    ).resolves.toBe(false);
+    const reconnectingChannel = (await repo.getVersionedLiveChannel(created.channel.id))!;
+    await repo.compareAndSetLiveChannel(
+      { ...reconnectingChannel.value, publisherState: 'offline' },
+      reconnectingChannel.revision
+    );
+    await expect(
+      service.authorizeMediaMtx(
+        {
+          action: 'publish',
+          path: stored?.ingestPath ?? stored!.path,
+          user: 'vrrelay-publish',
+          password: created.publisher.publishToken
+        },
+        'read-token'
+      )
+    ).resolves.toBe(true);
     await expect(
       service.authorizeMediaMtx(
         {

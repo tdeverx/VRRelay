@@ -57,6 +57,10 @@ evidence.
   maxrate, buffer, GOP/keyframe interval, B-frames, audio codec, channels, sample
   rate, and audio bitrate from the selected profile instead of process-level
   defaults.
+- Live publisher authorization now atomically claims a publisher slot before
+  MediaMTX accepts a publish request. A second publisher is rejected while the
+  channel is `online` or `reconnecting`, and primary/backup URLs can publish
+  again only after reconciliation marks the channel offline.
 
 ## Lean guardrails run
 
@@ -83,6 +87,7 @@ npx vitest run packages/application/src/services.test.ts -t "disk cache pressure
 npx vitest run apps/relay/src/composition/role-server.test.ts
 npx vitest run apps/relay/src/composition/role-server.test.ts -t "reconfigures a live edge origin path"
 npx vitest run packages/application/src/services.test.ts -t "live"
+npx vitest run packages/application/src/services.test.ts -t "Live relay service"
 npx vitest run packages/adapters/src/ffmpeg-live-normalizer.test.ts
 npm run generate:api
 npm run check:agent-protocol-schema
@@ -106,7 +111,7 @@ intentional skips and reported zero npm vulnerabilities.
 ## Deferred to later Phase 6 and final high-pass verification
 
 - Broader object-store lifecycle reconciliation.
-- Primary/backup publisher states, destructive origin recovery evidence, and one
-  upstream pull per active edge evidence.
+- Administrator-authorized publisher replacement, destructive origin recovery
+  evidence, and one upstream pull per active edge evidence.
 - Full `npm run ci` under the checksum-verified pinned Node runtime and
   destructive multi-process edge/live failure evidence.

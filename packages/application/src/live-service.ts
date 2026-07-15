@@ -12,6 +12,8 @@ import type { ClusterRepository, EventBus, LiveNormalizer, Repository } from './
 import { ConflictError, NotFoundError } from './errors.js';
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 
+const MAX_LIVE_CHANNEL_WRITE_ATTEMPTS = 5;
+
 export interface LiveServiceOptions {
   publicUrl: string;
   rtmpUrl: string;
@@ -128,6 +130,29 @@ export class LiveService {
     };
     await this.repository.createLiveChannel(channel);
     return { channel: publicLiveChannel(channel), publisher };
+  }
+
+  async #claimPublisherSlot(channelId: string): Promise<boolean> {
+    let stored = await this.repository.getVersionedLiveChannel(channelId);
+    for (let attempt = 0; stored && attempt < MAX_LIVE_CHANNEL_WRITE_ATTEMPTS; attempt += 1) {
+      if (
+        stored.value.publisherState === 'online' ||
+        stored.value.publisherState === 'reconnecting'
+      )
+        return false;
+      const result = await this.repository.compareAndSetLiveChannel(
+        {
+          ...stored.value,
+          publisherState: 'reconnecting',
+          publisherUpdatedAt: new Date().toISOString()
+        },
+        stored.revision
+      );
+      if (result.applied) return true;
+      if (result.reason === 'not-found') return false;
+      stored = result.current ?? (await this.repository.getVersionedLiveChannel(channelId));
+    }
+    return false;
   }
 
   async #selectOrigin(
@@ -299,6 +324,7 @@ export class LiveService {
       (candidate) => (candidate.ingestPath ?? candidate.path) === input.path
     );
     const supplied = input.password ?? input.token ?? '';
-    return Boolean(channel && supplied && hashToken(supplied) === channel.publishTokenHash);
+    if (!channel || !supplied || hashToken(supplied) !== channel.publishTokenHash) return false;
+    return this.#claimPublisherSlot(channel.id);
   }
 }

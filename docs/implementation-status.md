@@ -164,6 +164,10 @@ edge-delivery and live-fan-out verification is still pending.
 - Normalized live channels now pin the selected live-session profile, reject
   conflicting normalized profile choices for the same channel, and drive FFmpeg
   normalization from that profile's video and audio settings.
+- Live publisher authorization now claims a channel slot before MediaMTX accepts
+  a publisher. Duplicate publish attempts are rejected while the channel is
+  online or reconnecting; primary or backup ingest URLs can publish again after
+  reconciliation marks the channel offline.
 - The cache administration API can target a connected node for inventory and
   eviction via strict agent envelopes and fails closed for disconnected targets
   instead of falling back to controller-local cache mutation.
@@ -219,8 +223,9 @@ still pending.
   metadata, node-targeted cache administration, corrupt object-store restore
   recovery, immediate disk-pressure enforcement, and per-node backend
   application tracking now have implementation checkpoints. Broader object-store
-  lifecycle reconciliation, live backup/replacement behavior, destructive origin
-  recovery evidence, and one-pull-per-edge guarantees remain Phase 6 work.
+  lifecycle reconciliation, administrator-authorized live replacement,
+  destructive origin recovery evidence, and one-pull-per-edge guarantees remain
+  Phase 6 work.
 - The OpenAPI client is current and protected by a non-mutating freshness gate,
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
