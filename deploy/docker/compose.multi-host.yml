@@ -1,0 +1,66 @@
+name: vrrelay-node
+services:
+  controller:
+    profiles: [controller]
+    image: ${VRRELAY_IMAGE:?Set VRRELAY_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    env_file:
+      - { path: .env, required: false }
+    environment:
+      {
+        VRRELAY_NODE_ROLES: controller,
+        VRRELAY_LISTEN_ADDR: '0.0.0.0:8099',
+        VRRELAY_AGENT_LISTEN_ADDR: '0.0.0.0:8100'
+      }
+    volumes: [vrrelay-data:/data, vrrelay-cache:/cache]
+    ports: [8099:8099, 8100:8100]
+  source-worker:
+    profiles: [source-worker]
+    extends: { service: controller }
+    environment: { VRRELAY_NODE_ROLES: source-worker, VRRELAY_LISTEN_ADDR: '0.0.0.0:8099' }
+    ports: []
+  ingest-origin:
+    profiles: [ingest-origin]
+    extends: { service: controller }
+    environment:
+      VRRELAY_NODE_ROLES: ingest-origin
+      VRRELAY_LISTEN_ADDR: '0.0.0.0:8099'
+      VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
+    ports: []
+  edge:
+    profiles: [edge]
+    extends: { service: controller }
+    environment:
+      VRRELAY_NODE_ROLES: edge
+      VRRELAY_LISTEN_ADDR: '0.0.0.0:8099'
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-edge:8888
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-edge:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-edge:8554
+      VRRELAY_LIVE_ORIGIN_URL: ${VRRELAY_LIVE_ORIGIN_URL:-}
+    ports: [8099:8099]
+  mediamtx-origin:
+    profiles: [ingest-origin]
+    image: bluenviron/mediamtx:1.18.2
+    restart: unless-stopped
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://ingest-origin:8099/internal/mediamtx/auth
+      MTX_API: 'yes'
+      MTX_APIADDRESS: :9997
+      MTX_HLSVARIANT: mpegts
+      MTX_PATHDEFAULTS_SRTREADPASSPHRASE: ${VRRELAY_LIVE_SRT_PASSPHRASE:-}
+      MTX_WEBRTCLOCALUDPADDRESS: :8189
+      MTX_WEBRTCADDITIONALHOSTS: ${VRRELAY_WEBRTC_ADDITIONAL_HOSTS:-}
+    ports: [1935:1935, 8889:8889, '8189:8189/udp', '8890:8890/udp']
+  mediamtx-edge:
+    profiles: [edge]
+    image: bluenviron/mediamtx:1.18.2
+    restart: unless-stopped
+    volumes: [./mediamtx-edge.yml:/mediamtx.yml:ro]
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://edge:8099/internal/mediamtx/auth
+      MTX_HLSVARIANT: mpegts
+volumes: { vrrelay-data: {}, vrrelay-cache: {} }

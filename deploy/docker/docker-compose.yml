@@ -1,0 +1,66 @@
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      VRRELAY_LISTEN_ADDR: 0.0.0.0:8099
+      VRRELAY_PUBLIC_URL: ${VRRELAY_PUBLIC_URL:-http://localhost:8099}
+      VRRELAY_SETUP_TOKEN: ${VRRELAY_SETUP_TOKEN:-}
+      VRRELAY_DATA_DIR: /data
+      VRRELAY_CACHE_DIR: /cache
+      VRRELAY_MASTER_KEY: ${VRRELAY_MASTER_KEY:?Set a random VRRELAY_MASTER_KEY}
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx:8888
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx:9997
+      VRRELAY_MEDIAMTX_RTMP_URL: ${VRRELAY_RTMP_URL:-rtmp://localhost:1935}
+      VRRELAY_MEDIAMTX_SRT_URL: ${VRRELAY_SRT_URL:-srt://localhost:8890}
+      VRRELAY_MEDIAMTX_WHIP_URL: ${VRRELAY_WHIP_URL:-http://localhost:8889}
+      VRRELAY_MEDIAMTX_READ_TOKEN: ${VRRELAY_MEDIAMTX_READ_TOKEN:?Set a random read token}
+      VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
+      VRRELAY_MAX_WORKERS: ${VRRELAY_MAX_WORKERS:-2}
+    volumes:
+      - vrrelay-data:/data
+      - vrrelay-cache:/cache
+    ports:
+      - '8099:8099'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8099/api/v1/health').then(r=>{if(!r.ok)process.exit(1)})"
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.18.2
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://relay:8099/internal/mediamtx/auth
+      MTX_HLSADDRESS: :8888
+      MTX_HLSVARIANT: mpegts
+      MTX_WEBRTCADDRESS: :8889
+      MTX_WEBRTCLOCALUDPADDRESS: :8189
+      MTX_WEBRTCADDITIONALHOSTS: ${VRRELAY_WEBRTC_ADDITIONAL_HOSTS:-}
+      MTX_RTMPADDRESS: :1935
+      MTX_SRTADDRESS: :8890
+      MTX_API: 'yes'
+      MTX_APIADDRESS: :9997
+    ports:
+      - '1935:1935'
+      - '8889:8889'
+      - '8189:8189/udp'
+      - '8890:8890/udp'
+
+volumes:
+  vrrelay-data:
+  vrrelay-cache:

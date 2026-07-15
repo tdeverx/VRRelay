@@ -1,0 +1,183 @@
+name: Release
+on:
+  push: { tags: ['v*'] }
+permissions: { contents: read }
+env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22.23.1', cache: npm }
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with: { version: v4.2.3 }
+      - run: npm ci
+      - name: Validate release tag
+        run: test "$(node script/release-version.mjs '${{ github.ref_name }}')" = "${GITHUB_REF_NAME#v}"
+      - run: script/check-workflows.sh
+      - run: npm run ci
+      - run: helm lint deploy/kubernetes
+      - run: helm template vrrelay deploy/kubernetes > rendered.yaml
+      - run: node script/check-kubernetes.mjs rendered.yaml
+      - name: Reject shared node identities
+        run: if helm template vrrelay deploy/kubernetes --set edge.replicas=2; then exit 1; fi
+      - name: Verify staged controller bootstrap
+        run: |
+          helm template vrrelay deploy/kubernetes --set sourceWorker.enabled=false --set ingestOrigin.enabled=false --set edge.enabled=false > controller-only.yaml
+          if grep -q vrrelay-mediamtx-origin controller-only.yaml; then exit 1; fi
+      - name: Run real-process distributed VOD smoke test
+        shell: bash
+        run: |
+          set -o pipefail
+          script/check-compose.sh
+          script/container-smoke.sh "${GITHUB_REF_NAME#v}"
+          script/compose-smoke.sh
+          npm run test:cluster-compose 2>&1 | tee cluster-compose.log
+          npm run test:local-cluster 2>&1 | tee local-cluster.log
+      - name: Run two-worker/two-edge acceptance harness
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:integration 2>&1 | tee acceptance.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-acceptance-logs
+          path: |
+            local-cluster.log
+            cluster-compose.log
+            acceptance.log
+          if-no-files-found: ignore
+  security:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions: { contents: read, security-events: write }
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          {
+            scan-type: fs,
+            scan-ref: .,
+            format: sarif,
+            output: trivy.sarif,
+            severity: 'HIGH,CRITICAL',
+            exit-code: '1'
+          }
+      - uses: github/codeql-action/upload-sarif@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d # v3
+        if: always()
+        with: { sarif_file: trivy.sarif }
+  oci:
+    needs: [gate, security]
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: version
+        run: echo "version=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          build-args: VRRELAY_VERSION=${{ steps.version.outputs.version }}
+          provenance: true
+          sbom: true
+  native:
+    needs: [gate, security]
+    strategy:
+      {
+        matrix:
+          {
+            include: [{ os: macos-14, artifact: macos }, { os: windows-latest, artifact: windows }]
+          }
+      }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22.23.1', cache: npm }
+      - run: npm ci
+      - shell: bash
+        run: |
+          echo "VRRELAY_VERSION=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_ENV"
+          echo "VRRELAY_BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: npm run build
+      - if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg@7
+          echo "VRRELAY_FFMPEG_BINARY=$(brew --prefix ffmpeg@7)/bin/ffmpeg" >> "$GITHUB_ENV"
+      - if: runner.os == 'macOS'
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+        run: deploy/macos/package.sh release pkg
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: deploy/windows/package.ps1
+      - shell: bash
+        run: find dist -maxdepth 1 -type f ! -name '*SHA256SUMS' -print0 | xargs -0 shasum -a 256 > "dist/VRRelay-${{ matrix.artifact }}-SHA256SUMS"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vrrelay-${{ matrix.artifact }}
+          path: dist/
+  release-metadata:
+    needs: [gate, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22.23.1', cache: npm }
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with: { version: v4.2.3 }
+      - run: npm ci
+      - id: version
+        run: echo "version=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_OUTPUT"
+      - run: mkdir -p dist/release-metadata
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with: { path: '.', format: spdx-json, output-file: dist/release-metadata/vrrelay.spdx.json }
+      - name: Package Helm chart and release notices
+        env:
+          FFMPEG_SOURCE_BUNDLE_URL: ${{ vars.VRRELAY_FFMPEG_SOURCE_BUNDLE_URL }}
+          FFMPEG_SOURCE_BUNDLE_SHA256: ${{ vars.VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256 }}
+        run: |
+          helm package deploy/kubernetes --version "${{ steps.version.outputs.version }}" --app-version "${{ steps.version.outputs.version }}" --destination dist/release-metadata
+          cp LICENSE THIRD_PARTY_NOTICES.md deploy/runtime-manifest.json docs/releasing.md dist/release-metadata/
+          curl -fL https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz -o dist/release-metadata/ffmpeg-7.1.5.tar.xz
+          node script/verify-runtime.mjs dist/release-metadata/ffmpeg-7.1.5.tar.xz
+          test -n "$FFMPEG_SOURCE_BUNDLE_URL" && test -n "$FFMPEG_SOURCE_BUNDLE_SHA256"
+          curl -fL "$FFMPEG_SOURCE_BUNDLE_URL" -o dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz
+          echo "$FFMPEG_SOURCE_BUNDLE_SHA256  dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz" | sha256sum --check --strict
+          node script/windows-source-bundle.mjs --verify dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz
+      - name: Checksum final release metadata
+        run: |
+          (cd dist/release-metadata && sha256sum * > ../VRRelay-release-metadata-SHA256SUMS)
+          mv dist/VRRelay-release-metadata-SHA256SUMS dist/release-metadata/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vrrelay-release-metadata
+          path: dist/release-metadata/
+  publish:
+    needs: [oci, native, release-metadata]
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { path: artifacts, pattern: 'vrrelay-*' }
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with: { files: artifacts/**/*, draft: true }

@@ -1,0 +1,25 @@
+# Private-production operations
+
+## Enrollment and networking
+
+Create a single-use join token in **Cluster → Enroll node**, select the exact roles, and transfer it to the target node once. The node exchanges it at the enrollment URL, stores the returned identity in its platform secret backend, then uses only outbound mTLS WebSockets. Remove `VRRELAY_NODE_JOIN_TOKEN` after enrollment. Certificates rotate automatically during the last 48 hours of their seven-day lifetime.
+
+The protocol is identical over public WSS and private overlays. Public mode needs TCP 8100 forwarded to the controller agent listener and the public DNS name in `VRRELAY_AGENT_TLS_NAMES`. Overlay mode uses the overlay address in `VRRELAY_CONTROLLER_AGENT_URL`. Workers, origins, and edges need no inbound management port.
+
+## Traffic director
+
+The default director performs capacity-aware, stable session hashing locally. **Cluster → Configure routing** can validate and activate a generic webhook without restarting the controller. Public endpoints must use HTTPS; private-network HTTP is accepted with the same SSRF and credential-in-URL checks as provider connections. An optional `secretRef` names a bearer token already provisioned in the controller's root secret backend—the secret value is never stored in distributed configuration or returned by the API.
+
+VRRelay sends `{"type":"health"}` for validation. Selection requests contain `type: "select-edge"`, the session and preferred region, and only eligible edges with public routing/capacity fields. Return `{"nodeId":"…"}` for one supplied candidate. Unknown, offline, or otherwise ineligible IDs are rejected.
+
+## Backup, restore, upgrade, and rollback
+
+Back up PostgreSQL with `deploy/docker/backup.sh`, object-store configuration, TLS material, and each node's secret backend. Valkey is coordination state, not the authoritative backup. Test restores in an isolated cluster.
+
+Before upgrading, take a backup and verify release checksums/SBOM. Drain non-controller roles one at a time, upgrade the single controller, then agents. Keep the previous artifacts and backup until VRChat smoke tests pass. Roll back binaries only with a compatible schema; otherwise restore the matching pre-upgrade database and node data. Native uninstallers retain data unless explicitly purged.
+
+After controller restart, sessions and queued jobs remain in PostgreSQL. Expired leases can be reassigned; completed object keys are checked before new work. Object-store failures leave partial objects hidden. Certificate revocation is persisted and closes the live agent socket.
+
+## Metrics and privacy
+
+Set a dedicated 32-character-or-longer `VRRELAY_METRICS_TOKEN`. Viewer counts are estimates: VRRelay HMACs IP/user-agent pairs with an installation-local salt and expires activity after 30 seconds. Relay byte counters are exact.

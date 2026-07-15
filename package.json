@@ -1,0 +1,68 @@
+{
+  "name": "vrrelay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A private, self-hosted Jellyfin VOD and OBS live relay for VRChat video players.",
+  "license": "GPL-3.0-or-later",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "workspaces": [
+    "apps/relay",
+    "apps/web",
+    "apps/windows",
+    "packages/*"
+  ],
+  "overrides": {
+    "@sveltejs/kit": {
+      "cookie": "0.7.2"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:packages && npm run build --workspace @vrrelay/relay && npm run build --workspace @vrrelay/web && node script/sync-web.mjs",
+    "build:packages": "npm run build --workspace @vrrelay/domain && npm run build --workspace @vrrelay/contracts && npm run build --workspace @vrrelay/application && npm run build --workspace @vrrelay/adapters",
+    "clean": "node script/clean.mjs",
+    "check": "npm run check:api && npm run check --workspaces --if-present && npm run check:tests && npm run check:repo",
+    "check:api": "node script/generate-api.mjs --check",
+    "check:compose": "script/check-compose.sh",
+    "check:repo": "node script/check-repository.mjs",
+    "check:tests": "tsc -p tsconfig.tests.json",
+    "ci": "npm run format:check && npm run check && npm run lint && npm test -- --run && npm run build && npm audit --audit-level=moderate",
+    "predev": "npm run build:packages",
+    "dev": "node script/dev.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prelint": "npm run sync --workspace @vrrelay/web",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:compose": "script/compose-smoke.sh",
+    "test:cluster-compose": "node script/cluster-compose-smoke.mjs",
+    "test:container": "script/container-smoke.sh",
+    "test:integration": "node script/integration-harness.mjs",
+    "pretest:real-jellyfin": "npm run build",
+    "test:real-jellyfin": "node script/real-jellyfin-smoke.mjs",
+    "pretest:real-live": "npm run build",
+    "test:real-live": "node script/real-live-smoke.mjs",
+    "pretest:local-cluster": "npm run build",
+    "test:local-cluster": "node script/local-cluster-smoke.mjs",
+    "test:watch": "vitest",
+    "generate:api": "node script/generate-api.mjs",
+    "verify:runtime": "node script/verify-runtime.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.37.0",
+    "@hey-api/openapi-ts": "^0.99.0",
+    "@types/node": "^24.7.2",
+    "cookie": "0.7.2",
+    "eslint": "^9.37.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-svelte": "^3.5.2",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.64.0",
+    "uuid": "^11.1.1",
+    "vitest": "^4.1.10"
+  }
+}

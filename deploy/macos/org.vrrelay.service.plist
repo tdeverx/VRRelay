@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>org.vrrelay.service</string>
+  <key>ProgramArguments</key><array>
+    <string>/Library/Application Support/VRRelay/runtime/bin/node</string>
+    <string>/Library/Application Support/VRRelay/runtime/apps/relay/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Library/Application Support/VRRelay/runtime</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>VRRELAY_DATA_DIR</key><string>/Library/Application Support/VRRelay/data</string>
+    <key>VRRELAY_CACHE_DIR</key><string>/Library/Caches/VRRelay</string>
+    <key>VRRELAY_FFMPEG</key><string>/Library/Application Support/VRRelay/runtime/bin/ffmpeg</string>
+    <key>VRRELAY_MEDIAMTX_EXECUTABLE</key><string>/Library/Application Support/VRRelay/runtime/bin/mediamtx</string>
+    <key>VRRELAY_MEDIAMTX_CONFIG</key><string>/Library/Application Support/VRRelay/runtime/mediamtx.yml</string>
+    <key>VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ</key><string>true</string>
+  </dict>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Library/Logs/VRRelay/service.log</string>
+  <key>StandardErrorPath</key><string>/Library/Logs/VRRelay/service.log</string>
+  <key>ThrottleInterval</key><integer>10</integer>
+</dict></plist>

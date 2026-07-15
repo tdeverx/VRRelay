@@ -1,0 +1,87 @@
+image: { repository: ghcr.io/vrrelay/vrrelay, tag: '', pullPolicy: IfNotPresent }
+disruptionBudget: { enabled: true }
+agent:
+  controllerUrl: wss://relay.example.com:8100/api/v1/nodes/connect
+  enrollmentUrl: https://relay.example.com
+  tlsNames: [relay.example.com, vrrelay-controller]
+storage: { driver: s3, bucket: vrrelay, endpoint: http://minio:9000 }
+secrets:
+  controller: vrrelay-controller-runtime
+  sourceWorker: vrrelay-source-worker-runtime
+  ingestOrigin: vrrelay-ingest-origin-runtime
+  edge: vrrelay-edge-runtime
+controller:
+  enabled: true
+  replicas: 1
+  region: home
+  publicUrl: https://relay.example.com
+  cacheSize: 20Gi
+  persistence: { enabled: true, size: 5Gi, storageClass: '' }
+  resources: {}
+  agentService:
+    type: ClusterIP
+    annotations: {}
+  extraVolumes: []
+  extraVolumeMounts: []
+sourceWorker:
+  enabled: true
+  replicas: 1
+  region: home
+  publicUrl: https://source.invalid
+  cacheSize: 50Gi
+  persistence: { enabled: true, size: 5Gi, storageClass: '' }
+  resources: {}
+  extraVolumes: []
+  extraVolumeMounts: []
+ingestOrigin:
+  enabled: true
+  replicas: 1
+  region: home
+  publicUrl: https://ingest.example.com
+  cacheSize: 10Gi
+  persistence: { enabled: true, size: 5Gi, storageClass: '' }
+  resources: {}
+  extraVolumes: []
+  extraVolumeMounts: []
+edge:
+  enabled: true
+  replicas: 1
+  region: home
+  publicUrl: https://edge.example.com
+  liveOriginUrl: srt://vrrelay-mediamtx-origin:8890
+  cacheSize: 100Gi
+  persistence: { enabled: true, size: 5Gi, storageClass: '' }
+  resources: {}
+  ingress:
+    enabled: true
+    className: ''
+    host: edge.example.com
+    tlsSecret: vrrelay-edge-tls
+    annotations: {}
+  extraVolumes: []
+  extraVolumeMounts: []
+mediaMtx:
+  enabled: true
+  replicas: 1
+  image: bluenviron/mediamtx:1.18.2
+  resources: {}
+  publicUrls:
+    rtmp: rtmp://ingest.example.com:1935
+    srt: srt://ingest.example.com:8890
+    whip: https://ingest.example.com
+  webrtcAdditionalHosts: [ingest.example.com]
+  ingestService:
+    type: ClusterIP
+    annotations: {}
+  whipIngress:
+    enabled: true
+    className: ''
+    host: ingest.example.com
+    tlsSecret: vrrelay-ingest-tls
+    annotations: {}
+ingress:
+  enabled: true
+  className: ''
+  host: relay.example.com
+  tlsSecret: vrrelay-tls
+  annotations: {}

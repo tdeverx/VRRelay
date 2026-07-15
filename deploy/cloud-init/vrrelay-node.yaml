@@ -1,0 +1,31 @@
+#cloud-config
+package_update: true
+packages: [docker.io, docker-compose-v2]
+write_files:
+  - path: /etc/vrrelay/node.env
+    permissions: '0600'
+    content: |
+      VRRELAY_NODE_ID=${node_id}
+      VRRELAY_NODE_NAME=${node_name}
+      VRRELAY_NODE_REGION=${region}
+      VRRELAY_NODE_ROLES=${roles}
+      VRRELAY_PUBLIC_URL=${public_url}
+      VRRELAY_CONTROLLER_AGENT_URL=${controller_agent_url}
+      VRRELAY_CONTROLLER_ENROLLMENT_URL=${controller_enrollment_url}
+      VRRELAY_NODE_JOIN_TOKEN=${single_use_join_token}
+      VRRELAY_MASTER_KEY=${master_key}
+  - path: /etc/systemd/system/vrrelay.service
+    content: |
+      [Unit]
+      After=docker.service network-online.target
+      Requires=docker.service
+      [Service]
+      Restart=always
+      EnvironmentFile=/etc/vrrelay/node.env
+      ExecStart=/usr/bin/docker run --rm --name vrrelay --env-file /etc/vrrelay/node.env -p 8099:8099 ghcr.io/vrrelay/vrrelay:0.1.0
+      ExecStop=/usr/bin/docker stop vrrelay
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now vrrelay

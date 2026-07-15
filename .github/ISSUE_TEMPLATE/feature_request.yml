@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a focused improvement
+title: '[Feature]: '
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes: { label: Problem, description: What user or operator problem should be solved? }
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      {
+        label: Proposed outcome,
+        description: Describe behavior and boundaries,
+        not only an implementation.
+      }
+    validations: { required: true }
+  - type: textarea
+    id: alternatives
+    attributes: { label: Alternatives considered }
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Primary area
+      options:
+        [
+          Media compatibility,
+          Provider adapter,
+          Cluster/runtime,
+          Dashboard/API,
+          Deployment/packaging,
+          Documentation,
+          Other
+        ]
+    validations: { required: true }
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Potential impact
+      options:
+        - label: Public API or protocol change
+        - label: Persisted data migration
+        - label: New credential or trust boundary
+        - label: New default media behavior
+        - label: Platform-specific dependency

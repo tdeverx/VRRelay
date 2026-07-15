@@ -1,0 +1,10 @@
+#!/bin/zsh
+set -eu
+install -d -m 0750 "/Library/Application Support/VRRelay/data" "/Library/Caches/VRRelay" "/Library/Logs/VRRelay"
+chown -R root:wheel "/Library/Application Support/VRRelay" "/Library/Caches/VRRelay" "/Library/Logs/VRRelay"
+chmod 0700 "/Library/Application Support/VRRelay/data"
+/bin/launchctl bootout system/org.vrrelay.service 2>/dev/null || true
+/bin/launchctl bootstrap system /Library/LaunchDaemons/org.vrrelay.service.plist
+/bin/launchctl enable system/org.vrrelay.service
+/bin/launchctl kickstart -k system/org.vrrelay.service
+exit 0

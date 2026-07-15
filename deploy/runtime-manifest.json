@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-14",
+  "components": [
+    {
+      "name": "node",
+      "version": "22.23.1",
+      "license": "MIT",
+      "source": "https://nodejs.org/download/release/v22.23.1/",
+      "capabilities": ["relay-runtime", "dashboard-build", "node-agent"],
+      "artifacts": {
+        "darwin-arm64": {
+          "file": "node-v22.23.1-darwin-arm64.tar.gz",
+          "sha256": "ef28d8fab2c0e4314522d4bb1b7173270aa3937e93b92cb7de79c112ac1fa953"
+        },
+        "win32-x64": {
+          "file": "node-v22.23.1-win-x64.zip",
+          "sha256": "7df0bc9375723f4a86b3aa1b7cc73342423d9677a8df4538aca31a049e309c29"
+        },
+        "linux-x64": {
+          "file": "node-v22.23.1-linux-x64.tar.xz",
+          "sha256": "9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578"
+        },
+        "linux-arm64": {
+          "file": "node-v22.23.1-linux-arm64.tar.xz",
+          "sha256": "0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1"
+        }
+      }
+    },
+    {
+      "name": "ffmpeg",
+      "version": "7.1.5",
+      "license": "GPL-3.0-or-later",
+      "source": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz",
+      "sourceNotes": {
+        "darwin-arm64": "The Homebrew ffmpeg@7 build is based on the 7.1.5 release source.",
+        "linux-x64": "The pinned BtbN GPL build is based on FFmpeg commit 7d0e8420048cffd0ca3883b877ead2390496d0b2. OCI and Windows binaries share one complete corresponding-source bundle.",
+        "linux-arm64": "The pinned BtbN GPL build is based on FFmpeg commit 7d0e8420048cffd0ca3883b877ead2390496d0b2. OCI and Windows binaries share one complete corresponding-source bundle.",
+        "windows-x64": "The BtbN build is based on FFmpeg commit 7d0e8420048cffd0ca3883b877ead2390496d0b2 and its GPL dependency build scripts. Binary releases are blocked unless the complete corresponding-source bundle is attached."
+      },
+      "capabilities": ["h264", "aac", "mpegts-hls", "fmp4-hls", "subtitles", "tonemap"],
+      "artifacts": {
+        "source": {
+          "file": "ffmpeg-7.1.5.tar.xz",
+          "sha256": "de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f"
+        },
+        "linux-x64": {
+          "file": "ffmpeg-n7.1.5-1-g7d0e842004-linux64-gpl-7.1.tar.xz",
+          "sha256": "f0c580f5f12af54e8c9c649c70b2d25f264edb35393203d34b20cf4f9c126288",
+          "buildRecipe": {
+            "provider": "BtbN/FFmpeg-Builds",
+            "releaseTag": "autobuild-2026-06-30-13-34",
+            "repositoryCommit": "7a83528ea3431e9eca982a712bc3a7cd0789d5d0",
+            "ffmpegCommit": "7d0e8420048cffd0ca3883b877ead2390496d0b2",
+            "target": "linux64",
+            "variant": "gpl",
+            "addins": ["7.1"]
+          }
+        },
+        "linux-arm64": {
+          "file": "ffmpeg-n7.1.5-1-g7d0e842004-linuxarm64-gpl-7.1.tar.xz",
+          "sha256": "8b61e22e674c9f3530a8953a684d6789dd94de26fffd614b9234b15673b85d04",
+          "buildRecipe": {
+            "provider": "BtbN/FFmpeg-Builds",
+            "releaseTag": "autobuild-2026-06-30-13-34",
+            "repositoryCommit": "7a83528ea3431e9eca982a712bc3a7cd0789d5d0",
+            "ffmpegCommit": "7d0e8420048cffd0ca3883b877ead2390496d0b2",
+            "target": "linuxarm64",
+            "variant": "gpl",
+            "addins": ["7.1"]
+          }
+        },
+        "windows-x64": {
+          "file": "ffmpeg-n7.1.5-1-g7d0e842004-win64-gpl-7.1.zip",
+          "sha256": "405b190f746db40539eb453967f72c0e69d8bf260b10ceff36e0c2149a9ad22f",
+          "buildRecipe": {
+            "provider": "BtbN/FFmpeg-Builds",
+            "releaseTag": "autobuild-2026-06-30-13-34",
+            "repositoryCommit": "7a83528ea3431e9eca982a712bc3a7cd0789d5d0",
+            "ffmpegCommit": "7d0e8420048cffd0ca3883b877ead2390496d0b2",
+            "target": "win64",
+            "variant": "gpl",
+            "addins": ["7.1"]
+          }
+        }
+      }
+    },
+    {
+      "name": "mediamtx",
+      "version": "1.18.2",
+      "license": "MIT",
+      "source": "https://github.com/bluenviron/mediamtx/releases/tag/v1.18.2",
+      "capabilities": ["rtmp", "srt", "whip", "hls", "rtsp"],
+      "artifacts": {
+        "darwin-arm64": {
+          "file": "mediamtx_v1.18.2_darwin_arm64.tar.gz",
+          "sha256": "6a9273ae22a9d0ba85d00d03fdd1b13b9eeaf129ea8b90999ec746367f20449a"
+        },
+        "windows-x64": {
+          "file": "mediamtx_v1.18.2_windows_amd64.zip",
+          "sha256": "945ab46c5fc6d2802ad18e2f1d7e49245ca5609657d85e310aa6eda4cdd72eec"
+        },
+        "linux-x64": {
+          "file": "mediamtx_v1.18.2_linux_amd64.tar.gz",
+          "sha256": "73ed27c292e05ceb4990dcb34531f01872dfff5374b7515c45a202e0abf47706"
+        },
+        "linux-arm64": {
+          "file": "mediamtx_v1.18.2_linux_arm64.tar.gz",
+          "sha256": "c78aa7a1bdab94b2b02be364661f17802143215dba37e1fa67c3e0849248b485"
+        }
+      }
+    },
+    {
+      "name": "electron",
+      "version": "39.8.10",
+      "license": "MIT",
+      "source": "https://github.com/electron/electron/releases/tag/v39.8.10",
+      "capabilities": ["windows-tray-host"],
+      "artifacts": {
+        "darwin-arm64": {
+          "file": "electron-v39.8.10-darwin-arm64.zip",
+          "sha256": "f7e3ed2cc34dd2eba3f2a95234b576fe8082d35fb133e482102c08105f298572"
+        },
+        "win32-x64": {
+          "file": "electron-v39.8.10-win32-x64.zip",
+          "sha256": "4478410a35a8399b7745085096695a37877f176755182a71e27eddc245cd98d5"
+        }
+      }
+    },
+    {
+      "name": "winsw",
+      "version": "2.12.0",
+      "license": "MIT",
+      "source": "https://github.com/winsw/winsw/releases/tag/v2.12.0",
+      "capabilities": ["windows-service", "restart-recovery", "rolling-logs"],
+      "artifacts": {
+        "win32-x64": {
+          "file": "WinSW-x64.exe",
+          "sha256": "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+        }
+      }
+    }
+  ]
+}

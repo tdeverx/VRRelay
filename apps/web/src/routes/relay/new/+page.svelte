@@ -1,0 +1,839 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import {
+    AlertTriangle,
+    ArrowLeft,
+    Check,
+    ChevronDown,
+    Film,
+    Info,
+    LoaderCircle,
+    Search,
+    Settings2,
+    Sparkles
+  } from '@lucide/svelte';
+  import { toast } from 'svelte-sonner';
+  import type {
+    MediaItem,
+    PlatformMode,
+    ProfileRevision,
+    PublicProviderConnection
+  } from '@vrrelay/domain';
+  import AppShell from '$lib/components/AppShell.svelte';
+  import { api, isAuthenticatedError } from '$lib/api';
+  import { Button } from '$lib/components/ui/button';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Input } from '$lib/components/ui/input';
+  import { Switch } from '$lib/components/ui/switch';
+  import * as Select from '$lib/components/ui/select';
+  import * as Field from '$lib/components/ui/field';
+  import * as Alert from '$lib/components/ui/alert';
+  import * as Collapsible from '$lib/components/ui/collapsible';
+  import { Progress } from '$lib/components/ui/progress';
+  import { formatBitrate, formatDuration } from '$lib/utils';
+
+  let providers = $state<PublicProviderConnection[]>([]);
+  let profiles = $state<ProfileRevision[]>([]);
+  let results = $state<MediaItem[]>([]);
+  let selected = $state<MediaItem | null>(null);
+  let providerId = $state('');
+  let profileKey = $state('');
+  let platformMode = $state<PlatformMode>('universal');
+  let audioTrackId = $state('');
+  let subtitleTrackId = $state('none');
+  let query = $state('');
+  let loading = $state(true);
+  let searching = $state(false);
+  let creating = $state(false);
+  let pinned = $state(false);
+  let reportActivity = $state(true);
+  let placementPolicy = $state<'local' | 'hosted' | 'auto'>('auto');
+  let preferredRegion = $state('');
+  let advancedOpen = $state(false);
+
+  let currentProfile = $derived(
+    profiles.find((profile) => `${profile.profileId}:${profile.revision}` === profileKey)
+  );
+  let provider = $derived(providers.find((item) => item.id === providerId));
+  let step = $derived(
+    !selected
+      ? 1
+      : !audioTrackId && (selected.audioTracks?.length ?? 0) > 0
+        ? 2
+        : !currentProfile
+          ? 3
+          : 4
+  );
+  let ready = $derived(Boolean(selected && currentProfile && provider));
+
+  onMount(load);
+
+  async function load() {
+    try {
+      const [providerResult, profileResult] = await Promise.all([api.providers(), api.profiles()]);
+      providers = providerResult.items;
+      profiles = profileResult.items.filter(
+        (profile) => !profile.disabledReason && profile.delivery.playlistType === 'vod'
+      );
+      providerId = providers[0]?.id ?? '';
+      const defaultProfile =
+        profiles.find(
+          (profile) => profile.platform === 'universal' && profile.delivery.method === 'hls'
+        ) ?? profiles[0];
+      if (defaultProfile) {
+        profileKey = `${defaultProfile.profileId}:${defaultProfile.revision}`;
+        platformMode = defaultProfile.platform;
+      }
+      if (providerId) await searchCatalog();
+    } catch (error) {
+      if (isAuthenticatedError(error)) return goto('/login');
+      toast.error(error instanceof Error ? error.message : 'Could not prepare the relay form.');
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function searchCatalog() {
+    if (!providerId) return;
+    searching = true;
+    try {
+      results = (await api.catalog(providerId, { search: query || undefined, limit: 24 })).items;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not search the catalog.');
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function choose(item: MediaItem) {
+    try {
+      selected = await api.item(item.providerId, item.id);
+      audioTrackId =
+        selected.audioTracks?.find((track) => track.isDefault)?.id ??
+        selected.audioTracks?.[0]?.id ??
+        '';
+      subtitleTrackId = 'none';
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load media details.');
+    }
+  }
+
+  function setProfile(value: string) {
+    profileKey = value;
+    const profile = profiles.find((item) => `${item.profileId}:${item.revision}` === value);
+    if (profile) platformMode = profile.platform;
+  }
+
+  async function createRelay() {
+    if (!selected || !currentProfile) return;
+    creating = true;
+    try {
+      const session = await api.createVodSession({
+        name: selected.name,
+        source: {
+          providerId: selected.providerId,
+          itemId: selected.id,
+          versionId: selected.versions?.[0]?.id,
+          audioTrackId: audioTrackId || undefined,
+          subtitleTrackId: subtitleTrackId === 'none' ? undefined : subtitleTrackId
+        },
+        profileId: currentProfile.profileId,
+        profileRevision: currentProfile.revision,
+        platformMode,
+        placementPolicy,
+        preferredRegion: preferredRegion.trim() || undefined,
+        pinned,
+        reportActivity
+      });
+      toast.success('Relay ready', { description: 'The playback URL has been generated.' });
+      await goto(`/?session=${session.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not create the relay.');
+    } finally {
+      creating = false;
+    }
+  }
+</script>
+
+<AppShell active="sessions">
+  <div class="relay-page">
+    <header>
+      <Button variant="ghost" size="icon" href="/" aria-label="Back to sessions"
+        ><ArrowLeft /></Button
+      >
+      <div>
+        <h1>New relay</h1>
+        <p>Create a finite, seekable URL from Jellyfin media.</p>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <nav class="steps" aria-label="Relay creation progress">
+        {#each [['Source', 'Choose Jellyfin media'], ['Tracks', 'Audio and subtitles'], ['Output', 'Playback profile'], ['Review', 'Create relay']] as item, index}
+          <div class:current={step === index + 1} class:complete={step > index + 1}>
+            <span
+              >{#if step > index + 1}<Check />{:else}{index + 1}{/if}</span
+            >
+            <div><strong>{item[0]}</strong><small>{item[1]}</small></div>
+          </div>
+        {/each}
+      </nav>
+
+      <main>
+        <section class="form-section">
+          <div class="section-title">
+            <span>01</span>
+            <div>
+              <h2>Source</h2>
+              <p>Select the original media VRRelay should process.</p>
+            </div>
+          </div>
+          {#if providers.length === 0 && !loading}
+            <Alert.Root
+              ><AlertTriangle /><Alert.Title>No provider connected</Alert.Title><Alert.Description
+                >Add Jellyfin in Settings before creating a VOD relay.</Alert.Description
+              ></Alert.Root
+            >
+            <Button href="/settings">Open settings</Button>
+          {:else}
+            <Field.Field>
+              <Field.FieldLabel>Media provider</Field.FieldLabel>
+              <Select.Root
+                type="single"
+                bind:value={providerId}
+                onValueChange={() => void searchCatalog()}
+              >
+                <Select.Trigger class="w-full">{provider?.name ?? 'Select provider'}</Select.Trigger
+                >
+                <Select.Content
+                  ><Select.Group
+                    >{#each providers as item}<Select.Item value={item.id} label={item.name}
+                        >{item.name}</Select.Item
+                      >{/each}</Select.Group
+                  ></Select.Content
+                >
+              </Select.Root>
+            </Field.Field>
+            <form
+              class="search"
+              onsubmit={(event) => {
+                event.preventDefault();
+                void searchCatalog();
+              }}
+            >
+              <Search /><Input
+                bind:value={query}
+                placeholder="Search films, episodes, or videos…"
+                aria-label="Search media"
+              />
+              <Button type="submit" variant="secondary" disabled={searching}
+                >{searching ? 'Searching…' : 'Search'}</Button
+              >
+            </form>
+            <div class="media-grid" aria-label="Media results">
+              {#each results as item (item.id)}
+                <button class:selected={selected?.id === item.id} onclick={() => void choose(item)}>
+                  <span class="poster"
+                    >{#if item.imageUrl}<img src={item.imageUrl} alt="" />{:else}<Film />{/if}</span
+                  >
+                  <span
+                    ><strong>{item.name}</strong><small
+                      >{[item.productionYear, formatDuration(item.durationSeconds)]
+                        .filter(Boolean)
+                        .join(' · ') || item.kind}</small
+                    ></span
+                  >
+                  {#if selected?.id === item.id}<Check class="selected-check" />{/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </section>
+
+        <section class="form-section" class:dimmed={!selected}>
+          <div class="section-title">
+            <span>02</span>
+            <div>
+              <h2>Tracks</h2>
+              <p>Choose the source tracks before real-time transcoding.</p>
+            </div>
+          </div>
+          <div class="two-column">
+            <Field.Field>
+              <Field.FieldLabel>Audio track</Field.FieldLabel>
+              <Select.Root type="single" bind:value={audioTrackId} disabled={!selected}>
+                <Select.Trigger class="w-full"
+                  >{selected?.audioTracks?.find((track) => track.id === audioTrackId)?.title ??
+                    'Default audio'}</Select.Trigger
+                >
+                <Select.Content
+                  ><Select.Group
+                    >{#each selected?.audioTracks ?? [] as track}<Select.Item
+                        value={track.id}
+                        label={track.title}>{track.title} · {track.codec ?? 'unknown'}</Select.Item
+                      >{/each}</Select.Group
+                  ></Select.Content
+                >
+              </Select.Root>
+            </Field.Field>
+            <Field.Field>
+              <Field.FieldLabel>Subtitles</Field.FieldLabel>
+              <Select.Root type="single" bind:value={subtitleTrackId} disabled={!selected}>
+                <Select.Trigger class="w-full"
+                  >{subtitleTrackId === 'none'
+                    ? 'Off'
+                    : selected?.subtitleTracks?.find((track) => track.id === subtitleTrackId)
+                        ?.title}</Select.Trigger
+                >
+                <Select.Content
+                  ><Select.Group
+                    ><Select.Item value="none" label="Off">Off</Select.Item
+                    >{#each selected?.subtitleTracks ?? [] as track}<Select.Item
+                        value={track.id}
+                        label={track.title}>{track.title}</Select.Item
+                      >{/each}</Select.Group
+                  ></Select.Content
+                >
+              </Select.Root>
+            </Field.Field>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <div class="section-title">
+            <span>03</span>
+            <div>
+              <h2>Output</h2>
+              <p>Select a tested profile or an experimental delivery method.</p>
+            </div>
+          </div>
+          <div class="two-column">
+            <Field.Field>
+              <Field.FieldLabel>Encoding profile</Field.FieldLabel>
+              <Select.Root
+                type="single"
+                value={profileKey}
+                onValueChange={(value) => setProfile(value ?? '')}
+              >
+                <Select.Trigger class="w-full"
+                  >{currentProfile?.name ?? 'Select profile'}</Select.Trigger
+                >
+                <Select.Content
+                  ><Select.Group
+                    >{#each profiles as profile}<Select.Item
+                        value={`${profile.profileId}:${profile.revision}`}
+                        label={profile.name}>{profile.name}</Select.Item
+                      >{/each}</Select.Group
+                  ></Select.Content
+                >
+              </Select.Root>
+            </Field.Field>
+            <Field.Field>
+              <Field.FieldLabel>Platform mode</Field.FieldLabel>
+              <Select.Root type="single" bind:value={platformMode}>
+                <Select.Trigger class="w-full"
+                  >{{
+                    universal: 'Universal PC + Quest',
+                    pc: 'PC optimized',
+                    quest: 'Quest optimized',
+                    dual: 'Dual output'
+                  }[platformMode]}</Select.Trigger
+                >
+                <Select.Content
+                  ><Select.Group
+                    ><Select.Item value="universal" label="Universal PC + Quest"
+                      >Universal PC + Quest</Select.Item
+                    ><Select.Item value="pc" label="PC optimized">PC optimized</Select.Item
+                    ><Select.Item value="quest" label="Quest optimized">Quest optimized</Select.Item
+                    ><Select.Item value="dual" label="Dual output">Dual output</Select.Item
+                    ></Select.Group
+                  ></Select.Content
+                >
+              </Select.Root>
+            </Field.Field>
+          </div>
+          <Collapsible.Root bind:open={advancedOpen}>
+            <Collapsible.Trigger class="advanced-trigger"
+              ><Settings2 />Advanced behavior<ChevronDown
+                class={advancedOpen ? 'rotated' : ''}
+              /></Collapsible.Trigger
+            >
+            <Collapsible.Content class="advanced-content">
+              <label
+                ><span
+                  ><strong>Pin relay</strong><small
+                    >Keep configuration and URL after idle cache cleanup.</small
+                  ></span
+                ><Switch bind:checked={pinned} /></label
+              >
+              <label
+                ><span
+                  ><strong>Report activity</strong><small
+                    >Report playback activity to the connected provider.</small
+                  ></span
+                ><Switch bind:checked={reportActivity} /></label
+              >
+              <div class="placement-fields">
+                <Field.Field>
+                  <Field.FieldLabel>Placement policy</Field.FieldLabel>
+                  <Select.Root type="single" bind:value={placementPolicy}>
+                    <Select.Trigger class="w-full"
+                      >{{ auto: 'Automatic', local: 'This node', hosted: 'Cluster node' }[
+                        placementPolicy
+                      ]}</Select.Trigger
+                    >
+                    <Select.Content
+                      ><Select.Group
+                        ><Select.Item value="auto" label="Automatic">Automatic</Select.Item
+                        ><Select.Item value="local" label="This node">This node</Select.Item
+                        ><Select.Item value="hosted" label="Cluster node">Cluster node</Select.Item
+                        ></Select.Group
+                      ></Select.Content
+                    >
+                  </Select.Root>
+                </Field.Field>
+                <Field.Field>
+                  <Field.FieldLabel>Preferred region</Field.FieldLabel>
+                  <Input bind:value={preferredRegion} placeholder="Optional, for example eu-west" />
+                </Field.Field>
+              </div>
+            </Collapsible.Content>
+          </Collapsible.Root>
+        </section>
+      </main>
+
+      <aside class="summary">
+        <div class="summary-header">
+          <Sparkles />
+          <div>
+            <h2>Relay summary</h2>
+            <p>Generated just in time</p>
+          </div>
+        </div>
+        <Progress value={ready ? 100 : step * 24} />
+        <dl>
+          <div>
+            <dt>Source</dt>
+            <dd>{selected?.name ?? 'Not selected'}</dd>
+          </div>
+          <div>
+            <dt>Duration</dt>
+            <dd>{formatDuration(selected?.durationSeconds)}</dd>
+          </div>
+          <div>
+            <dt>Video</dt>
+            <dd>
+              {currentProfile
+                ? `${currentProfile.video.codec.toUpperCase()} · ${currentProfile.video.width}p`
+                : '—'}
+            </dd>
+          </div>
+          <div>
+            <dt>Audio</dt>
+            <dd>
+              {currentProfile
+                ? `${currentProfile.audio.codec.toUpperCase()} · ${currentProfile.audio.channels} ch`
+                : '—'}
+            </dd>
+          </div>
+          <div>
+            <dt>Delivery</dt>
+            <dd>{currentProfile?.delivery.method.replace('_', ' ').toUpperCase() ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Bitrate</dt>
+            <dd>{currentProfile ? formatBitrate(currentProfile.video.bitrateKbps) : '—'}</dd>
+          </div>
+        </dl>
+        {#if provider?.securityNotice}<Alert.Root variant="destructive"
+            ><AlertTriangle /><Alert.Title>Private HTTP connection</Alert.Title><Alert.Description
+              >{provider.securityNotice}</Alert.Description
+            ></Alert.Root
+          >{/if}
+        <Alert.Root
+          ><Info /><Alert.Title
+            >{ready ? 'Ready to create' : 'Complete the source selection'}</Alert.Title
+          ><Alert.Description
+            >{ready
+              ? 'Encoding begins only when a player requests segments.'
+              : 'No media is processed or stored yet.'}</Alert.Description
+          ></Alert.Root
+        >
+        <div class="actions">
+          <Button variant="outline" href="/">Cancel</Button><Button
+            disabled={!ready || creating}
+            onclick={() => void createRelay()}
+            >{#if creating}<LoaderCircle class="spin" />{/if}Create relay</Button
+          >
+        </div>
+      </aside>
+    </div>
+  </div>
+</AppShell>
+
+<style>
+  .relay-page {
+    min-height: 100%;
+    padding: 32px 38px 48px;
+  }
+  .relay-page > header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .relay-page h1 {
+    font-size: 27px;
+    letter-spacing: -0.025em;
+  }
+  .relay-page p {
+    color: var(--muted-foreground);
+    font-size: 13px;
+  }
+  .workspace {
+    display: grid;
+    grid-template-columns: 180px minmax(440px, 1fr) 310px;
+    gap: 30px;
+    align-items: start;
+  }
+  .steps {
+    position: sticky;
+    top: 24px;
+    display: flex;
+    flex-direction: column;
+  }
+  .steps > div {
+    position: relative;
+    display: flex;
+    gap: 12px;
+    min-height: 74px;
+    color: var(--muted-foreground);
+  }
+  .steps > div:not(:last-child)::after {
+    position: absolute;
+    top: 30px;
+    bottom: 0;
+    left: 14px;
+    width: 1px;
+    background: var(--border);
+    content: '';
+  }
+  .steps > div > span {
+    z-index: 1;
+    display: grid;
+    width: 29px;
+    height: 29px;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--background);
+    font-size: 11px;
+  }
+  .steps :global(svg) {
+    width: 14px;
+  }
+  .steps div div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-top: 4px;
+  }
+  .steps strong {
+    font-size: 13px;
+  }
+  .steps small {
+    font-size: 11px;
+  }
+  .steps .current {
+    color: var(--foreground);
+  }
+  .steps .current > span {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+  .steps .complete > span {
+    border-color: var(--success);
+    color: var(--success);
+  }
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .form-section,
+  .summary {
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--card);
+  }
+  .form-section {
+    padding: 23px;
+  }
+  .form-section.dimmed {
+    opacity: 0.58;
+  }
+  .section-title {
+    display: flex;
+    gap: 13px;
+    margin-bottom: 20px;
+  }
+  .section-title > span {
+    color: var(--primary);
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    padding-top: 5px;
+  }
+  .section-title h2,
+  .summary h2 {
+    font-size: 16px;
+  }
+  .section-title p {
+    margin-top: 3px;
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 14px 0;
+  }
+  .search > :global(svg) {
+    position: absolute;
+    width: 16px;
+    margin-left: 11px;
+    color: var(--muted-foreground);
+  }
+  .search :global(input) {
+    padding-left: 35px;
+  }
+  .media-grid {
+    display: grid;
+    max-height: 315px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    overflow: auto;
+  }
+  .media-grid button {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface-subtle);
+    padding: 8px;
+    text-align: left;
+    color: var(--foreground);
+  }
+  .media-grid button:hover,
+  .media-grid button.selected {
+    border-color: color-mix(in oklab, var(--primary) 65%, var(--border));
+    background: var(--surface-selected);
+  }
+  .poster {
+    display: grid;
+    width: 40px;
+    height: 52px;
+    flex: none;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--muted);
+  }
+  .poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .poster :global(svg) {
+    width: 18px;
+    color: var(--muted-foreground);
+  }
+  .media-grid button > span:nth-child(2) {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .media-grid strong,
+  .media-grid small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .media-grid strong {
+    font-size: 12px;
+  }
+  .media-grid small {
+    color: var(--muted-foreground);
+    font-size: 10px;
+  }
+  :global(.selected-check) {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 14px;
+    color: var(--primary);
+  }
+  .two-column,
+  .placement-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .placement-fields {
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  :global(.advanced-trigger) {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 9px;
+    margin-top: 18px;
+    border-top: 1px solid var(--border);
+    padding: 16px 2px 0;
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
+  :global(.advanced-trigger svg) {
+    width: 15px;
+  }
+  :global(.advanced-trigger svg:last-child) {
+    margin-left: auto;
+    transition: transform 0.15s;
+  }
+  :global(.advanced-trigger .rotated) {
+    transform: rotate(180deg);
+  }
+  :global(.advanced-content) {
+    display: grid;
+    gap: 12px;
+    padding-top: 16px;
+  }
+  :global(.advanced-content label) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  :global(.advanced-content label span) {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  :global(.advanced-content strong) {
+    font-size: 12px;
+  }
+  :global(.advanced-content small) {
+    color: var(--muted-foreground);
+    font-size: 11px;
+  }
+  .summary {
+    position: sticky;
+    top: 24px;
+    padding: 22px;
+  }
+  .summary-header {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-bottom: 18px;
+  }
+  .summary-header > :global(svg) {
+    width: 19px;
+    color: var(--primary);
+  }
+  .summary-header p {
+    margin-top: 2px;
+    font-size: 11px;
+  }
+  .summary :global([data-slot='progress']) {
+    margin-bottom: 24px;
+  }
+  .summary dl {
+    display: flex;
+    flex-direction: column;
+    margin: 0 0 19px;
+  }
+  .summary dl div {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    border-bottom: 1px solid var(--border);
+    padding: 11px 0;
+    font-size: 11px;
+  }
+  .summary dt {
+    color: var(--muted-foreground);
+  }
+  .summary dd {
+    max-width: 170px;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .summary :global([data-slot='alert']) {
+    margin-top: 12px;
+  }
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 8px;
+    margin-top: 18px;
+  }
+  :global(.spin) {
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (max-width: 1180px) {
+    .workspace {
+      grid-template-columns: 150px minmax(400px, 1fr);
+    }
+    .summary {
+      position: static;
+      grid-column: 2;
+    }
+  }
+  @media (max-width: 760px) {
+    .relay-page {
+      padding: 22px 16px;
+    }
+    .workspace {
+      display: block;
+    }
+    .steps {
+      position: static;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin-bottom: 18px;
+    }
+    .steps > div {
+      min-height: 58px;
+    }
+    .steps > div:not(:last-child)::after {
+      display: none;
+    }
+    .steps small {
+      display: none;
+    }
+    .workspace main {
+      margin-bottom: 18px;
+    }
+    .two-column,
+    .media-grid,
+    .placement-fields {
+      grid-template-columns: 1fr;
+    }
+    .summary {
+      margin-top: 18px;
+    }
+  }
+</style>

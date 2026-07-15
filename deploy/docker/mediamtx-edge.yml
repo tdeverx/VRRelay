@@ -1,0 +1,12 @@
+# MediaMTX read replica. Each active edge pulls one stream from the origin on
+# demand and fans it out to all viewers attached to this edge.
+hls: yes
+hlsAddress: :8888
+hlsVariant: mpegts
+rtsp: yes
+rtspAddress: :8554
+api: yes
+apiAddress: :9997
+
+paths:
+  all_others:

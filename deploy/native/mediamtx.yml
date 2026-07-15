@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Environment variables supplied by the native relay supervisor override these
+# private listener addresses and the local authentication callback.
+authMethod: http
+authHTTPAddress: http://127.0.0.1:8099/internal/mediamtx/auth
+api: yes
+apiAddress: 127.0.0.1:9997
+hlsAddress: 127.0.0.1:8888
+hlsVariant: mpegts
+rtspAddress: 127.0.0.1:8554
+rtmpAddress: :1935
+srtAddress: :8890
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+paths:
+  all_others:

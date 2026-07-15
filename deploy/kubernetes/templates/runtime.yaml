@@ -1,0 +1,355 @@
+{{- $root := . -}}
+{{- $imageTag := default .Chart.AppVersion .Values.image.tag -}}
+{{- range $role := list "controller" "sourceWorker" "ingestOrigin" "edge" -}}
+{{- $settings := index $root.Values $role -}}
+{{- $roleName := kebabcase $role -}}
+{{- if $settings.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vrrelay-{{ $roleName }}
+  labels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: {{ $roleName }} }
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrrelay-{{ $roleName }}
+spec:
+  replicas: {{ if eq $role "controller" }}1{{ else }}{{ $settings.replicas }}{{ end }}
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: {{ $roleName }} } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: {{ $roleName }} }
+      annotations: { checksum/runtime-settings: {{ toJson $root.Values.secrets | sha256sum | quote }} }
+    spec:
+      serviceAccountName: vrrelay-{{ $roleName }}
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: relay
+          image: "{{ $root.Values.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          ports:
+            - { name: http, containerPort: 8099 }
+            {{- if eq $role "controller" }}
+            - { name: agent, containerPort: 8100 }
+            {{- end }}
+          env:
+            - { name: VRRELAY_LISTEN_ADDR, value: "0.0.0.0:8099" }
+            - { name: VRRELAY_NODE_NAME, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            - { name: VRRELAY_NODE_REGION, value: {{ $settings.region | quote }} }
+            - { name: VRRELAY_NODE_ROLES, value: {{ $roleName | quote }} }
+            - { name: VRRELAY_PUBLIC_URL, value: {{ $settings.publicUrl | quote }} }
+            - { name: VRRELAY_DATA_DIR, value: /var/lib/vrrelay }
+            - { name: VRRELAY_CACHE_DIR, value: /var/cache/vrrelay }
+            - { name: VRRELAY_REPOSITORY_DRIVER, value: postgres }
+            - { name: VRRELAY_COORDINATION_DRIVER, value: valkey }
+            - { name: VRRELAY_OBJECT_STORE_DRIVER, value: {{ $root.Values.storage.driver | quote }} }
+            - { name: VRRELAY_OBJECT_STORE_BUCKET, value: {{ $root.Values.storage.bucket | quote }} }
+            - { name: VRRELAY_S3_ENDPOINT, value: {{ $root.Values.storage.endpoint | quote }} }
+            {{- if eq $role "controller" }}
+            - { name: VRRELAY_AGENT_LISTEN_ADDR, value: "0.0.0.0:8100" }
+            - { name: VRRELAY_AGENT_TLS_NAMES, value: {{ join "," $root.Values.agent.tlsNames | quote }} }
+            {{- if $root.Values.mediaMtx.enabled }}
+            - { name: VRRELAY_MEDIAMTX_RTMP_URL, value: {{ $root.Values.mediaMtx.publicUrls.rtmp | quote }} }
+            - { name: VRRELAY_MEDIAMTX_SRT_URL, value: {{ $root.Values.mediaMtx.publicUrls.srt | quote }} }
+            - { name: VRRELAY_MEDIAMTX_WHIP_URL, value: {{ $root.Values.mediaMtx.publicUrls.whip | quote }} }
+            {{- end }}
+            {{- else }}
+            - { name: VRRELAY_CONTROLLER_AGENT_URL, value: {{ $root.Values.agent.controllerUrl | quote }} }
+            - { name: VRRELAY_CONTROLLER_ENROLLMENT_URL, value: {{ $root.Values.agent.enrollmentUrl | quote }} }
+            {{- end }}
+            {{- if and $root.Values.mediaMtx.enabled (eq $role "ingestOrigin") }}
+            - { name: VRRELAY_MEDIAMTX_RTMP_URL, value: "rtmp://vrrelay-mediamtx-origin:1935" }
+            - { name: VRRELAY_MEDIAMTX_SRT_URL, value: "srt://vrrelay-mediamtx-origin:8890" }
+            - { name: VRRELAY_MEDIAMTX_WHIP_URL, value: "http://vrrelay-mediamtx-origin:8889" }
+            - { name: VRRELAY_MEDIAMTX_HLS_URL, value: "http://vrrelay-mediamtx-origin:8888" }
+            - { name: VRRELAY_MEDIAMTX_RTSP_URL, value: "rtsp://vrrelay-mediamtx-origin:8554" }
+            - { name: VRRELAY_MEDIAMTX_API_URL, value: "http://vrrelay-mediamtx-origin:9997" }
+            - { name: VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ, value: "true" }
+            {{- end }}
+            {{- if and $root.Values.mediaMtx.enabled (eq $role "edge") }}
+            - { name: VRRELAY_MEDIAMTX_HLS_URL, value: "http://127.0.0.1:8888" }
+            - { name: VRRELAY_MEDIAMTX_RTSP_URL, value: "rtsp://127.0.0.1:8554" }
+            - { name: VRRELAY_MEDIAMTX_API_URL, value: "http://127.0.0.1:9997" }
+            - { name: VRRELAY_LIVE_ORIGIN_URL, value: {{ $settings.liveOriginUrl | quote }} }
+            {{- end }}
+          envFrom: [{ secretRef: { name: {{ index $root.Values.secrets $role | quote }} } }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/vrrelay }
+            - { name: cache, mountPath: /var/cache/vrrelay }
+            - { name: tmp, mountPath: /tmp }
+            {{- with $settings.extraVolumeMounts }}{{ toYaml . | nindent 12 }}{{- end }}
+          readinessProbe: { httpGet: { path: /api/v1/health, port: http }, initialDelaySeconds: 5, periodSeconds: 10, failureThreshold: 3 }
+          livenessProbe: { httpGet: { path: /api/v1/health, port: http }, initialDelaySeconds: 20, periodSeconds: 20, failureThreshold: 5 }
+          startupProbe: { httpGet: { path: /api/v1/health, port: http }, periodSeconds: 5, failureThreshold: 30 }
+          resources: {{ toYaml $settings.resources | nindent 12 }}
+        {{- if and $root.Values.mediaMtx.enabled (eq $role "edge") }}
+        - name: mediamtx-edge
+          image: {{ $root.Values.mediaMtx.image | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          env:
+            - { name: MTX_AUTHMETHOD, value: http }
+            - { name: MTX_AUTHHTTPADDRESS, value: "http://127.0.0.1:8099/internal/mediamtx/auth" }
+            - { name: MTX_API, value: "yes" }
+            - { name: MTX_APIADDRESS, value: ":9997" }
+            - { name: MTX_HLS, value: "yes" }
+            - { name: MTX_HLSADDRESS, value: ":8888" }
+            - { name: MTX_HLSVARIANT, value: mpegts }
+            - { name: MTX_RTSP, value: "yes" }
+            - { name: MTX_RTSPADDRESS, value: ":8554" }
+          ports:
+            - { name: edge-hls, containerPort: 8888 }
+            - { name: edge-api, containerPort: 9997 }
+          readinessProbe: { httpGet: { path: /v3/config/global/get, port: edge-api }, initialDelaySeconds: 3, periodSeconds: 10 }
+          resources: {{ toYaml $root.Values.mediaMtx.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: data
+          {{- if $settings.persistence.enabled }}
+          persistentVolumeClaim: { claimName: vrrelay-{{ $roleName }} }
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - { name: cache, emptyDir: { sizeLimit: {{ $settings.cacheSize | quote }} } }
+        - { name: tmp, emptyDir: {} }
+        {{- with $settings.extraVolumes }}{{ toYaml . | nindent 8 }}{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vrrelay-{{ $roleName }} }
+spec:
+  selector: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: {{ $roleName }} }
+  ports:
+    - { name: http, port: 8099, targetPort: http }
+---
+{{- if $root.Values.disruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: vrrelay-{{ $roleName }} }
+spec:
+  maxUnavailable: 0
+  selector: { matchLabels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: {{ $roleName }} } }
+---
+{{- end }}
+{{- if eq $role "controller" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrrelay-controller-agent
+  annotations: {{ toYaml $settings.agentService.annotations | nindent 4 }}
+spec:
+  type: {{ $settings.agentService.type }}
+  selector: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: controller }
+  ports: [{ name: agent, port: 8100, targetPort: agent }]
+---
+{{- end }}
+{{- if $settings.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: vrrelay-{{ $roleName }} }
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $settings.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources: { requests: { storage: {{ $settings.persistence.size | quote }} } }
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and .Values.mediaMtx.enabled .Values.ingestOrigin.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: vrrelay-mediamtx-origin }
+spec:
+  replicas: {{ .Values.mediaMtx.replicas }}
+  selector: { matchLabels: { app.kubernetes.io/name: vrrelay-mediamtx-origin } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: vrrelay-mediamtx-origin } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: mediamtx
+          image: {{ .Values.mediaMtx.image | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          env:
+            - { name: MTX_AUTHMETHOD, value: http }
+            - { name: MTX_AUTHHTTPADDRESS, value: "http://vrrelay-ingest-origin:8099/internal/mediamtx/auth" }
+            - { name: MTX_API, value: "yes" }
+            - { name: MTX_APIADDRESS, value: ":9997" }
+            - { name: MTX_HLS, value: "yes" }
+            - { name: MTX_HLSVARIANT, value: mpegts }
+            - { name: MTX_WEBRTCLOCALUDPADDRESS, value: ":8189" }
+            - { name: MTX_WEBRTCADDITIONALHOSTS, value: {{ join "," .Values.mediaMtx.webrtcAdditionalHosts | quote }} }
+            - name: MTX_PATHDEFAULTS_SRTREADPASSPHRASE
+              valueFrom: { secretKeyRef: { name: {{ .Values.secrets.ingestOrigin | quote }}, key: VRRELAY_LIVE_SRT_PASSPHRASE } }
+          ports:
+            - { name: rtmp, containerPort: 1935 }
+            - { name: rtsp, containerPort: 8554 }
+            - { name: hls, containerPort: 8888 }
+            - { name: whip-tcp, containerPort: 8889 }
+            - { name: webrtc-ice, containerPort: 8189, protocol: UDP }
+            - { name: srt, containerPort: 8890, protocol: UDP }
+            - { name: api, containerPort: 9997 }
+          readinessProbe: { httpGet: { path: /v3/config/global/get, port: api }, initialDelaySeconds: 3, periodSeconds: 10 }
+          resources: {{ toYaml .Values.mediaMtx.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vrrelay-mediamtx-origin }
+spec:
+  selector: { app.kubernetes.io/name: vrrelay-mediamtx-origin }
+  ports:
+    - { name: rtmp, port: 1935 }
+    - { name: rtsp, port: 8554 }
+    - { name: hls, port: 8888 }
+    - { name: whip-tcp, port: 8889 }
+    - { name: webrtc-ice, port: 8189, protocol: UDP }
+    - { name: srt, port: 8890, protocol: UDP }
+    - { name: api, port: 9997 }
+---
+{{- if .Values.disruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: vrrelay-mediamtx-origin }
+spec:
+  maxUnavailable: 0
+  selector: { matchLabels: { app.kubernetes.io/name: vrrelay-mediamtx-origin } }
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrrelay-mediamtx-ingest
+  annotations: {{ toYaml .Values.mediaMtx.ingestService.annotations | nindent 4 }}
+spec:
+  type: {{ .Values.mediaMtx.ingestService.type }}
+  selector: { app.kubernetes.io/name: vrrelay-mediamtx-origin }
+  ports:
+    - { name: rtmp, port: 1935 }
+    - { name: webrtc-ice, port: 8189, protocol: UDP }
+    - { name: srt, port: 8890, protocol: UDP }
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: vrrelay-default-deny }
+spec: { podSelector: {}, policyTypes: [Ingress, Egress] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: vrrelay-cluster }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay } } }, { namespaceSelector: {} }]
+      ports: [{ port: 8099 }]
+  egress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: vrrelay-controller-agent }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: controller } }
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{ port: 8100, protocol: TCP }]
+{{- if and .Values.mediaMtx.enabled .Values.ingestOrigin.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: vrrelay-mediamtx-origin }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay-mediamtx-origin } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - { port: 1935, protocol: TCP }
+        - { port: 8189, protocol: UDP }
+        - { port: 8890, protocol: UDP }
+    - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay } } }]
+      ports:
+        - { port: 1935, protocol: TCP }
+        - { port: 8554, protocol: TCP }
+        - { port: 8888, protocol: TCP }
+        - { port: 8889, protocol: TCP }
+        - { port: 8189, protocol: UDP }
+        - { port: 8890, protocol: UDP }
+        - { port: 9997, protocol: TCP }
+    - from: [{ namespaceSelector: {} }]
+      ports: [{ port: 8889, protocol: TCP }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: ingest-origin } } }]
+      ports: [{ port: 8099, protocol: TCP }]
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - ports: [{ port: 1024, endPort: 65535, protocol: UDP }]
+{{- end }}
+{{- if and .Values.controller.enabled .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrrelay
+  annotations: {{ toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  tls: [{ hosts: [{{ .Values.ingress.host | quote }}], secretName: {{ .Values.ingress.tlsSecret | quote }} }]
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: vrrelay-controller, port: { name: http } } }
+{{- end }}
+{{- if and .Values.edge.enabled .Values.edge.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrrelay-edge
+  annotations: {{ toYaml .Values.edge.ingress.annotations | nindent 4 }}
+spec:
+  {{- with .Values.edge.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  tls: [{ hosts: [{{ .Values.edge.ingress.host | quote }}], secretName: {{ .Values.edge.ingress.tlsSecret | quote }} }]
+  rules:
+    - host: {{ .Values.edge.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: vrrelay-edge, port: { name: http } } }
+{{- end }}
+{{- if and .Values.mediaMtx.enabled .Values.ingestOrigin.enabled .Values.mediaMtx.whipIngress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrrelay-whip
+  annotations: {{ toYaml .Values.mediaMtx.whipIngress.annotations | nindent 4 }}
+spec:
+  {{- with .Values.mediaMtx.whipIngress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  tls: [{ hosts: [{{ .Values.mediaMtx.whipIngress.host | quote }}], secretName: {{ .Values.mediaMtx.whipIngress.tlsSecret | quote }} }]
+  rules:
+    - host: {{ .Values.mediaMtx.whipIngress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: vrrelay-mediamtx-origin, port: { name: whip-tcp } } }
+{{- end }}

@@ -1,0 +1,1580 @@
+openapi: 3.1.0
+info:
+  title: VRRelay API
+  version: 1.0.0
+  description: Administrative, cluster-enrollment, and event API for a private VRRelay installation.
+  license: { name: GPL-3.0-or-later }
+servers: [{ url: /api/v1 }]
+security: [{ cookieSession: [] }, { personalToken: [] }]
+tags:
+  - { name: System }
+  - { name: Authentication }
+  - { name: Providers }
+  - { name: Profiles }
+  - { name: Sessions }
+  - { name: Live }
+  - { name: Cluster }
+  - { name: Operations }
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [System]
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/Health' }
+  /setup:
+    get:
+      operationId: getSetupStatus
+      tags: [Authentication]
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/SetupStatus' }
+    post:
+      operationId: initializeAdmin
+      tags: [Authentication]
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/FirstRun' }
+      responses:
+        '201': { $ref: '#/components/responses/SetupStatus' }
+        '400': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Authentication]
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/Login' }
+      responses:
+        '200': { $ref: '#/components/responses/AuthSession' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Authentication]
+      responses:
+        '204': { description: Logged out }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /providers:
+    get:
+      operationId: listProviders
+      tags: [Providers]
+      responses:
+        '200': { $ref: '#/components/responses/ProviderList' }
+    post:
+      operationId: createProvider
+      tags: [Providers]
+      requestBody: { $ref: '#/components/requestBodies/CreateProvider' }
+      responses:
+        '201': { $ref: '#/components/responses/Provider' }
+        '400': { $ref: '#/components/responses/Error' }
+  /providers/{providerId}/validate:
+    post:
+      operationId: validateProvider
+      tags: [Providers]
+      parameters: [{ $ref: '#/components/parameters/ProviderId' }]
+      responses:
+        '204': { description: Provider validated }
+        '404': { $ref: '#/components/responses/Error' }
+  /providers/{providerId}:
+    delete:
+      operationId: deleteProvider
+      tags: [Providers]
+      parameters: [{ $ref: '#/components/parameters/ProviderId' }]
+      responses:
+        '204': { description: Provider and its local credential were deleted }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /providers/{providerId}/catalog:
+    get:
+      operationId: browseCatalog
+      tags: [Providers]
+      parameters:
+        - { $ref: '#/components/parameters/ProviderId' }
+        - { name: parentId, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: kinds, in: query, schema: { type: array, items: { type: string } } }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { $ref: '#/components/responses/Catalog' }
+  /providers/{providerId}/items/{itemId}:
+    get:
+      operationId: getProviderItem
+      tags: [Providers]
+      parameters:
+        - { $ref: '#/components/parameters/ProviderId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaItem' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /profiles:
+    get:
+      operationId: listProfiles
+      tags: [Profiles]
+      responses:
+        '200': { $ref: '#/components/responses/ProfileList' }
+    post:
+      operationId: createProfileRevision
+      tags: [Profiles]
+      requestBody: { $ref: '#/components/requestBodies/CreateProfileRevision' }
+      responses:
+        '201': { $ref: '#/components/responses/Profile' }
+  /capabilities:
+    get:
+      operationId: getMediaCapabilities
+      tags: [Profiles]
+      responses:
+        '200': { $ref: '#/components/responses/MediaCapabilities' }
+
+  /sessions:
+    get:
+      operationId: listSessions
+      tags: [Sessions]
+      responses:
+        '200': { $ref: '#/components/responses/SessionList' }
+    post:
+      operationId: createSession
+      tags: [Sessions]
+      requestBody: { $ref: '#/components/requestBodies/CreateSession' }
+      responses:
+        '201': { $ref: '#/components/responses/Session' }
+        '409': { $ref: '#/components/responses/Error' }
+  /sessions/{sessionId}:
+    get:
+      operationId: getSession
+      tags: [Sessions]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      operationId: controlSession
+      tags: [Sessions]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody: { $ref: '#/components/requestBodies/ControlSession' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+    delete:
+      operationId: deleteSession
+      tags: [Sessions]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '204': { description: Session deleted }
+
+  /live-channels:
+    get:
+      operationId: listLiveChannels
+      tags: [Live]
+      responses:
+        '200': { $ref: '#/components/responses/LiveChannelList' }
+    post:
+      operationId: createLiveChannel
+      tags: [Live]
+      requestBody: { $ref: '#/components/requestBodies/CreateLiveChannel' }
+      responses:
+        '201': { $ref: '#/components/responses/CreatedLiveChannel' }
+  /live-channels/{channelId}:
+    delete:
+      operationId: deleteLiveChannel
+      tags: [Live]
+      parameters: [{ $ref: '#/components/parameters/ChannelId' }]
+      responses:
+        '204': { description: Live channel deleted }
+
+  /compatibility:
+    get:
+      operationId: listCompatibilityResults
+      tags: [Operations]
+      responses:
+        '200': { $ref: '#/components/responses/CompatibilityList' }
+    post:
+      operationId: recordCompatibilityResult
+      tags: [Operations]
+      requestBody: { $ref: '#/components/requestBodies/CompatibilityResult' }
+      responses:
+        '201': { $ref: '#/components/responses/Compatibility' }
+  /tokens:
+    get:
+      operationId: listPersonalTokens
+      tags: [Authentication]
+      responses:
+        '200': { $ref: '#/components/responses/TokenList' }
+    post:
+      operationId: createPersonalToken
+      tags: [Authentication]
+      requestBody: { $ref: '#/components/requestBodies/CreatePersonalToken' }
+      responses:
+        '201': { $ref: '#/components/responses/CreatedToken' }
+  /tokens/{tokenId}:
+    delete:
+      operationId: revokePersonalToken
+      tags: [Authentication]
+      parameters: [{ $ref: '#/components/parameters/TokenId' }]
+      responses:
+        '204': { description: Token revoked }
+  /events/recent:
+    get:
+      operationId: listRecentEvents
+      tags: [Operations]
+      responses:
+        '200': { $ref: '#/components/responses/EventList' }
+  /events:
+    get:
+      operationId: streamEvents
+      tags: [Operations]
+      description: WebSocket endpoint that sends RelayEvent JSON messages after authentication.
+      responses:
+        '101': { description: WebSocket upgrade }
+
+  /nodes:
+    get:
+      operationId: listClusterNodes
+      tags: [Cluster]
+      responses:
+        '200': { $ref: '#/components/responses/NodeList' }
+  /nodes/join-tokens:
+    post:
+      operationId: createNodeJoinToken
+      tags: [Cluster]
+      requestBody: { $ref: '#/components/requestBodies/CreateNodeJoinToken' }
+      responses:
+        '201': { $ref: '#/components/responses/CreatedJoinToken' }
+  /nodes/enroll:
+    post:
+      operationId: enrollNode
+      tags: [Cluster]
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/EnrollNode' }
+      responses:
+        '201': { $ref: '#/components/responses/EnrolledNode' }
+        '401': { $ref: '#/components/responses/Error' }
+  /nodes/connect:
+    get:
+      operationId: connectNodeAgent
+      tags: [Cluster]
+      description: Dedicated agent-listener WebSocket endpoint, normally on port 8100.
+      security: [{ clusterNode: [] }]
+      responses:
+        '101': { description: Versioned bidirectional node-agent WebSocket }
+  /nodes/{nodeId}:
+    delete:
+      operationId: removeNode
+      tags: [Cluster]
+      parameters: [{ $ref: '#/components/parameters/NodeId' }]
+      responses:
+        '204': { description: Node removed }
+  /nodes/{nodeId}/drain:
+    post:
+      operationId: drainNode
+      tags: [Cluster]
+      parameters: [{ $ref: '#/components/parameters/NodeId' }]
+      requestBody: { $ref: '#/components/requestBodies/DrainNode' }
+      responses:
+        '200': { $ref: '#/components/responses/Node' }
+  /nodes/{nodeId}/certificate/rotate:
+    post:
+      operationId: rotateNodeCertificate
+      tags: [Cluster]
+      parameters: [{ $ref: '#/components/parameters/NodeId' }]
+      requestBody: { $ref: '#/components/requestBodies/RotateCertificate' }
+      responses:
+        '200': { $ref: '#/components/responses/RotatedCertificate' }
+  /nodes/{nodeId}/revoke:
+    post:
+      operationId: revokeNode
+      tags: [Cluster]
+      parameters: [{ $ref: '#/components/parameters/NodeId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Node' }
+  /nodes/{nodeId}/logs:
+    get:
+      operationId: listNodeLogs
+      tags: [Cluster]
+      parameters: [{ $ref: '#/components/parameters/NodeId' }]
+      responses:
+        '200': { $ref: '#/components/responses/LogList' }
+
+  /provider-bindings:
+    get:
+      operationId: listProviderBindings
+      tags: [Cluster]
+      parameters:
+        - { name: providerId, in: query, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/BindingList' }
+    post:
+      operationId: createProviderBinding
+      tags: [Cluster]
+      requestBody: { $ref: '#/components/requestBodies/CreateProviderBinding' }
+      responses:
+        '201': { $ref: '#/components/responses/CreatedBinding' }
+  /provider-bindings/{bindingId}:
+    delete:
+      operationId: deleteProviderBinding
+      tags: [Cluster]
+      parameters: [{ $ref: '#/components/parameters/BindingId' }]
+      responses:
+        '204': { description: Binding and node-local credential removed }
+  /placement/preview:
+    post:
+      operationId: previewPlacement
+      tags: [Cluster]
+      requestBody: { $ref: '#/components/requestBodies/PlacementPreview' }
+      responses:
+        '200': { $ref: '#/components/responses/PlacementPreview' }
+  /jobs:
+    get:
+      operationId: listSegmentJobs
+      tags: [Operations]
+      responses:
+        '200': { $ref: '#/components/responses/JobList' }
+  /jobs/{jobId}:
+    delete:
+      operationId: cancelSegmentJob
+      tags: [Operations]
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      responses:
+        '204': { description: Job cancelled }
+  /jobs/{jobId}/retry:
+    post:
+      operationId: retrySegmentJob
+      tags: [Operations]
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200': { $ref: '#/components/responses/SegmentJobResult' }
+  /backends:
+    get:
+      operationId: listBackendHealth
+      tags: [Operations]
+      responses:
+        '200': { $ref: '#/components/responses/BackendList' }
+  /backends/validate:
+    post:
+      operationId: validateBackend
+      tags: [Operations]
+      requestBody: { $ref: '#/components/requestBodies/ValidateBackend' }
+      responses:
+        '200': { $ref: '#/components/responses/Backend' }
+  /backends/activate:
+    post:
+      operationId: activateBackend
+      tags: [Operations]
+      requestBody: { $ref: '#/components/requestBodies/ActivateBackend' }
+      responses:
+        '200': { $ref: '#/components/responses/Backend' }
+  /cache:
+    get:
+      operationId: listCacheInventory
+      tags: [Operations]
+      responses:
+        '200': { $ref: '#/components/responses/CacheList' }
+    delete:
+      operationId: evictCache
+      tags: [Operations]
+      requestBody: { $ref: '#/components/requestBodies/EvictCache' }
+      responses:
+        '200': { $ref: '#/components/responses/EvictionResult' }
+
+components:
+  securitySchemes:
+    cookieSession: { type: apiKey, in: cookie, name: vrrelay_session }
+    personalToken: { type: http, scheme: bearer }
+    clusterNode:
+      type: mutualTLS
+      description: Seven-day rotating node certificate issued through a single-use enrollment token.
+  parameters:
+    ProviderId: { name: providerId, in: path, required: true, schema: { type: string } }
+    ItemId: { name: itemId, in: path, required: true, schema: { type: string } }
+    SessionId: { name: sessionId, in: path, required: true, schema: { type: string } }
+    ChannelId: { name: channelId, in: path, required: true, schema: { type: string } }
+    TokenId: { name: tokenId, in: path, required: true, schema: { type: string } }
+    NodeId: { name: nodeId, in: path, required: true, schema: { type: string } }
+    BindingId: { name: bindingId, in: path, required: true, schema: { type: string } }
+    JobId: { name: jobId, in: path, required: true, schema: { type: string } }
+  requestBodies:
+    FirstRun:
+      {
+        required: true,
+        content: { application/json: { schema: { $ref: '#/components/schemas/FirstRunRequest' } } }
+      }
+    Login:
+      {
+        required: true,
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
+      }
+    CreateProvider:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CreateProviderRequest' } } }
+      }
+    CreateProfileRevision:
+      {
+        required: true,
+        content:
+          {
+            application/json:
+              { schema: { $ref: '#/components/schemas/CreateProfileRevisionRequest' } }
+          }
+      }
+    CreateSession:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CreateSessionRequest' } } }
+      }
+    ControlSession:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/ControlSessionRequest' } } }
+      }
+    CreateLiveChannel:
+      {
+        required: true,
+        content:
+          {
+            application/json: { schema: { $ref: '#/components/schemas/CreateLiveChannelRequest' } }
+          }
+      }
+    CompatibilityResult:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CompatibilityInput' } } }
+      }
+    CreatePersonalToken:
+      {
+        required: true,
+        content:
+          {
+            application/json:
+              { schema: { $ref: '#/components/schemas/CreatePersonalTokenRequest' } }
+          }
+      }
+    CreateNodeJoinToken:
+      {
+        required: true,
+        content:
+          {
+            application/json:
+              { schema: { $ref: '#/components/schemas/CreateNodeJoinTokenRequest' } }
+          }
+      }
+    EnrollNode:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/EnrollNodeRequest' } } }
+      }
+    DrainNode:
+      {
+        required: true,
+        content: { application/json: { schema: { $ref: '#/components/schemas/DrainNodeRequest' } } }
+      }
+    RotateCertificate:
+      {
+        required: false,
+        content:
+          {
+            application/json: { schema: { $ref: '#/components/schemas/RotateCertificateRequest' } }
+          }
+      }
+    CreateProviderBinding:
+      {
+        required: true,
+        content:
+          {
+            application/json:
+              { schema: { $ref: '#/components/schemas/CreateProviderBindingRequest' } }
+          }
+      }
+    PlacementPreview:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/PlacementPreviewRequest' } } }
+      }
+    ValidateBackend:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/BackendValidationRequest' } }
+    ActivateBackend:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/BackendActivationRequest' } }
+    EvictCache:
+      {
+        required: true,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CacheEvictionRequest' } } }
+      }
+  responses:
+    Error:
+      {
+        description: Request failed,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+      }
+    Health:
+      {
+        description: Health and worker capacity,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } }
+      }
+    SetupStatus:
+      {
+        description: First-run state,
+        content: { application/json: { schema: { $ref: '#/components/schemas/SetupStatus' } } }
+      }
+    AuthSession:
+      {
+        description: Authenticated browser session metadata,
+        content: { application/json: { schema: { $ref: '#/components/schemas/AuthSession' } } }
+      }
+    Provider:
+      {
+        description: Provider without secret material,
+        content: { application/json: { schema: { $ref: '#/components/schemas/PublicProvider' } } }
+      }
+    ProviderList:
+      {
+        description: Provider connections,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProviderList' } } }
+      }
+    Catalog:
+      {
+        description: Provider-neutral media page,
+        content: { application/json: { schema: { $ref: '#/components/schemas/CatalogPage' } } }
+      }
+    MediaItem:
+      {
+        description: Provider-neutral media item,
+        content: { application/json: { schema: { $ref: '#/components/schemas/MediaItem' } } }
+      }
+    Profile:
+      {
+        description: Immutable profile revision,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProfileRevision' } } }
+      }
+    ProfileList:
+      {
+        description: Immutable profile revisions,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProfileList' } } }
+      }
+    MediaCapabilities:
+      {
+        description: Discovered FFmpeg capabilities,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/MediaCapabilities' } } }
+      }
+    Session:
+      {
+        description: Relay session and opaque playback URLs,
+        content: { application/json: { schema: { $ref: '#/components/schemas/RelaySession' } } }
+      }
+    SessionList:
+      {
+        description: Relay sessions,
+        content: { application/json: { schema: { $ref: '#/components/schemas/SessionList' } } }
+      }
+    LiveChannelList:
+      {
+        description: Live ingest channels without stored token hashes,
+        content: { application/json: { schema: { $ref: '#/components/schemas/LiveChannelList' } } }
+      }
+    CreatedLiveChannel:
+      {
+        description: New channel and one-time publisher connection details,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CreatedLiveChannel' } } }
+      }
+    Compatibility:
+      {
+        description: Compatibility evidence,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CompatibilityResult' } } }
+      }
+    CompatibilityList:
+      {
+        description: Compatibility evidence,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/CompatibilityList' } } }
+      }
+    TokenList:
+      {
+        description: Personal tokens without token hashes or token material,
+        content: { application/json: { schema: { $ref: '#/components/schemas/TokenList' } } }
+      }
+    CreatedToken:
+      {
+        description: Token material returned once,
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreatedToken' } } }
+      }
+    EventList:
+      {
+        description: Recent events,
+        content: { application/json: { schema: { $ref: '#/components/schemas/EventList' } } }
+      }
+    Node:
+      {
+        description: Cluster node,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ClusterNode' } } }
+      }
+    NodeList:
+      {
+        description: Cluster topology and agent state,
+        content: { application/json: { schema: { $ref: '#/components/schemas/NodeList' } } }
+      }
+    CreatedJoinToken:
+      {
+        description: One-time enrollment token,
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreatedJoinToken' } } }
+      }
+    EnrolledNode:
+      {
+        description: Node identity; private material is returned only during enrollment,
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      }
+    RotatedCertificate:
+      {
+        description: New certificate expiry; private material travels over the agent channel,
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [certificateExpiresAt],
+                    properties: { certificateExpiresAt: { type: string, format: date-time } }
+                  }
+              }
+          }
+      }
+    LogList:
+      {
+        description: Bounded redacted node logs,
+        content: { application/json: { schema: { $ref: '#/components/schemas/LogList' } } }
+      }
+    BindingList:
+      {
+        description: Provider bindings without secret references,
+        content: { application/json: { schema: { $ref: '#/components/schemas/BindingList' } } }
+      }
+    CreatedBinding:
+      {
+        description: Provider and node-local binding,
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreatedBinding' } } }
+      }
+    PlacementPreview:
+      {
+        description: Selected node and placement reason,
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [reason],
+                    properties:
+                      {
+                        node:
+                          {
+                            anyOf: [{ $ref: '#/components/schemas/ClusterNode' }, { type: 'null' }]
+                          },
+                        reason: { type: string }
+                      }
+                  }
+              }
+          }
+      }
+    JobList:
+      {
+        description: Recent distributed segment jobs,
+        content: { application/json: { schema: { $ref: '#/components/schemas/JobList' } } }
+      }
+    SegmentJobResult:
+      {
+        description: Retried distributed segment job,
+        content: { application/json: { schema: { $ref: '#/components/schemas/SegmentJob' } } }
+      }
+    Backend:
+      {
+        description: Redacted backend health,
+        content: { application/json: { schema: { $ref: '#/components/schemas/BackendStatus' } } }
+      }
+    BackendList:
+      {
+        description: Active backend health,
+        content: { application/json: { schema: { $ref: '#/components/schemas/BackendList' } } }
+      }
+    CacheList:
+      {
+        description: Cache inventory without filesystem paths,
+        content: { application/json: { schema: { $ref: '#/components/schemas/CacheList' } } }
+      }
+    EvictionResult:
+      {
+        description: Cache objects removed,
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [removed],
+                    properties: { removed: { type: integer, minimum: 0 } }
+                  }
+              }
+          }
+      }
+  schemas:
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details: { type: object, additionalProperties: true }
+    Health:
+      type: object
+      required: [status, version, now, workers]
+      properties:
+        status: { const: ok }
+        version: { type: string }
+        now: { type: string, format: date-time }
+        workers: { $ref: '#/components/schemas/WorkerCapacity' }
+    WorkerCapacity:
+      type: object
+      required: [active, limit, queued]
+      properties:
+        active: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 0 }
+        queued: { type: integer, minimum: 0 }
+    SetupStatus:
+      {
+        type: object,
+        required: [configured, requiresToken],
+        properties: { configured: { type: boolean }, requiresToken: { type: boolean } }
+      }
+    AuthSession:
+      type: object
+      required: [csrfToken, expiresAt]
+      properties:
+        csrfToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+    FirstRunRequest:
+      {
+        type: object,
+        additionalProperties: false,
+        required: [password],
+        properties:
+          {
+            password: { type: string, minLength: 12, maxLength: 256 },
+            setupToken: { type: string, minLength: 32 }
+          }
+      }
+    LoginRequest:
+      {
+        type: object,
+        additionalProperties: false,
+        required: [password],
+        properties: { password: { type: string, minLength: 1, maxLength: 256 } }
+      }
+    AuthenticationMode: { type: string, enum: [user_token, api_key] }
+    PlatformMode: { type: string, enum: [universal, pc, quest, dual] }
+    PlacementPolicy: { type: string, enum: [local, hosted, auto] }
+    CompatibilityState: { type: string, enum: [experimental, verified, broken, retired] }
+    Scope:
+      {
+        type: string,
+        enum: ['catalog:read', 'sessions:create', 'sessions:read', 'sessions:control', admin]
+      }
+    NodeRole: { type: string, enum: [controller, source-worker, ingest-origin, edge] }
+    ProviderCredentials:
+      type: object
+      properties:
+        username: { type: string }
+        password: { type: string, writeOnly: true }
+        apiKey: { type: string, writeOnly: true }
+    CreateProviderRequest:
+      allOf:
+        - { $ref: '#/components/schemas/ProviderCredentials' }
+        - type: object
+          required: [type, name, baseUrl, authMode]
+          properties:
+            type: { const: jellyfin }
+            name: { type: string, minLength: 1, maxLength: 100 }
+            baseUrl: { type: string, format: uri }
+            authMode: { $ref: '#/components/schemas/AuthenticationMode' }
+            allowPublicHttp: { type: boolean, default: false }
+    PublicProvider:
+      type: object
+      required: [id, type, name, baseUrl, authMode, capabilities, healthy, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [jellyfin, fake] }
+        name: { type: string }
+        baseUrl: { type: string, format: uri }
+        authMode: { $ref: '#/components/schemas/AuthenticationMode' }
+        userId: { type: string }
+        username: { type: string }
+        serverName: { type: string }
+        serverVersion: { type: string }
+        capabilities: { type: array, items: { type: string } }
+        healthy: { type: boolean }
+        securityNotice: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProviderList:
+      {
+        type: object,
+        required: [items],
+        properties:
+          { items: { type: array, items: { $ref: '#/components/schemas/PublicProvider' } } }
+      }
+    MediaSourceRef:
+      type: object
+      additionalProperties: false
+      required: [providerId, itemId]
+      properties:
+        providerId: { type: string }
+        itemId: { type: string }
+        versionId: { type: string }
+        sourceFingerprint: { type: string }
+        audioTrackId: { type: string }
+        subtitleTrackId: { type: string }
+    MediaItem:
+      type: object
+      required: [id, providerId, name, kind]
+      properties:
+        id: { type: string }
+        providerId: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        overview: { type: string }
+        productionYear: { type: integer }
+        durationSeconds: { type: number, minimum: 0 }
+        imageUrl: { type: string }
+        parentId: { type: string }
+        videoCodec: { type: string }
+        audioCodec: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        versions: { type: array, items: { type: object, additionalProperties: true } }
+        audioTracks: { type: array, items: { type: object, additionalProperties: true } }
+        subtitleTracks: { type: array, items: { type: object, additionalProperties: true } }
+    CatalogPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MediaItem' } }
+        total: { type: integer, minimum: 0 }
+    VideoSettings:
+      type: object
+      required:
+        [
+          codec,
+          encoder,
+          hardwareMode,
+          pixelFormat,
+          width,
+          height,
+          frameRate,
+          bitrateKbps,
+          maxrateKbps,
+          bufferKbps,
+          gop,
+          bFrames
+        ]
+      properties:
+        codec: { type: string, enum: [h264, h265, av1, copy] }
+        encoder: { type: string }
+        hardwareMode: { type: string, enum: [auto, software, videotoolbox, qsv, vaapi, nvenc, amf] }
+        decodeMode:
+          {
+            type: string,
+            enum: [auto, software, videotoolbox, d3d11va, qsv, vaapi, cuda],
+            default: auto
+          }
+        profile: { type: string }
+        level: { type: string }
+        pixelFormat: { type: string }
+        width: { type: integer, minimum: 16, maximum: 7680 }
+        height: { type: integer, minimum: 16, maximum: 4320 }
+        frameRate: { type: integer, minimum: 1, maximum: 120 }
+        bitrateKbps: { type: integer, minimum: 64, maximum: 100000 }
+        maxrateKbps: { type: integer, minimum: 64, maximum: 120000 }
+        bufferKbps: { type: integer, minimum: 64, maximum: 240000 }
+        quality: { type: integer, minimum: 0, maximum: 63 }
+        preset: { type: string }
+        tune: { type: string }
+        gop: { type: integer, minimum: 1, maximum: 600 }
+        bFrames: { type: integer, minimum: 0, maximum: 16 }
+    AudioSettings:
+      type: object
+      required: [codec, channels, layout, sampleRate, bitrateKbps]
+      properties:
+        codec: { type: string, enum: [aac, opus, ac3, copy] }
+        channels: { type: integer, minimum: 1, maximum: 8 }
+        layout: { type: string }
+        sampleRate: { type: integer, minimum: 8000, maximum: 192000 }
+        bitrateKbps: { type: integer, minimum: 32, maximum: 1536 }
+    DeliverySettings:
+      type: object
+      required: [method, container, segmentType, segmentDuration, playlistType, latencyMode]
+      properties:
+        method: { type: string, enum: [hls, fragmented_mp4, rtsp, mpegts_http] }
+        container: { type: string, enum: [mpegts, fmp4, mp4] }
+        segmentType: { type: string, enum: [mpegts, fmp4, none] }
+        segmentDuration: { type: number, minimum: 1, maximum: 30 }
+        playlistType: { type: string, enum: [vod, event, live] }
+        latencyMode: { type: string, enum: [standard, low] }
+    ProcessingSettings:
+      type: object
+      required: [toneMap, burnSubtitles, passthrough, maxWorkers]
+      properties:
+        toneMap: { type: boolean }
+        burnSubtitles: { type: boolean }
+        passthrough: { type: string, enum: [never, compatible, always] }
+        maxWorkers: { type: integer, minimum: 1, maximum: 32 }
+    CreateProfileRevisionRequest:
+      type: object
+      required: [name, platform, state, video, audio, delivery, processing]
+      properties:
+        profileId: { type: string }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        platform: { $ref: '#/components/schemas/PlatformMode' }
+        state: { type: string, enum: [experimental, verified] }
+        video: { $ref: '#/components/schemas/VideoSettings' }
+        audio: { $ref: '#/components/schemas/AudioSettings' }
+        delivery: { $ref: '#/components/schemas/DeliverySettings' }
+        processing: { $ref: '#/components/schemas/ProcessingSettings' }
+    ProfileRevision:
+      allOf:
+        - { $ref: '#/components/schemas/CreateProfileRevisionRequest' }
+        - type: object
+          required: [profileId, revision, createdAt]
+          properties:
+            profileId: { type: string }
+            revision: { type: integer, minimum: 1 }
+            state: { $ref: '#/components/schemas/CompatibilityState' }
+            disabledReason: { type: string }
+            createdAt: { type: string, format: date-time }
+    ProfileList:
+      {
+        type: object,
+        required: [items],
+        properties:
+          { items: { type: array, items: { $ref: '#/components/schemas/ProfileRevision' } } }
+      }
+    MediaCapabilities:
+      type: object
+      required: [ffmpegVersion, encoders, muxers, filters, pixelFormats]
+      properties:
+        ffmpegVersion: { type: string }
+        encoders:
+          {
+            type: array,
+            items:
+              {
+                type: object,
+                required: [name, codec, hardware, available],
+                properties:
+                  {
+                    name: { type: string },
+                    codec: { type: string },
+                    hardware: { type: boolean },
+                    available: { type: boolean },
+                    reason: { type: string }
+                  }
+              }
+          }
+        muxers: { type: array, items: { type: string } }
+        filters: { type: array, items: { type: string } }
+        pixelFormats: { type: array, items: { type: string } }
+    SessionCommon:
+      type: object
+      required: [kind, profileId, profileRevision, platformMode]
+      properties:
+        name: { type: string, maxLength: 160 }
+        profileId: { type: string }
+        profileRevision: { type: integer, minimum: 1 }
+        platformMode: { $ref: '#/components/schemas/PlatformMode' }
+        pinned: { type: boolean }
+        placementPolicy: { $ref: '#/components/schemas/PlacementPolicy' }
+        preferredNodeId: { type: string }
+        preferredRegion: { type: string }
+        playbackTtlSeconds:
+          { anyOf: [{ type: integer, minimum: 60, maximum: 31536000 }, { type: 'null' }] }
+    CreateSessionRequest:
+      oneOf:
+        - allOf:
+            - { $ref: '#/components/schemas/SessionCommon' }
+            - type: object
+              required: [kind, source]
+              properties:
+                kind: { const: vod }
+                source: { $ref: '#/components/schemas/MediaSourceRef' }
+                reportActivity: { type: boolean, default: true }
+        - allOf:
+            - { $ref: '#/components/schemas/SessionCommon' }
+            - type: object
+              required: [kind, name, liveChannelId]
+              properties:
+                kind: { const: live }
+                name: { type: string, minLength: 1 }
+                liveChannelId: { type: string }
+                reportActivity: { const: false }
+      discriminator: { propertyName: kind }
+    ControlSessionRequest:
+      type: object
+      minProperties: 1
+      properties:
+        pinned: { type: boolean }
+        state: { type: string, enum: [idle, stopped] }
+    RelaySession:
+      type: object
+      required:
+        [
+          id,
+          name,
+          kind,
+          profileId,
+          profileRevision,
+          platformMode,
+          state,
+          pinned,
+          reportActivity,
+          viewers,
+          placementPolicy,
+          placementLocked,
+          outputUrls,
+          createdAt,
+          updatedAt
+        ]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [vod, live] }
+        source: { $ref: '#/components/schemas/MediaSourceRef' }
+        liveChannelId: { type: string }
+        profileId: { type: string }
+        profileRevision: { type: integer }
+        platformMode: { $ref: '#/components/schemas/PlatformMode' }
+        state: { type: string, enum: [idle, queued, starting, active, live, error, stopped] }
+        durationSeconds: { type: number }
+        pinned: { type: boolean }
+        reportActivity: { type: boolean }
+        viewers: { type: integer, minimum: 0 }
+        placementPolicy: { $ref: '#/components/schemas/PlacementPolicy' }
+        assignedNodeId: { type: string }
+        placementLocked: { type: boolean }
+        preferredRegion: { type: string }
+        outputUrls: { type: object, additionalProperties: { type: string, format: uri } }
+        errorMessage: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SessionList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/RelaySession' } } }
+      }
+    CreateLiveChannelRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        preferredRegion: { type: string }
+        normalize: { type: boolean, default: true }
+    LiveChannel:
+      type: object
+      required: [id, name, path, normalize, publisherState, rtmpUrl, srtUrl, whipUrl, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        normalize: { type: boolean }
+        publisherState: { type: string, enum: [offline, online, reconnecting, error] }
+        rtmpUrl: { type: string, format: uri }
+        srtUrl: { type: string, format: uri }
+        whipUrl: { type: string, format: uri }
+        backupRtmpUrl: { type: string, format: uri }
+        backupSrtUrl: { type: string, format: uri }
+        createdAt: { type: string, format: date-time }
+    LiveChannelList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/LiveChannel' } } }
+      }
+    PublisherConnectionDetails:
+      type: object
+      required: [publishToken, rtmpUrl, srtUrl, whipUrl]
+      properties:
+        publishToken: { type: string, writeOnly: true }
+        rtmpUrl: { type: string, format: uri, writeOnly: true }
+        srtUrl: { type: string, format: uri, writeOnly: true }
+        whipUrl: { type: string, format: uri, writeOnly: true }
+        backupRtmpUrl: { type: string, format: uri, writeOnly: true }
+        backupSrtUrl: { type: string, format: uri, writeOnly: true }
+    CreatedLiveChannel:
+      {
+        type: object,
+        required: [channel, publisher],
+        properties:
+          {
+            channel: { $ref: '#/components/schemas/LiveChannel' },
+            publisher: { $ref: '#/components/schemas/PublisherConnectionDetails' }
+          }
+      }
+    CompatibilityInput:
+      type: object
+      required:
+        [
+          applicationVersion,
+          platform,
+          player,
+          profileId,
+          profileRevision,
+          state,
+          startup,
+          duration,
+          pause,
+          forwardSeek,
+          backwardSeek,
+          lateJoin,
+          completion,
+          audio,
+          video
+        ]
+      properties:
+        applicationVersion: { type: string }
+        platform: { type: string, enum: [pc, quest] }
+        player: { type: string }
+        profileId: { type: string }
+        profileRevision: { type: integer, minimum: 1 }
+        state: { $ref: '#/components/schemas/CompatibilityState' }
+        startup: { type: boolean }
+        duration: { type: boolean }
+        pause: { type: boolean }
+        forwardSeek: { type: boolean }
+        backwardSeek: { type: boolean }
+        lateJoin: { type: boolean }
+        completion: { type: boolean }
+        audio: { type: boolean }
+        video: { type: boolean }
+        latencyMs: { type: integer, minimum: 0 }
+        notes: { type: string, maxLength: 2000 }
+    CompatibilityResult:
+      allOf:
+        - { $ref: '#/components/schemas/CompatibilityInput' }
+        - type: object
+          required: [id, testedAt]
+          properties:
+            id: { type: string }
+            testedAt: { type: string, format: date-time }
+    CompatibilityList:
+      {
+        type: object,
+        required: [items],
+        properties:
+          { items: { type: array, items: { $ref: '#/components/schemas/CompatibilityResult' } } }
+      }
+    CreatePersonalTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        scopes: { type: array, minItems: 1, items: { $ref: '#/components/schemas/Scope' } }
+        expiresAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], default: null }
+    PublicToken:
+      type: object
+      required: [id, name, scopes, expiresAt, lastUsedAt, revokedAt, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scopes: { type: array, items: { $ref: '#/components/schemas/Scope' } }
+        expiresAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        lastUsedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        revokedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        createdAt: { type: string, format: date-time }
+    TokenList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/PublicToken' } } }
+      }
+    CreatedToken:
+      allOf:
+        - { $ref: '#/components/schemas/PublicToken' }
+        - type: object
+          required: [token]
+          properties: { token: { type: string, writeOnly: true } }
+    RelayEvent:
+      type: object
+      required: [version, id, type, timestamp, payload]
+      properties:
+        version: { const: 1 }
+        id: { type: string }
+        type: { type: string }
+        timestamp: { type: string, format: date-time }
+        sessionId: { type: string }
+        payload: { type: object, additionalProperties: true }
+    EventList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/RelayEvent' } } }
+      }
+    NodeCapability:
+      type: object
+      required:
+        [
+          encoders,
+          hardwareDevices,
+          maxWorkers,
+          activeWorkers,
+          queuedWorkers,
+          cacheBytes,
+          cacheLimitBytes,
+          egressMbps,
+          providerIds
+        ]
+      properties:
+        encoders: { type: array, items: { type: string } }
+        hardwareDevices: { type: array, items: { type: string } }
+        maxWorkers: { type: integer, minimum: 0 }
+        activeWorkers: { type: integer, minimum: 0 }
+        queuedWorkers: { type: integer, minimum: 0 }
+        cacheBytes: { type: integer, minimum: 0 }
+        cacheLimitBytes: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        egressMbps:
+          type: number
+          minimum: 0
+          description: Average media payload egress over the trailing 30 seconds.
+        providerIds: { type: array, items: { type: string } }
+    ClusterNode:
+      type: object
+      required:
+        [
+          id,
+          name,
+          roles,
+          region,
+          publicUrl,
+          state,
+          capabilities,
+          weight,
+          lastHeartbeatAt,
+          createdAt,
+          updatedAt
+        ]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        roles: { type: array, items: { $ref: '#/components/schemas/NodeRole' } }
+        region: { type: string }
+        publicUrl: { type: string, format: uri, pattern: '^https?://' }
+        internalUrl: { type: string, format: uri, pattern: '^https?://' }
+        state: { type: string, enum: [joining, online, degraded, draining, offline, revoked] }
+        capabilities: { $ref: '#/components/schemas/NodeCapability' }
+        weight: { type: integer }
+        certificateExpiresAt: { type: string, format: date-time }
+        lastHeartbeatAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        agent:
+          {
+            type: object,
+            properties:
+              { connected: { type: boolean }, connectedAt: { type: string, format: date-time } }
+          }
+    NodeList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/ClusterNode' } } }
+      }
+    CreateNodeJoinTokenRequest:
+      type: object
+      required: [name, roles, region]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        roles: { type: array, minItems: 1, items: { $ref: '#/components/schemas/NodeRole' } }
+        region: { type: string, minLength: 1, maxLength: 80 }
+        expiresInSeconds: { type: integer, minimum: 60, maximum: 3600, default: 600 }
+    CreatedJoinToken:
+      {
+        type: object,
+        required: [token, expiresAt],
+        properties:
+          {
+            token: { type: string, writeOnly: true },
+            expiresAt: { type: string, format: date-time }
+          }
+      }
+    EnrollNodeRequest:
+      type: object
+      required: [token, name, publicUrl, capabilities]
+      properties:
+        token: { type: string, minLength: 32, writeOnly: true }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        publicUrl: { type: string, format: uri, pattern: '^https?://' }
+        internalUrl: { type: string, format: uri, pattern: '^https?://' }
+        capabilities: { $ref: '#/components/schemas/NodeCapability' }
+    DrainNodeRequest:
+      {
+        type: object,
+        additionalProperties: false,
+        required: [draining],
+        properties: { draining: { type: boolean } }
+      }
+    RotateCertificateRequest:
+      {
+        type: object,
+        additionalProperties: false,
+        properties: { force: { type: boolean, default: false } }
+      }
+    CreateProviderBindingRequest:
+      allOf:
+        - { $ref: '#/components/schemas/CreateProviderRequest' }
+        - type: object
+          required: [nodeId]
+          properties:
+            providerId:
+              type: string
+              description: Existing provider ID when adding an explicit failover binding.
+            nodeId: { type: string }
+    ProviderBinding:
+      type: object
+      required: [id, providerId, nodeId, reachable, state, validatedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        providerId: { type: string }
+        nodeId: { type: string }
+        reachable: { type: boolean }
+        state: { type: string, enum: [pending, healthy, degraded, revoked] }
+        lastError: { type: string }
+        validatedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    BindingList:
+      {
+        type: object,
+        required: [items],
+        properties:
+          { items: { type: array, items: { $ref: '#/components/schemas/ProviderBinding' } } }
+      }
+    CreatedBinding:
+      {
+        type: object,
+        required: [provider, binding],
+        properties:
+          {
+            provider: { $ref: '#/components/schemas/PublicProvider' },
+            binding: { $ref: '#/components/schemas/ProviderBinding' }
+          }
+      }
+    PlacementPreviewRequest:
+      type: object
+      required: [profileId, profileRevision, placementPolicy]
+      properties:
+        providerId: { type: string }
+        profileId: { type: string }
+        profileRevision: { type: integer, minimum: 1 }
+        placementPolicy: { $ref: '#/components/schemas/PlacementPolicy' }
+        preferredNodeId: { type: string }
+        preferredRegion: { type: string }
+    SegmentJob:
+      type: object
+      required:
+        [
+          id,
+          contentKey,
+          sessionId,
+          segmentIndex,
+          state,
+          attempts,
+          workerHistory,
+          createdAt,
+          updatedAt
+        ]
+      properties:
+        id: { type: string }
+        contentKey: { type: string }
+        sessionId: { type: string }
+        segmentIndex: { type: integer, minimum: 0 }
+        state: { type: string, enum: [queued, leased, running, complete, failed, cancelled] }
+        attempts: { type: integer, minimum: 0 }
+        ownerNodeId: { type: string }
+        leaseExpiresAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        errorMessage: { type: string }
+        workerHistory:
+          type: array
+          items:
+            type: object
+            required: [attempt, nodeId, state, startedAt]
+            properties:
+              attempt: { type: integer, minimum: 1 }
+              nodeId: { type: string }
+              state: { type: string, enum: [running, complete, failed, cancelled] }
+              startedAt: { type: string, format: date-time }
+              completedAt: { type: string, format: date-time }
+              errorMessage: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    JobList:
+      {
+        type: object,
+        required: [items],
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/SegmentJob' } } }
+      }
+    BackendValidationRequest:
+      type: object
+      required: [category, kind]
+      properties:
+        category:
+          {
+            type: string,
+            enum: [object-store, coordination, repository, routing, secrets, metrics]
+          }
+        kind:
+          {
+            type: string,
+            enum:
+              [
+                local,
+                s3,
+                azure-blob,
+                gcs,
+                postgres,
+                valkey,
+                builtin,
+                webhook,
+                sqlite,
+                keychain,
+                dpapi,
+                encrypted-file,
+                prometheus
+              ]
+          }
+        endpoint: { type: string, format: uri }
+        secretRef: { type: string, writeOnly: true }
+        bucket: { type: string, minLength: 1, maxLength: 255 }
+        container: { type: string, minLength: 1, maxLength: 255 }
+        region: { type: string, minLength: 1, maxLength: 100 }
+        prefix: { type: string, minLength: 1, maxLength: 500 }
+        projectId: { type: string, minLength: 1, maxLength: 200 }
+        forcePathStyle: { type: boolean }
+        intervalSeconds: { type: integer, minimum: 5, maximum: 300 }
+    BackendActivationRequest:
+      allOf: [{ $ref: '#/components/schemas/BackendValidationRequest' }]
+    BackendStatus:
+      type: object
+      required: [category, kind, healthy, checkedAt]
+      properties:
+        category:
+          {
+            type: string,
+            enum: [object-store, coordination, repository, routing, secrets, metrics]
+          }
+        kind:
+          {
+            type: string,
+            enum:
+              [
+                local,
+                s3,
+                azure-blob,
+                gcs,
+                postgres,
+                valkey,
+                builtin,
+                webhook,
+                sqlite,
+                keychain,
+                dpapi,
+                encrypted-file,
+                prometheus
+              ]
+          }
+        healthy: { type: boolean }
+        message: { type: string }
+        checkedAt: { type: string, format: date-time }
+        restartRequired: { type: boolean }
+    BackendList:
+      {
+        type: object,
+        required: [items, restartRequired],
+        properties:
+          {
+            items: { type: array, items: { $ref: '#/components/schemas/BackendStatus' } },
+            restartRequired: { type: boolean }
+          }
+      }
+    CacheEvictionRequest:
+      type: object
+      minProperties: 1
+      properties:
+        all: { type: boolean }
+        sessionId: { type: string }
+        profileId: { type: string }
+    CachedObject:
+      type: object
+      required: [key, size, contentType, expiresAt, createdAt, lastAccessedAt]
+      properties:
+        key: { type: string }
+        size: { type: integer, minimum: 0 }
+        contentType: { type: string }
+        etag: { type: string }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        expiresAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        createdAt: { type: string, format: date-time }
+        lastAccessedAt: { type: string, format: date-time }
+    CacheList:
+      {
+        type: object,
+        required: [items, totalBytes],
+        properties:
+          {
+            items: { type: array, items: { $ref: '#/components/schemas/CachedObject' } },
+            totalBytes: { type: integer, minimum: 0 }
+          }
+      }
+    AgentLogEntry:
+      type: object
+      required: [id, nodeId, level, message, context, timestamp]
+      properties:
+        id: { type: string }
+        nodeId: { type: string }
+        level: { type: string, enum: [debug, info, warn, error] }
+        message: { type: string }
+        context: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+    LogList:
+      {
+        type: object,
+        required: [items],
+        properties:
+          { items: { type: array, items: { $ref: '#/components/schemas/AgentLogEntry' } } }
+      }

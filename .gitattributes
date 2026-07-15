@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.pkg binary
+*.exe binary
+
+apps/web/src/lib/generated/** linguist-generated=true
+package-lock.json linguist-generated=true

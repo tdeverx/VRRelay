@@ -1,0 +1,124 @@
+# Testing guide
+
+## Fast local feedback
+
+```sh
+npm run check
+npm test -- --run
+```
+
+`npm run check` runs TypeScript and Svelte diagnostics across every workspace. Unit tests use temporary directories and generated media; they must not depend on a developer's library or credentials.
+
+## Full repository gate
+
+```sh
+npm run ci
+```
+
+This checks formatting, lint, types, unit tests, the production build, and the npm vulnerability threshold. API changes also require:
+
+```sh
+npm run generate:api
+git diff --exit-code -- apps/web/src/lib/generated/vrrelay-api
+```
+
+Generated client files are committed so consumers and reviewers see contract changes directly.
+
+## Distributed acceptance harness
+
+The release-level harness builds the production container and provisions a disposable cluster with
+one controller, two source workers, one ingest origin, two edges, PostgreSQL, Valkey, MinIO, a
+deterministic Jellyfin-compatible fixture, MediaMTX, and an OBS-compatible FFmpeg publisher.
+
+```sh
+npm run test:integration
+```
+
+It verifies node enrollment over mTLS WSS, node-local primary and failover provider credentials,
+finite VOD manifests, one cluster-wide job for identical edge requests, byte-identical MPEG-TS edge
+output, completed per-worker attempt history, edge draining, worker revocation and failover,
+controller restart recovery, and one live
+origin path per active edge. The harness owns the `vrrelay-acceptance` Compose project and removes
+its containers and volumes on completion. Use `node script/integration-harness.mjs --keep` to retain
+the cluster for diagnosis, or `--skip-build` to reuse an existing `vrrelay:harness` image.
+
+This test downloads and builds multiple container images. Budget at least 8 GB of free Docker and
+host storage before running it.
+
+When MinIO and MediaMTX images are unavailable, the smaller real-process VOD harness still exercises
+the built relay against PostgreSQL and Redis with two workers and two edges:
+
+```sh
+npm run test:local-cluster
+```
+
+It builds the application, starts project-scoped disposable database containers, runs the relay
+roles as separate host processes, and verifies real FFmpeg output, mTLS enrollment, cluster-wide
+coalescing, completed per-worker attempt history, node-local failover bindings, administrative certificate rotation, edge drain, worker
+revocation, PostgreSQL and Redis restart tolerance, controller restart, and playback-grant recovery.
+It uses ports `19096`, `19100`, `19110`, `19201`, `19202`, `19211`, `19212`, `19379`, and `19432`.
+
+## Integration boundaries
+
+Real-service tests are opt-in and read secrets only from ignored environment values. The Jellyfin command is documented in `CONTRIBUTING.md`. Hosted Azure Blob and GCS contract tests, extended destructive cluster recovery, native installers, and real VRChat clients require their target environments and remain release evidence rather than default unit tests.
+
+For a complete standalone Jellyfin smoke test—authentication, catalog, finite manifest, real-time
+FFmpeg segment generation, playback revocation, and credential deletion—run:
+
+```sh
+VRRELAY_TEST_JELLYFIN_URL=https://jellyfin.example \
+VRRELAY_TEST_JELLYFIN_USER=your-test-user \
+VRRELAY_TEST_JELLYFIN_PASSWORD='...' \
+npm run test:real-jellyfin
+```
+
+The password is forwarded only in the authenticated provider-creation request and is not inherited
+by the relay child process or written to test logs. Add `-- --keep` only when retaining ignored
+diagnostic state after a failure is necessary.
+
+For a real OBS-compatible live smoke test, provide the pinned MediaMTX executable and its extracted
+configuration alongside FFmpeg:
+
+```sh
+VRRELAY_TEST_MEDIAMTX=/path/to/mediamtx \
+VRRELAY_TEST_MEDIAMTX_CONFIG=/path/to/mediamtx.yml \
+VRRELAY_TEST_FFMPEG=ffmpeg \
+npm run test:real-live
+```
+
+Add `-- --managed-mediamtx` to exercise the native-package topology, where the relay service starts, monitors, and shuts down the bundled MediaMTX process itself. This mode requires the MediaMTX configuration path.
+
+This publishes generated H.264/AAC over the one-time authenticated RTMP URL, exercises the default
+real-time normalizer, retrieves an MPEG-TS segment through the opaque grant-backed relay URL,
+reconciles publisher disconnect, revokes playback, and deletes the live channel. Pass
+`-- --passthrough` only to test the non-normalizing diagnostic path.
+
+When testing media behavior, record the source properties, immutable profile revision, platform, player, startup, duration, pause, seeks, late join, completion, audio/video, and HTTPS/URL-permission result. Do not infer VRChat compatibility from FFmpeg success alone.
+
+## Deployment validation
+
+Use the checks that match the changed area:
+
+```sh
+npm run check:compose
+npm run test:container
+npm run test:compose
+npm run test:cluster-compose
+helm lint deploy/kubernetes
+helm template vrrelay deploy/kubernetes > /dev/null
+swift build --package-path apps/macos -c release --arch arm64
+script/verify-macos-package.sh dist/VRRelay-<version>-macOS-arm64.pkg <version> <build-number>
+```
+
+The container smoke test performs a fresh native-architecture image build, validates the pinned Node and FFmpeg versions and required media capabilities, proves the runtime user is non-root, then boots the relay with a read-only root filesystem and empty tmpfs-backed data/cache directories. It requires a healthy Docker daemon and removes its temporary image and container on exit. CI separately builds both amd64 and arm64 images through Buildx after this runnable native test passes.
+
+The standalone Compose smoke test builds the production image, creates disposable data and cache volumes, waits for the relay health check, verifies the dashboard and MediaMTX Control API, confirms the MPEG-TS HLS setting and opens the RTMP listener. It removes its project-scoped containers, volumes, network, and image on exit.
+
+The cluster Compose smoke test boots the checked-in production topology with PostgreSQL, Valkey,
+role-scoped MinIO identities, a controller, source worker, ingest origin, edge, and both MediaMTX
+services. It performs first-run setup, issues single-use role tokens, verifies all three agents enroll
+and remain connected over mTLS WSS, checks controller and edge health, and probes the ingest
+MediaMTX Control API. Its randomly generated secrets, project-scoped containers, volumes, network,
+and image are removed on exit.
+
+Windows packaging must be built and exercised on Windows. macOS signing and notarization require release-only credentials; ordinary local builds remain unsigned.

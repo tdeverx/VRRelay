@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vrrelay.local/contracts/events/relay-event.schema.json",
+  "title": "RelayEvent",
+  "type": "object",
+  "required": ["version", "id", "type", "timestamp", "payload"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": [
+        "session.created",
+        "session.updated",
+        "session.deleted",
+        "worker.started",
+        "worker.completed",
+        "worker.failed",
+        "cache.hit",
+        "cache.evicted",
+        "viewer.joined",
+        "viewer.left",
+        "live.publisher.connected",
+        "live.publisher.disconnected",
+        "live.channel.deleted",
+        "system.capacity",
+        "node.joined",
+        "node.heartbeat",
+        "node.draining",
+        "node.offline",
+        "job.queued",
+        "job.leased",
+        "job.completed",
+        "job.failed",
+        "route.selected",
+        "storage.uploaded"
+      ]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "sessionId": { "type": "string" },
+    "payload": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

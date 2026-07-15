@@ -1,0 +1,291 @@
+name: vrrelay-acceptance
+
+x-relay-environment: &relay-environment
+  VRRELAY_LISTEN_ADDR: 0.0.0.0:8099
+  VRRELAY_REPOSITORY_DRIVER: postgres
+  VRRELAY_POSTGRES_URL: postgres://vrrelay:${POSTGRES_PASSWORD}@postgres:5432/vrrelay
+  VRRELAY_COORDINATION_DRIVER: valkey
+  VRRELAY_VALKEY_URL: redis://valkey:6379
+  VRRELAY_OBJECT_STORE_DRIVER: s3
+  VRRELAY_OBJECT_STORE_BUCKET: vrrelay
+  VRRELAY_OBJECT_STORE_PREFIX: acceptance
+  VRRELAY_S3_ENDPOINT: http://minio:9000
+  VRRELAY_S3_REGION: us-east-1
+  VRRELAY_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+  VRRELAY_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+  VRRELAY_MASTER_KEY: ${VRRELAY_MASTER_KEY}
+  VRRELAY_MEDIAMTX_READ_TOKEN: ${VRRELAY_MEDIAMTX_READ_TOKEN}
+  VRRELAY_LOG_LEVEL: info
+
+x-relay-common: &relay-common
+  image: ${VRRELAY_HARNESS_IMAGE:-vrrelay:harness}
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    valkey: { condition: service_healthy }
+    minio-init: { condition: service_completed_successfully }
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vrrelay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: vrrelay
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U vrrelay]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    command: [valkey-server, --save, '', --appendonly, 'no']
+    healthcheck:
+      test: [CMD, valkey-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set -- local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/vrrelay
+        mc anonymous set private local/vrrelay
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+  jellyfin:
+    image: ${VRRELAY_HARNESS_IMAGE:-vrrelay:harness}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=30 \
+          -f lavfi -i sine=frequency=880:sample_rate=48000 -t 12 -c:v libx264 -preset ultrafast \
+          -pix_fmt yuv420p -g 120 -c:a aac -ac 2 -b:a 128k -movflags +faststart \
+          -y /tmp/fixture.mp4
+        exec node /fixture/jellyfin-fixture.mjs
+    environment:
+      FIXTURE_USERNAME: fixture-user
+      FIXTURE_PASSWORD: fixture-password
+      FIXTURE_ACCESS_TOKEN: fixture-access-token
+    volumes:
+      - ./jellyfin-fixture.mjs:/fixture/jellyfin-fixture.mjs:ro
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:8096/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mediamtx-origin:
+    image: bluenviron/mediamtx:1.18.2
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://controller:8099/internal/mediamtx/auth
+      MTX_API: 'yes'
+      MTX_APIADDRESS: :9997
+      MTX_HLS: 'yes'
+      MTX_HLSADDRESS: :8888
+      MTX_HLSVARIANT: mpegts
+      MTX_RTSP: 'yes'
+      MTX_RTSPADDRESS: :8554
+      MTX_PATHDEFAULTS_SRTREADPASSPHRASE: integration-srt-passphrase
+      MTX_WEBRTCLOCALUDPADDRESS: :8189
+
+  controller:
+    <<: *relay-common
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_ID: controller-1
+      VRRELAY_NODE_NAME: Acceptance controller
+      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_ROLES: controller
+      VRRELAY_PUBLIC_URL: http://127.0.0.1:18100
+      VRRELAY_AGENT_LISTEN_ADDR: 0.0.0.0:8100
+      VRRELAY_AGENT_TLS_NAMES: controller
+      VRRELAY_MEDIAMTX_RTMP_URL: rtmp://mediamtx-origin:1935
+      VRRELAY_MEDIAMTX_SRT_URL: srt://mediamtx-origin:8890
+      VRRELAY_MEDIAMTX_WHIP_URL: http://mediamtx-origin:8889
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-origin:8888
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-origin:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-origin:8554
+      VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
+    ports:
+      - 18100:8099
+      - 18110:8100
+    volumes:
+      - controller-data:/data
+      - controller-cache:/cache
+
+  source-worker-a:
+    <<: *relay-common
+    profiles: [agents]
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Acceptance worker A
+      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_ROLES: source-worker
+      VRRELAY_PUBLIC_URL: http://source-worker-a:8099
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${SOURCE_A_JOIN_TOKEN:-missing}
+    volumes:
+      - source-a-data:/data
+      - source-a-cache:/cache
+
+  source-worker-b:
+    <<: *relay-common
+    profiles: [agents]
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Acceptance worker B
+      VRRELAY_NODE_REGION: backup
+      VRRELAY_NODE_ROLES: source-worker
+      VRRELAY_PUBLIC_URL: http://source-worker-b:8099
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${SOURCE_B_JOIN_TOKEN:-missing}
+    volumes:
+      - source-b-data:/data
+      - source-b-cache:/cache
+
+  ingest-origin:
+    <<: *relay-common
+    profiles: [agents]
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Acceptance ingest origin
+      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_ROLES: ingest-origin
+      VRRELAY_PUBLIC_URL: http://ingest-origin:8099
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${INGEST_JOIN_TOKEN:-missing}
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-origin:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-origin:8554
+    volumes:
+      - ingest-data:/data
+      - ingest-cache:/cache
+
+  edge-a:
+    <<: *relay-common
+    profiles: [agents]
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Acceptance edge A
+      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_ROLES: edge
+      VRRELAY_PUBLIC_URL: http://127.0.0.1:18201
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${EDGE_A_JOIN_TOKEN:-missing}
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-edge-a:8888
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-edge-a:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-edge-a:8554
+      VRRELAY_LIVE_ORIGIN_URL: srt://mediamtx-origin:8890
+      VRRELAY_LIVE_SRT_PASSPHRASE: integration-srt-passphrase
+    ports: [18201:8099]
+    volumes:
+      - edge-a-data:/data
+      - edge-a-cache:/cache
+
+  mediamtx-edge-a:
+    image: bluenviron/mediamtx:1.18.2
+    profiles: [agents]
+    volumes:
+      - ../docker/mediamtx-edge.yml:/mediamtx.yml:ro
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://edge-a:8099/internal/mediamtx/auth
+    ports: [18301:9997]
+
+  edge-b:
+    <<: *relay-common
+    profiles: [agents]
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Acceptance edge B
+      VRRELAY_NODE_REGION: backup
+      VRRELAY_NODE_ROLES: edge
+      VRRELAY_PUBLIC_URL: http://127.0.0.1:18202
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${EDGE_B_JOIN_TOKEN:-missing}
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-edge-b:8888
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-edge-b:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-edge-b:8554
+      VRRELAY_LIVE_ORIGIN_URL: srt://mediamtx-origin:8890
+      VRRELAY_LIVE_SRT_PASSPHRASE: integration-srt-passphrase
+    ports: [18202:8099]
+    volumes:
+      - edge-b-data:/data
+      - edge-b-cache:/cache
+
+  mediamtx-edge-b:
+    image: bluenviron/mediamtx:1.18.2
+    profiles: [agents]
+    volumes:
+      - ../docker/mediamtx-edge.yml:/mediamtx.yml:ro
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://edge-b:8099/internal/mediamtx/auth
+    ports: [18302:9997]
+
+  obs-publisher:
+    image: ${VRRELAY_HARNESS_IMAGE:-vrrelay:harness}
+    profiles: [publisher]
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        exec ffmpeg -hide_banner -loglevel warning -re \
+          -f lavfi -i testsrc2=size=640x360:rate=30 \
+          -f lavfi -i sine=frequency=440:sample_rate=48000 \
+          -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
+          -g 60 -c:a aac -ar 48000 -ac 2 -f flv "$${LIVE_RTMP_URL}"
+    environment:
+      LIVE_RTMP_URL: ${LIVE_RTMP_URL:-rtmp://mediamtx-origin:1935/missing}
+    restart: on-failure
+
+volumes:
+  controller-data:
+  controller-cache:
+  source-a-data:
+  source-a-cache:
+  source-b-data:
+  source-b-cache:
+  ingest-data:
+  ingest-cache:
+  edge-a-data:
+  edge-a-cache:
+  edge-b-data:
+  edge-b-cache:

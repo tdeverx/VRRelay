@@ -1,0 +1,21 @@
+<service>
+  <id>VRRelay</id>
+  <name>VRRelay</name>
+  <description>VRRelay background media relay and cluster node</description>
+  <executable>%BASE%\runtime\node.exe</executable>
+  <arguments>%BASE%\runtime\apps\relay\dist\main.js</arguments>
+  <workingdirectory>%BASE%\runtime</workingdirectory>
+  <env name="VRRELAY_DATA_DIR" value="%ProgramData%\VRRelay\data"/>
+  <env name="VRRELAY_CACHE_DIR" value="%ProgramData%\VRRelay\cache"/>
+  <env name="VRRELAY_VERSION" value="__VRRELAY_VERSION__"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <stoptimeout>30 sec</stoptimeout>
+  <log mode="roll-by-size"><sizeThreshold>10240</sizeThreshold><keepFiles>8</keepFiles></log>
+  <env name="VRRELAY_FFMPEG" value="%BASE%\runtime\ffmpeg.exe"/>
+  <env name="VRRELAY_MEDIAMTX_EXECUTABLE" value="%BASE%\runtime\mediamtx.exe"/>
+  <env name="VRRELAY_MEDIAMTX_CONFIG" value="%BASE%\runtime\mediamtx.yml"/>
+  <env name="VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ" value="true"/>
+</service>

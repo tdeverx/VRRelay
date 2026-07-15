@@ -1,0 +1,18 @@
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      VRRELAY_DOMAIN: ${VRRELAY_DOMAIN:?Set the public relay domain}
+      VRRELAY_INGEST_DOMAIN: ${VRRELAY_INGEST_DOMAIN:?Set the public WHIP ingest domain}
+      VRRELAY_INGEST_UPSTREAM: ${VRRELAY_INGEST_UPSTREAM:-mediamtx:8889}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the ACME account email}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

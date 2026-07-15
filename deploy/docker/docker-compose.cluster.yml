@@ -1,0 +1,199 @@
+name: vrrelay-cluster
+
+x-relay-common: &relay-common
+  image: ${VRRELAY_IMAGE:-vrrelay:local}
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    valkey: { condition: service_healthy }
+    minio-init: { condition: service_completed_successfully }
+  environment: &relay-environment
+    VRRELAY_LISTEN_ADDR: 0.0.0.0:8099
+    VRRELAY_REPOSITORY_DRIVER: postgres
+    VRRELAY_POSTGRES_URL: postgres://vrrelay:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/vrrelay
+    VRRELAY_COORDINATION_DRIVER: valkey
+    VRRELAY_VALKEY_URL: redis://valkey:6379
+    VRRELAY_OBJECT_STORE_DRIVER: s3
+    VRRELAY_OBJECT_STORE_BUCKET: vrrelay
+    VRRELAY_OBJECT_STORE_PREFIX: segments
+    VRRELAY_S3_ENDPOINT: http://minio:9000
+    VRRELAY_S3_REGION: us-east-1
+    VRRELAY_MASTER_KEY: ${VRRELAY_MASTER_KEY:?Set VRRELAY_MASTER_KEY}
+    VRRELAY_MEDIAMTX_READ_TOKEN: ${VRRELAY_MEDIAMTX_READ_TOKEN:?Set VRRELAY_MEDIAMTX_READ_TOKEN}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vrrelay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: vrrelay
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      { test: [CMD-SHELL, pg_isready -U vrrelay], interval: 5s, timeout: 3s, retries: 20 }
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: [valkey-server, --appendonly, yes]
+    volumes: [valkey-data:/data]
+    healthcheck: { test: [CMD, valkey-cli, ping], interval: 5s, timeout: 3s, retries: 20 }
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes: [minio-data:/data]
+    healthcheck: { test: [CMD, mc, ready, local], interval: 5s, timeout: 3s, retries: 20 }
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on: { minio: { condition: service_healthy } }
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set -- local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/vrrelay
+        mc anonymous set private local/vrrelay
+        mc admin policy create local vrrelay-read /policies/read.json
+        mc admin policy create local vrrelay-write /policies/write.json
+        mc admin user add -- local "$${MINIO_CONTROLLER_USER}" "$${MINIO_CONTROLLER_PASSWORD}"
+        mc admin user add -- local "$${MINIO_SOURCE_USER}" "$${MINIO_SOURCE_PASSWORD}"
+        mc admin user add -- local "$${MINIO_EDGE_USER}" "$${MINIO_EDGE_PASSWORD}"
+        mc admin user add -- local "$${MINIO_INGEST_USER}" "$${MINIO_INGEST_PASSWORD}"
+        mc admin policy attach local vrrelay-read --user "$${MINIO_CONTROLLER_USER}"
+        mc admin policy attach local vrrelay-write --user "$${MINIO_SOURCE_USER}"
+        mc admin policy attach local vrrelay-read --user "$${MINIO_EDGE_USER}"
+        mc admin policy attach local vrrelay-read --user "$${MINIO_INGEST_USER}"
+        mc ilm rule add --expire-days 1 --prefix segments/ local/vrrelay || true
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_CONTROLLER_USER: ${MINIO_CONTROLLER_USER:?Set MINIO_CONTROLLER_USER}
+      MINIO_CONTROLLER_PASSWORD: ${MINIO_CONTROLLER_PASSWORD:?Set MINIO_CONTROLLER_PASSWORD}
+      MINIO_SOURCE_USER: ${MINIO_SOURCE_USER:?Set MINIO_SOURCE_USER}
+      MINIO_SOURCE_PASSWORD: ${MINIO_SOURCE_PASSWORD:?Set MINIO_SOURCE_PASSWORD}
+      MINIO_EDGE_USER: ${MINIO_EDGE_USER:?Set MINIO_EDGE_USER}
+      MINIO_EDGE_PASSWORD: ${MINIO_EDGE_PASSWORD:?Set MINIO_EDGE_PASSWORD}
+      MINIO_INGEST_USER: ${MINIO_INGEST_USER:?Set MINIO_INGEST_USER}
+      MINIO_INGEST_PASSWORD: ${MINIO_INGEST_PASSWORD:?Set MINIO_INGEST_PASSWORD}
+    volumes: [./minio-policies:/policies:ro]
+
+  controller:
+    <<: *relay-common
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile }
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_ID: controller-1
+      VRRELAY_NODE_NAME: Controller
+      VRRELAY_NODE_REGION: ${VRRELAY_CONTROLLER_REGION:-home}
+      VRRELAY_NODE_ROLES: controller
+      VRRELAY_PUBLIC_URL: ${VRRELAY_PUBLIC_URL:?Set VRRELAY_PUBLIC_URL}
+      VRRELAY_SETUP_TOKEN: ${VRRELAY_SETUP_TOKEN:?Set VRRELAY_SETUP_TOKEN for first-run initialization}
+      VRRELAY_AGENT_LISTEN_ADDR: 0.0.0.0:8100
+      VRRELAY_AGENT_TLS_NAMES: controller,${VRRELAY_AGENT_PUBLIC_HOST:-controller}
+      VRRELAY_S3_ACCESS_KEY_ID: ${MINIO_CONTROLLER_USER:?Set MINIO_CONTROLLER_USER}
+      VRRELAY_S3_SECRET_ACCESS_KEY: ${MINIO_CONTROLLER_PASSWORD:?Set MINIO_CONTROLLER_PASSWORD}
+      VRRELAY_MEDIAMTX_RTMP_URL: ${VRRELAY_RTMP_URL:?Set VRRELAY_RTMP_URL}
+      VRRELAY_MEDIAMTX_SRT_URL: ${VRRELAY_SRT_URL:?Set VRRELAY_SRT_URL}
+      VRRELAY_MEDIAMTX_WHIP_URL: ${VRRELAY_WHIP_URL:?Set VRRELAY_WHIP_URL}
+    volumes: [controller-data:/data, controller-cache:/cache]
+    ports: [8099:8099, 8101:8100]
+
+  source-worker:
+    <<: *relay-common
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Source worker 1
+      VRRELAY_NODE_REGION: ${VRRELAY_SOURCE_REGION:-home}
+      VRRELAY_NODE_ROLES: source-worker
+      VRRELAY_PUBLIC_URL: ${VRRELAY_SOURCE_PUBLIC_URL:-https://source-worker.invalid}
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${VRRELAY_SOURCE_JOIN_TOKEN:-}
+      VRRELAY_S3_ACCESS_KEY_ID: ${MINIO_SOURCE_USER:?Set MINIO_SOURCE_USER}
+      VRRELAY_S3_SECRET_ACCESS_KEY: ${MINIO_SOURCE_PASSWORD:?Set MINIO_SOURCE_PASSWORD}
+    volumes: [source-data:/data, source-cache:/cache]
+
+  ingest-origin:
+    <<: *relay-common
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_NAME: Ingest origin 1
+      VRRELAY_NODE_REGION: ${VRRELAY_INGEST_REGION:-home}
+      VRRELAY_NODE_ROLES: ingest-origin
+      VRRELAY_PUBLIC_URL: ${VRRELAY_INGEST_PUBLIC_URL:-https://ingest-origin.invalid}
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${VRRELAY_INGEST_JOIN_TOKEN:-}
+      VRRELAY_S3_ACCESS_KEY_ID: ${MINIO_INGEST_USER:?Set MINIO_INGEST_USER}
+      VRRELAY_S3_SECRET_ACCESS_KEY: ${MINIO_INGEST_PASSWORD:?Set MINIO_INGEST_PASSWORD}
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-origin:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-origin:8554
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-origin:8888
+      VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
+    volumes: [ingest-data:/data, ingest-cache:/cache]
+
+  mediamtx-origin:
+    image: bluenviron/mediamtx:1.18.2
+    restart: unless-stopped
+    depends_on: { ingest-origin: { condition: service_started } }
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://controller:8099/internal/mediamtx/auth
+      MTX_API: 'yes'
+      MTX_APIADDRESS: :9997
+      MTX_HLSVARIANT: mpegts
+      MTX_PATHDEFAULTS_SRTREADPASSPHRASE: ${VRRELAY_LIVE_SRT_PASSPHRASE:-}
+      MTX_WEBRTCLOCALUDPADDRESS: :8189
+      MTX_WEBRTCADDITIONALHOSTS: ${VRRELAY_WEBRTC_ADDITIONAL_HOSTS:-}
+    ports: [1935:1935, 8889:8889, '8189:8189/udp', '8890:8890/udp']
+
+  edge:
+    <<: *relay-common
+    environment:
+      <<: *relay-environment
+      VRRELAY_NODE_ID: edge-1
+      VRRELAY_NODE_NAME: Edge 1
+      VRRELAY_NODE_REGION: ${VRRELAY_EDGE_REGION:-home}
+      VRRELAY_NODE_ROLES: edge
+      VRRELAY_PUBLIC_URL: ${VRRELAY_EDGE_PUBLIC_URL:?Set VRRELAY_EDGE_PUBLIC_URL}
+      VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
+      VRRELAY_CONTROLLER_ENROLLMENT_URL: http://controller:8099
+      VRRELAY_NODE_JOIN_TOKEN: ${VRRELAY_EDGE_JOIN_TOKEN:-}
+      VRRELAY_S3_ACCESS_KEY_ID: ${MINIO_EDGE_USER:?Set MINIO_EDGE_USER}
+      VRRELAY_S3_SECRET_ACCESS_KEY: ${MINIO_EDGE_PASSWORD:?Set MINIO_EDGE_PASSWORD}
+      VRRELAY_MEDIAMTX_HLS_URL: http://mediamtx-edge:8888
+      VRRELAY_MEDIAMTX_API_URL: http://mediamtx-edge:9997
+      VRRELAY_MEDIAMTX_RTSP_URL: rtsp://mediamtx-edge:8554
+      VRRELAY_LIVE_ORIGIN_URL: srt://mediamtx-origin:8890
+      VRRELAY_LIVE_SRT_PASSPHRASE: ${VRRELAY_LIVE_SRT_PASSPHRASE:-}
+    volumes: [edge-data:/data, edge-cache:/cache]
+    ports: [8100:8099]
+
+  mediamtx-edge:
+    image: bluenviron/mediamtx:1.18.2
+    restart: unless-stopped
+    volumes: [./mediamtx-edge.yml:/mediamtx.yml:ro]
+    environment:
+      MTX_AUTHMETHOD: http
+      MTX_AUTHHTTPADDRESS: http://edge:8099/internal/mediamtx/auth
+      MTX_HLSVARIANT: mpegts
+
+volumes:
+  postgres-data:
+  valkey-data:
+  minio-data:
+  controller-data:
+  controller-cache:
+  edge-data:
+  edge-cache:
+  source-data:
+  source-cache:
+  ingest-data:
+  ingest-cache:

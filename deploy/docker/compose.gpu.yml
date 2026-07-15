@@ -1,0 +1,14 @@
+# Merge with docker-compose.yml and enable only the matching host example.
+services:
+  relay:
+    devices:
+      # Intel QSV / VA-API
+      - /dev/dri:/dev/dri
+    # NVIDIA example (requires NVIDIA Container Toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]

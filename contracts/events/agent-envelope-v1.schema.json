@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vrrelay.local/contracts/events/agent-envelope-v1.schema.json",
+  "title": "AgentEnvelopeV1",
+  "type": "object",
+  "required": ["version", "id", "sequence", "kind", "sentAt", "payload"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "heartbeat",
+        "capabilities",
+        "job.offer",
+        "job.accept",
+        "job.reject",
+        "job.progress",
+        "job.complete",
+        "job.fail",
+        "job.cancel",
+        "drain",
+        "certificate.rotate",
+        "certificate.rotated",
+        "log",
+        "response",
+        "error",
+        "provider.bind",
+        "provider.unbind",
+        "provider.browse",
+        "provider.item",
+        "provider.validate",
+        "provider.activity"
+      ]
+    },
+    "sentAt": { "type": "string", "format": "date-time" },
+    "replyTo": { "type": "string" },
+    "deadlineAt": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

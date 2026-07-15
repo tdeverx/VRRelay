@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "apps/**/*.test.ts",
+    "packages/**/*.test.ts",
+    "script/**/*.test.ts",
+    "vitest.config.ts"
+  ]
+}

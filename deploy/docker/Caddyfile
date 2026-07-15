@@ -1,0 +1,12 @@
+{
+  email {$ACME_EMAIL}
+}
+
+{$VRRELAY_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy relay:8099
+}
+
+{$VRRELAY_INGEST_DOMAIN} {
+  reverse_proxy {$VRRELAY_INGEST_UPSTREAM}
+}
