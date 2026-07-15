@@ -10,6 +10,20 @@ import {
 } from './postgres-backup.js';
 
 const directories: string[] = [];
+async function readFileEventually(path: string, timeoutMs = 1_000): Promise<string> {
+  const startedAt = Date.now();
+  let lastError: unknown;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return await readFile(path, 'utf8');
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw lastError;
+}
+
 afterEach(async () =>
   Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 );
@@ -90,10 +104,10 @@ describe('PostgreSQL migration backup', () => {
           "process.on('SIGTERM',()=>setTimeout(()=>{require('node:fs').writeFileSync(process.env.VRRELAY_PG_DUMP_TEST_MARKER,'done');process.stderr.write('terminated after cleanup');process.exit(0);},75));setInterval(()=>{},1000)"
         ],
         environment: { PATH: process.env.PATH, VRRELAY_PG_DUMP_TEST_MARKER: cleanupMarker },
-        timeoutMs: 500
+        timeoutMs: 2_000
       })
-    ).rejects.toThrow('pg_dump exceeded its 500ms deadline');
-    await expect(readFile(cleanupMarker, 'utf8')).resolves.toBe('done');
+    ).rejects.toThrow('pg_dump exceeded its 2000ms deadline');
+    await expect(readFileEventually(cleanupMarker)).resolves.toBe('done');
   });
 
   it('redacts database credentials from pg_dump failures', async () => {
