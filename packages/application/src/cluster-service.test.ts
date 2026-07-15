@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ClusterNode } from '@vrrelay/domain';
+import type { AgentLogEntry, ClusterNode } from '@vrrelay/domain';
 import { SqliteRepository } from '../../adapters/src/sqlite-repository.js';
 import { MemoryCoordinationStore } from '../../adapters/src/local-infrastructure.js';
 import {
@@ -48,6 +48,17 @@ function edgeNode(
     lastHeartbeatAt: now,
     createdAt: now,
     updatedAt: now
+  };
+}
+
+function agentLog(id: string, nodeId: string, timestamp: string): AgentLogEntry {
+  return {
+    id,
+    nodeId,
+    level: 'info',
+    message: `log ${id}`,
+    context: { id },
+    timestamp
   };
 }
 
@@ -142,6 +153,44 @@ describe('cluster service', () => {
     await expect(
       new StaticTrafficDirector({ region: 'eu-west' }).selectEdge('session-a', nodes)
     ).resolves.toMatchObject({ id: 'edge-west' });
+  });
+
+  it('applies bounded agent log retention and query limits', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-agent-log-retention-'));
+    dirs.push(dir);
+    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    await repository.migrate();
+    const events = new InMemoryEventBus();
+    const cluster = new ClusterService(
+      repository,
+      new MemoryCoordinationStore(),
+      new BuiltinTrafficDirector(),
+      events,
+      undefined,
+      { agentLogRetentionRows: 2, agentLogQueryLimit: 1 }
+    );
+    const base = Date.now();
+
+    await cluster.recordLog(agentLog('log-1', 'node-a', new Date(base).toISOString()));
+    await cluster.recordLog(agentLog('log-2', 'node-a', new Date(base + 1).toISOString()));
+    await cluster.recordLog(agentLog('log-3', 'node-a', new Date(base + 2).toISOString()));
+    await cluster.recordLog(agentLog('other-node', 'node-b', new Date(base + 3).toISOString()));
+
+    expect((await repository.listAgentLogs('node-a', 10)).map((entry) => entry.id)).toEqual([
+      'log-3',
+      'log-2'
+    ]);
+    expect((await cluster.logs('node-a', 10)).map((entry) => entry.id)).toEqual(['log-3']);
+    expect((await repository.listAgentLogs('node-b', 10)).map((entry) => entry.id)).toEqual([
+      'other-node'
+    ]);
+    expect(events.recent(1)).toMatchObject([
+      {
+        id: 'other-node',
+        type: 'node.log',
+        payload: { nodeId: 'node-b', level: 'info', message: 'log other-node' }
+      }
+    ]);
   });
 
   it('consumes join tokens once and honors draining edges', async () => {

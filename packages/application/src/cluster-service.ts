@@ -26,6 +26,8 @@ const JOIN_PREFIX = 'cluster:join:';
 const JOIN_CONSUME_LEASE_MS = 60_000;
 const JOIN_ENROLLMENT_RETRY_MS = 5 * 60_000;
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
+const DEFAULT_AGENT_LOG_RETENTION_ROWS = 1000;
+const DEFAULT_AGENT_LOG_QUERY_LIMIT = 200;
 
 interface JoinEnrollmentClaim {
   csrSha256: string;
@@ -49,6 +51,11 @@ export interface EnrollNodeInput {
   internalUrl?: string;
   capabilities: NodeCapability;
   csrPem: string;
+}
+
+export interface ClusterServiceOptions {
+  agentLogRetentionRows?: number;
+  agentLogQueryLimit?: number;
 }
 
 export class BuiltinTrafficDirector implements TrafficDirector {
@@ -188,7 +195,8 @@ export class ClusterService {
     private readonly coordination: CoordinationStore,
     private readonly director: TrafficDirector,
     private readonly events: EventBus,
-    private readonly certificates?: CertificateAuthority
+    private readonly certificates?: CertificateAuthority,
+    private readonly options: ClusterServiceOptions = {}
   ) {}
 
   async createJoinToken(input: {
@@ -457,11 +465,26 @@ export class ClusterService {
       'Provider binding deletion conflicted with repeated concurrent updates'
     );
   }
-  async logs(nodeId: string, limit = 200): Promise<AgentLogEntry[]> {
-    return this.repository.listAgentLogs(nodeId, limit);
+  async logs(nodeId: string, limit = this.#agentLogQueryLimit()): Promise<AgentLogEntry[]> {
+    return this.repository.listAgentLogs(
+      nodeId,
+      Math.min(this.#agentLogQueryLimit(), Math.max(1, Math.floor(limit)))
+    );
   }
   async recordLog(entry: AgentLogEntry): Promise<void> {
-    await this.repository.putAgentLog(entry);
+    await this.repository.putAgentLog(entry, this.#agentLogRetentionRows());
+    this.events.publish({
+      version: 1,
+      id: entry.id,
+      type: 'node.log',
+      timestamp: entry.timestamp,
+      payload: {
+        nodeId: entry.nodeId,
+        level: entry.level,
+        message: entry.message,
+        context: entry.context
+      }
+    });
   }
 
   async registerLocal(
@@ -682,6 +705,20 @@ export class ClusterService {
     )
       throw new ConflictError('Join token is invalid, expired, or already used');
     return current.value;
+  }
+
+  #agentLogRetentionRows(): number {
+    return Math.max(
+      1,
+      Math.floor(this.options.agentLogRetentionRows ?? DEFAULT_AGENT_LOG_RETENTION_ROWS)
+    );
+  }
+
+  #agentLogQueryLimit(): number {
+    return Math.max(
+      1,
+      Math.floor(this.options.agentLogQueryLimit ?? DEFAULT_AGENT_LOG_QUERY_LIMIT)
+    );
   }
 
   #hash(value: string): string {

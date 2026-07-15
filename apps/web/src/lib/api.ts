@@ -270,7 +270,10 @@ export const api = {
     ),
   revokeNode: (nodeId: string) =>
     request<ClusterNode>(`/api/v1/nodes/${nodeId}/revoke`, json('POST', {})),
-  nodeLogs: (nodeId: string) => request<{ items: AgentLogEntry[] }>(`/api/v1/nodes/${nodeId}/logs`),
+  nodeLogs: (nodeId: string, limit?: number) =>
+    request<{ items: AgentLogEntry[] }>(
+      `/api/v1/nodes/${nodeId}/logs${limit ? `?limit=${encodeURIComponent(String(limit))}` : ''}`
+    ),
   cacheInventory: (nodeId?: string) =>
     request<{ items: CachedObject[]; totalBytes: number }>(
       `/api/v1/cache${nodeId ? `?nodeId=${encodeURIComponent(nodeId)}` : ''}`

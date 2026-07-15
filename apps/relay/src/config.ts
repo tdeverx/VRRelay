@@ -140,6 +140,8 @@ const ConfigSchema = z
     controllerAgentUrl: agentUrl.optional(),
     controllerEnrollmentUrl: serviceUrl.optional(),
     nodeJoinToken: z.string().min(32).optional(),
+    agentLogRetentionRows: z.coerce.number().int().min(100).max(50_000).default(1000),
+    agentLogQueryLimit: z.coerce.number().int().min(1).max(1000).default(200),
     repositoryDriver: z.enum(['sqlite', 'postgres']).default('sqlite'),
     postgresUrl: z.string().optional(),
     pgDumpPath: z.string().min(1).default('pg_dump'),
@@ -330,6 +332,8 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_CONTROLLER_ENROLLMENT_URL
     ),
     nodeJoinToken: optionalEnvironmentValue(environment.VRRELAY_NODE_JOIN_TOKEN),
+    agentLogRetentionRows: environment.VRRELAY_AGENT_LOG_RETENTION_ROWS,
+    agentLogQueryLimit: environment.VRRELAY_AGENT_LOG_QUERY_LIMIT,
     repositoryDriver: environment.VRRELAY_REPOSITORY_DRIVER,
     postgresUrl: optionalEnvironmentValue(environment.VRRELAY_POSTGRES_URL),
     pgDumpPath: optionalEnvironmentValue(environment.VRRELAY_PG_DUMP),

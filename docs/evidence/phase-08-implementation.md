@@ -38,6 +38,10 @@ operations, destructive, benchmark, deployment, or release-candidate evidence.
   alongside the built-in and webhook traffic directors. It can pin playback to
   an exact online edge or to a configured region without storing webhook
   endpoints or secrets, and pinned-node region mismatches fail closed.
+- Agent logs now have explicit per-node retention and query caps controlled by
+  `VRRELAY_AGENT_LOG_RETENTION_ROWS` and `VRRELAY_AGENT_LOG_QUERY_LIMIT`.
+  Redacted node logs are persisted, exposed through bounded list responses, and
+  emitted as `node.log` events on the authenticated operations stream.
 
 ## Lean guardrails run
 
@@ -56,8 +60,11 @@ npm run generate:api
 npx vitest run apps/relay/src/server.test.ts -t "readiness"
 npx vitest run apps/relay/src/backend-service.test.ts -t "static routing"
 npx vitest run packages/application/src/cluster-service.test.ts -t "static edge"
+npx vitest run packages/application/src/cluster-service.test.ts -t "agent log retention"
+npx vitest run apps/relay/src/config.test.ts -t "agent log retention"
 npx vitest run packages/application/src/services.test.ts
 npm run check:api
+npm run check:agent-protocol-schema
 npm run check --workspace @vrrelay/contracts
 npm run check --workspace @vrrelay/relay
 npm run check --workspace @vrrelay/application
@@ -65,7 +72,7 @@ npm run check --workspace @vrrelay/web
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 365 tests with 23
+Result: all commands passed. The local full CI gate passed 367 tests with 23
 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 8 and final high-pass verification
@@ -73,7 +80,8 @@ intentional skips and reported zero npm vulnerabilities.
 - Per-node egress metrics beyond the current aggregate viewer/egress, queue,
   job, cache, object, worker, ingest-state, publisher reconnect, and
   normalizer counters.
-- Bounded structured node/job log streaming and retention controls.
+- Job-level log streaming and retention controls beyond the current bounded
+  node-agent log stream.
 - Benchmark scenarios and retained benchmark metadata.
 - Destructive operations evidence under real repository, coordination, object
   storage, MediaMTX, and agent-listener failures.

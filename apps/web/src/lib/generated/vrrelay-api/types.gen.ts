@@ -1504,7 +1504,9 @@ export type ListNodeLogsData = {
     path: {
         nodeId: string;
     };
-    query?: never;
+    query?: {
+        limit?: number;
+    };
     url: '/nodes/{nodeId}/logs';
 };
 

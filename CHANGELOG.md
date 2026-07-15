@@ -45,6 +45,8 @@ retained evidence belong in the
   exporter with lifecycle, persistence-order, and delivery-health tests.
 - Static traffic routing that can pin playback to a configured edge node or
   region without depending on an external routing webhook.
+- Configurable bounded agent-log retention, capped node-log list queries, and
+  redacted `node.log` events on the authenticated operations stream.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone
   composition roots with explicit runtime dependency graphs, role-owned HTTP
   surfaces, schema-startup policy, and ordered shutdown.

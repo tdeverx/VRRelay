@@ -202,7 +202,7 @@ export interface ClusterRepository {
   listNodeCertificates(nodeId: string): Promise<NodeCertificateState[]>;
   rotateNodeCertificate(update: NodeCertificateRotation): Promise<AtomicWriteResult<ClusterNode>>;
   revokeNode(update: NodeRevocation): Promise<AtomicWriteResult<ClusterNode>>;
-  putAgentLog(entry: AgentLogEntry): Promise<void>;
+  putAgentLog(entry: AgentLogEntry, retentionRows?: number): Promise<void>;
   listAgentLogs(nodeId: string, limit?: number): Promise<AgentLogEntry[]>;
   getVersionedNode(id: string): Promise<VersionedRecord<ClusterNode> | undefined>;
   recordNodeHeartbeat(update: NodeHeartbeatUpdate): Promise<AtomicWriteResult<ClusterNode>>;

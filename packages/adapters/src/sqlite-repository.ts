@@ -1837,16 +1837,16 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
       .all(nodeId) as Array<{ json: string }>;
     return rows.map((row) => JSON.parse(row.json) as NodeCertificateState);
   }
-  async putAgentLog(value: AgentLogEntry): Promise<void> {
+  async putAgentLog(value: AgentLogEntry, retentionRows = 1000): Promise<void> {
     this.#db
       .prepare('INSERT OR REPLACE INTO agent_logs(id,node_id,json,timestamp) VALUES(?,?,?,?)')
       .run(value.id, value.nodeId, JSON.stringify(value), value.timestamp);
     this.#db
       .prepare(
         `DELETE FROM agent_logs WHERE node_id=? AND id NOT IN
-      (SELECT id FROM agent_logs WHERE node_id=? ORDER BY timestamp DESC LIMIT 1000)`
+      (SELECT id FROM agent_logs WHERE node_id=? ORDER BY timestamp DESC LIMIT ?)`
       )
-      .run(value.nodeId, value.nodeId);
+      .run(value.nodeId, value.nodeId, retentionRows);
   }
   async listAgentLogs(nodeId: string, limit = 200): Promise<AgentLogEntry[]> {
     const rows = this.#db

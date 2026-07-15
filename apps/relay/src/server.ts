@@ -45,6 +45,7 @@ import {
   CreateProviderBindingRequestSchema,
   DeleteProviderBindingQuerySchema,
   RotateNodeCertificateRequestSchema,
+  NodeLogsQuerySchema,
   CacheInventoryQuerySchema,
   CacheEvictionRequestSchema,
   BackendValidationRequestSchema,
@@ -812,8 +813,9 @@ export async function createServer(
   });
   app.get('/api/v1/nodes/:nodeId/logs', async (request) => {
     await authenticate(request, ['admin']);
+    const query = parse(NodeLogsQuerySchema, request.query);
     return {
-      items: await services.cluster.logs((request.params as { nodeId: string }).nodeId, 200)
+      items: await services.cluster.logs((request.params as { nodeId: string }).nodeId, query.limit)
     };
   });
   app.delete('/api/v1/nodes/:nodeId', async (request, reply) => {

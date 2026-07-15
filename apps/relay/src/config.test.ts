@@ -154,6 +154,24 @@ describe('relay configuration', () => {
     );
   });
 
+  it('parses bounded agent log retention controls', () => {
+    expect(loadConfig({})).toMatchObject({
+      agentLogRetentionRows: 1000,
+      agentLogQueryLimit: 200
+    });
+    expect(
+      loadConfig({
+        VRRELAY_AGENT_LOG_RETENTION_ROWS: '2500',
+        VRRELAY_AGENT_LOG_QUERY_LIMIT: '500'
+      })
+    ).toMatchObject({
+      agentLogRetentionRows: 2500,
+      agentLogQueryLimit: 500
+    });
+    expect(() => loadConfig({ VRRELAY_AGENT_LOG_RETENTION_ROWS: '99' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_AGENT_LOG_QUERY_LIMIT: '1001' })).toThrow();
+  });
+
   it('treats blank optional environment values as unset', () => {
     const config = loadConfig({
       VRRELAY_SETUP_TOKEN: '',

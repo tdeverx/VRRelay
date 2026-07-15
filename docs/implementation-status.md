@@ -239,6 +239,9 @@ pending.
 - The routing backend can now be switched between built-in hashing, static
   node/region routing, and the authenticated routing webhook through the
   backend service and cluster dashboard.
+- Agent logs are redacted on receipt, retained per node with configurable row
+  caps, bounded on list queries, and emitted as `node.log` events on the
+  authenticated operations stream.
 
 ## Known gaps in the audited checkout
 
@@ -272,7 +275,7 @@ pending.
   but the dashboard still uses a handwritten request facade and has unfinished
   session, placement, catalog, live, binding, job, metrics, realtime,
   mobile, keyboard, and accessibility workflows.
-- Per-node egress metrics, bounded structured logs, adapter contracts, browser
+- Per-node egress metrics, job-log streaming, adapter contracts, browser
   coverage, destructive cluster scenarios, and reproducible benchmark evidence
   remain release work.
 - Multi-host Compose, Kubernetes migration/TLS behavior, cloud-neutral VM

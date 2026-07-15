@@ -28,6 +28,7 @@
         "node.heartbeat",
         "node.draining",
         "node.offline",
+        "node.log",
         "job.queued",
         "job.leased",
         "job.completed",

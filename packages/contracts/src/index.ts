@@ -193,6 +193,10 @@ export type DeleteProviderBindingQuery = z.infer<typeof DeleteProviderBindingQue
 
 export const RotateNodeCertificateRequestSchema = z.object({}).strict();
 export type RotateNodeCertificateRequest = z.infer<typeof RotateNodeCertificateRequestSchema>;
+export const NodeLogsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(1000).optional()
+});
+export type NodeLogsQuery = z.infer<typeof NodeLogsQuerySchema>;
 export const CacheInventoryQuerySchema = z.object({
   nodeId: z.string().min(1).optional()
 });
@@ -295,6 +299,7 @@ export const RelayEventSchema = z.object({
     'node.heartbeat',
     'node.draining',
     'node.offline',
+    'node.log',
     'job.queued',
     'job.leased',
     'job.completed',

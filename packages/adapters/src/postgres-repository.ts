@@ -2046,15 +2046,15 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
       )
     ).rows.map((row) => row.document as NodeCertificateState);
   }
-  async putAgentLog(value: AgentLogEntry): Promise<void> {
+  async putAgentLog(value: AgentLogEntry, retentionRows = 1000): Promise<void> {
     await this.#pool.query(
-      'INSERT INTO agent_logs(id,node_id,document,timestamp) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET document=EXCLUDED.document',
+      'INSERT INTO agent_logs(id,node_id,document,timestamp) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET node_id=EXCLUDED.node_id, document=EXCLUDED.document, timestamp=EXCLUDED.timestamp',
       [value.id, value.nodeId, value, value.timestamp]
     );
     await this.#pool.query(
       `DELETE FROM agent_logs WHERE node_id=$1 AND id NOT IN
-      (SELECT id FROM agent_logs WHERE node_id=$1 ORDER BY timestamp DESC LIMIT 1000)`,
-      [value.nodeId]
+      (SELECT id FROM agent_logs WHERE node_id=$1 ORDER BY timestamp DESC LIMIT $2)`,
+      [value.nodeId, retentionRows]
     );
   }
   async listAgentLogs(nodeId: string, limit = 200): Promise<AgentLogEntry[]> {

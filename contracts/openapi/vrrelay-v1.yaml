@@ -318,7 +318,12 @@ paths:
     get:
       operationId: listNodeLogs
       tags: [Cluster]
-      parameters: [{ $ref: '#/components/parameters/NodeId' }]
+      parameters:
+        - { $ref: '#/components/parameters/NodeId' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000 }
       responses:
         '200': { $ref: '#/components/responses/LogList' }
 
