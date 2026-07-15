@@ -18,5 +18,27 @@ spec:
           image: '{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}'
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           args: ['node', 'apps/relay/dist/main.js', 'migrate']
+          env:
+            - { name: VRRELAY_ENVIRONMENT, value: production }
+            - { name: VRRELAY_PUBLIC_URL, value: {{ .Values.controller.publicUrl | quote }} }
+            - name: VRRELAY_TRUSTED_PROXY_CIDRS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.controller | quote }}
+                  key: VRRELAY_TRUSTED_PROXY_CIDRS
+            - { name: VRRELAY_NODE_ROLES, value: controller }
+            - { name: VRRELAY_DATA_DIR, value: /var/lib/vrrelay }
+            - { name: VRRELAY_REPOSITORY_DRIVER, value: postgres }
+            - name: VRRELAY_POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.controller | quote }}
+                  key: VRRELAY_POSTGRES_URL
           envFrom: [{ secretRef: { name: {{ .Values.secrets.controller | quote }} } }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/vrrelay }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
 {{- end }}

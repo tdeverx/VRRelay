@@ -28,6 +28,8 @@ retained evidence belong in the
   release, SBOM, provenance, and corresponding-source scaffolding.
 - Multi-host Compose role profiles with explicit service definitions and
   semantic checks for role-owned ports/listeners.
+- Kubernetes migration-hook PostgreSQL wiring with writable migration backup
+  storage and local template checks against SQLite fallback.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.

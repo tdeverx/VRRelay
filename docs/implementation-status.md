@@ -283,7 +283,8 @@ pending.
 - Adapter contracts, browser coverage, destructive cluster scenarios, and
   retained target-environment benchmark evidence remain release work.
 - Multi-host Compose now has explicit role profiles and semantic render checks,
-  but true multi-host boot evidence, Kubernetes migration/TLS behavior,
+  and the Helm migration hook now forces PostgreSQL with writable migration
+  backup storage, but true multi-host boot evidence, rendered Helm/TLS behavior,
   cloud-neutral VM provisioning, native installers, signing/notarization,
   supply-chain evidence, upgrade/rollback, and clean-target installation have
   not passed their release gates.
