@@ -6,6 +6,10 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed relay placement in standalone mode: selecting **This node** no longer locks the dashboard,
+  and the local source worker is now eligible for automatic placement without an agent connection
+  to itself.
+
 This section describes a prerelease foundation that is still being reconciled.
 It is not evidence that the repository, deployment targets, native packages, or
 VRChat compatibility have passed their release gates. Verified progress and

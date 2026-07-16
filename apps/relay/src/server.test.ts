@@ -29,6 +29,7 @@ import {
   liveHlsUpstreamUrl,
   liveOriginSourceUrl,
   meteredReadable,
+  placementNodeConnectivity,
   providerBindingDeletionAuditContext,
   redactRequestUrl,
   rotateNodeCertificateWithDelivery,
@@ -153,6 +154,17 @@ describe('HTTP log redaction', () => {
 });
 
 describe('control-plane HTTP surface matrix', () => {
+  it('treats the standalone runtime as connected without weakening controller placement', () => {
+    const disconnected = () => false;
+    const standalone = placementNodeConnectivity('standalone', 'local-node', disconnected);
+    const controller = placementNodeConnectivity('controller', 'local-node', disconnected);
+
+    expect(standalone?.('local-node')).toBe(true);
+    expect(standalone?.('remote-node')).toBe(false);
+    expect(controller?.('local-node')).toBe(false);
+    expect(placementNodeConnectivity('controller', 'local-node')).toBeUndefined();
+  });
+
   it.each([
     {
       surface: 'controller',
