@@ -27,14 +27,18 @@
   "workspaces": [
     "apps/relay",
     "apps/web",
-    "apps/windows",
     "packages/*"
   ],
   "overrides": {
     "@sveltejs/kit": {
-      "cookie": "2.0.1"
+      "cookie": "$cookie"
     },
-    "uuid": "$uuid"
+    "gaxios": {
+      "uuid": "14.0.1"
+    },
+    "teeny-request": {
+      "uuid": "14.0.1"
+    }
   },
   "scripts": {
     "benchmark": "node script/benchmark.mjs",
@@ -84,17 +88,15 @@
     "@hey-api/openapi-ts": "^0.99.0",
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
-    "cookie": "2.0.1",
+    "cookie": "0.7.2",
     "eslint": "^10.7.0",
-    "eslint-config-prettier": "^10.1.8",
     "globals": "^17.7.0",
     "prettier": "^3.9.5",
     "prettier-plugin-svelte": "^4.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
-    "typescript-compat": "npm:typescript@6.0.3",
+    "typescript-compat": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "^8.64.0",
-    "uuid": "14.0.1",
     "vitest": "^4.1.10",
     "zod": "^4.4.3"
   },

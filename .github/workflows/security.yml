@@ -4,7 +4,6 @@ on:
   pull_request:
   schedule: [{ cron: '17 4 * * 1' }]
 permissions: { contents: read, security-events: write }
-env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
 jobs:
   audit:
     runs-on: ubuntu-latest

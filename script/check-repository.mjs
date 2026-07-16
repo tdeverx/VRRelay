@@ -28,6 +28,34 @@ async function files(directory) {
 
 const repositoryFiles = await files(root);
 const failures = [];
+const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
+const rootLock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
+
+if (rootPackage.devDependencies?.['typescript-compat'] !== 'npm:@typescript/typescript6@6.0.2')
+  failures.push('TypeScript API tooling must use the official TypeScript 6 compatibility package');
+if (rootPackage.overrides?.['@sveltejs/kit']?.cookie !== '$cookie')
+  failures.push('SvelteKit must share the root API-compatible Cookie security release');
+if (rootPackage.devDependencies?.cookie !== '0.7.2')
+  failures.push('the root Cookie declaration must anchor SvelteKit compatibility at 0.7.2');
+for (const consumer of ['gaxios', 'teeny-request']) {
+  if (rootPackage.overrides?.[consumer]?.uuid !== '14.0.1')
+    failures.push(`${consumer} must use the patched UUID 14 security override`);
+}
+for (const removed of ['eslint-config-prettier', 'uuid']) {
+  if (rootPackage.dependencies?.[removed] || rootPackage.devDependencies?.[removed])
+    failures.push(`root package must not restore unused dependency ${removed}`);
+}
+if ((rootPackage.workspaces ?? []).includes('apps/windows'))
+  failures.push('the native Windows controller must not be restored as an npm workspace');
+for (const nativeTarget of [
+  '@node-rs/argon2-linux-x64-gnu',
+  '@node-rs/argon2-win32-x64-msvc',
+  '@tailwindcss/oxide-linux-x64-gnu',
+  '@tailwindcss/oxide-win32-x64-msvc'
+]) {
+  if (!rootLock.packages?.[`node_modules/${nativeTarget}`])
+    failures.push(`package lock must retain cross-platform optional target ${nativeTarget}`);
+}
 
 for (const required of [
   'CODE_OF_CONDUCT.md',
@@ -383,20 +411,18 @@ for (const artifact of ffmpegLinux) {
       failures.push(`FFmpeg source builder does not cover Linux recipe value ${value}`);
   }
 }
-const windowsPackage = JSON.parse(
-  await readFile(resolve(root, 'apps/windows/package.json'), 'utf8')
-);
-if (windowsPackage.devDependencies?.electron !== runtimeComponents.get('electron')?.version)
-  failures.push('Windows Electron build dependency differs from the bundled runtime manifest');
 const windowsPackager = await readFile(resolve(root, 'deploy/windows/package.ps1'), 'utf8');
 for (const required of [
-  runtimeComponents.get('electron')?.version,
   runtimeComponents.get('ffmpeg')?.artifacts?.['windows-x64']?.file,
-  'runtime-provenance.mjs'
+  'runtime-provenance.mjs',
+  'build-tray.ps1',
+  'VRRelayTray.exe'
 ]) {
   if (required && !windowsPackager.includes(required))
     failures.push(`Windows packager does not consume pinned runtime ${required}`);
 }
+if (runtimeComponents.has('electron') || /electron/i.test(windowsPackager))
+  failures.push('Windows packaging must not retain the removed Electron runtime');
 for (const required of ['release-version.mjs', 'VRRELAY_VERSION', '__VRRELAY_VERSION__']) {
   if (!windowsPackager.includes(required))
     failures.push(`Windows packager does not propagate release version through ${required}`);

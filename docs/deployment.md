@@ -97,12 +97,12 @@ For generic VMs, `deploy/opentofu` creates no cloud resources. It renders one se
 
 The Windows package registers the TypeScript relay with WinSW as an automatic service. That relay
 supervises the bundled MediaMTX process, and WinSW restarts the complete stack if either process
-fails. The Electron host is tray-only: it opens the dashboard in the system browser and exposes
-start, stop, and restart through Windows Service Control Manager. It may be closed independently
-without stopping the service. Release packaging supplies validated Node, FFmpeg
+fails. The native tray controller opens the dashboard in the system browser and exposes start,
+stop, and restart through Windows Service Control Manager. It may be closed independently without
+stopping the service. Release packaging supplies validated Node, FFmpeg
 (AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
 
-The Windows packager downloads the immutable FFmpeg 8.1.2 BtbN GPL archive and Electron 43.1.1 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
+The Windows tray is a dependency-free Win32 C++ executable. It starts for the installing user at sign-in, opens the dashboard in the system browser, and requests UAC elevation only for service start, stop, or restart. The Windows packager builds it from checked-in source with the statically linked MSVC runtime, downloads the immutable FFmpeg 8.1.2 BtbN GPL archive represented in the runtime manifest, verifies runtime hashes before extraction, signs all bundled executables when credentials are available, and records finalized third-party runtime hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
 
 ## TLS modes
 

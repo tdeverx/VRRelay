@@ -19,18 +19,31 @@ Uninstallable=yes
 
 [Files]
 Source: "..\..\dist\windows\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\dist\windows\host\*"; DestDir: "{app}\host"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\dist\windows\VRRelay.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\windows\VRRelayTray.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\dist\windows\VRRelay.xml"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\VRRelay"; Permissions: admins-full system-full; Flags: uninsneveruninstall
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\host"
+Type: filesandordirs; Name: "{app}\runtime\apps\windows"
+
+[Tasks]
+Name: "startuptray"; Description: "Start the VRRelay tray controller when I sign in"; Flags: checkedonce
+
+[Icons]
+Name: "{group}\VRRelay Dashboard and Controls"; Filename: "{app}\VRRelayTray.exe"
+Name: "{userstartup}\VRRelay Tray"; Filename: "{app}\VRRelayTray.exe"; Tasks: startuptray
+
 [Run]
 Filename: "{app}\VRRelay.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\VRRelay.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
+Filename: "{app}\VRRelayTray.exe"; Description: "Open VRRelay dashboard controls"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "{app}\VRRelayTray.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\VRRelay.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\VRRelay.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 

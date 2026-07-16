@@ -190,23 +190,6 @@
       }
     },
     {
-      "name": "electron",
-      "version": "43.1.1",
-      "license": "MIT",
-      "source": "https://github.com/electron/electron/releases/tag/v43.1.1",
-      "capabilities": ["windows-tray-host"],
-      "artifacts": {
-        "darwin-arm64": {
-          "file": "electron-v43.1.1-darwin-arm64.zip",
-          "sha256": "d6d0598d042ef4d146278d08d84deac9dde145eae31eb4f32ef46206d6bd6169"
-        },
-        "win32-x64": {
-          "file": "electron-v43.1.1-win32-x64.zip",
-          "sha256": "b4e9995cd3f65785eb8818276aa9020f3165ab11da41b3c762616d4a0ad8c7ad"
-        }
-      }
-    },
-    {
       "name": "winsw",
       "version": "2.12.0",
       "license": "MIT",

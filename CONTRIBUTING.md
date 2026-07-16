@@ -24,8 +24,16 @@ Optional tools depend on the area being changed:
 - MediaMTX 1.19.2 for OBS/live work.
 - Docker with Compose for deployment and distributed integration work.
 - Swift 6.3 and macOS 15 for the menu controller.
-- Windows x64, PowerShell, Inno Setup 6, and WinSW for Windows packaging.
+- Windows x64, PowerShell, MSVC x64 Build Tools, Inno Setup 6, and WinSW for Windows packaging.
 - Helm 4.2.3 for Kubernetes chart work.
+
+TypeScript 7 remains the project compiler, while the `typescript-compat` alias intentionally uses
+Microsoft's `@typescript/typescript6` package for tools that require the compiler API. The direct
+Cookie 0.7.2 declaration anchors SvelteKit's patched, API-compatible release; Fastify retains its
+nested Cookie 2 dependency. The UUID 14 override is limited to the vulnerable UUID 9 dependency
+paths in `gaxios` and `teeny-request`; UUID is not a direct project dependency. Dependency analyzers
+may report these configuration anchors as unused even though removing them breaks linting, Svelte
+checks, generation, builds, or the clean security audit.
 
 Set up a clean checkout with:
 

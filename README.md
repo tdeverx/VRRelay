@@ -54,7 +54,7 @@ production defaults. Experimental formats are not compatibility claims.
 - FFmpeg 8.1.2 with `libx264`, AAC, HLS, and MPEG-TS support.
 - Git.
 
-MediaMTX 1.19.2, Docker, Swift 6.3, Windows packaging tools, and Helm are needed
+MediaMTX 1.19.2, Docker, Swift 6.3, MSVC Windows packaging tools, and Helm are needed
 only for the corresponding live, deployment, or native workflows. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the complete tool matrix.
 
