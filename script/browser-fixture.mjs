@@ -16,15 +16,28 @@ await mkdir(dataDirectory, { recursive: true });
 await mkdir(cacheDirectory, { recursive: true });
 
 const jellyfinItems = [
-  { Id: 'movie-1', Name: 'Browser Movie', Type: 'Movie', ProductionYear: 2026 },
-  { Id: 'series-1', Name: 'Browser Series', Type: 'Series', ProductionYear: 2026 },
+  {
+    Id: 'movie-1',
+    Name: 'Browser Movie',
+    Type: 'Movie',
+    ProductionYear: 2026,
+    ImageTags: { Primary: 'movie-image' }
+  },
+  {
+    Id: 'series-1',
+    Name: 'Browser Series',
+    Type: 'Series',
+    ProductionYear: 2026,
+    ImageTags: { Primary: 'series-image' }
+  },
   {
     Id: 'season-1',
     Name: 'Season 1',
     Type: 'Season',
     ParentId: 'series-1',
     SeriesName: 'Browser Series',
-    IndexNumber: 1
+    IndexNumber: 1,
+    ImageTags: { Primary: 'season-image' }
   },
   {
     Id: 'episode-1',
@@ -36,6 +49,7 @@ const jellyfinItems = [
     IndexNumber: 2,
     ParentIndexNumber: 1,
     RunTimeTicks: 1_800_000_000,
+    ImageTags: { Primary: 'episode-image' },
     MediaStreams: [
       { Index: 0, Type: 'Video', Codec: 'h264', Width: 1920, Height: 1080 },
       {
@@ -103,6 +117,18 @@ const jellyfin = createServer(async (request, response) => {
   }
   if (request.method === 'GET' && url.pathname === '/System/Info') {
     send(200, { ServerName: 'Browser Jellyfin', Version: '10.11.0' });
+    return;
+  }
+  if (request.method === 'GET' && /^\/Items\/[^/]+\/Images\/Primary$/.test(url.pathname)) {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64'
+    );
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(png.length)
+    });
+    response.end(png);
     return;
   }
   if (request.method === 'GET' && url.pathname === '/Users/browser-user/Items') {

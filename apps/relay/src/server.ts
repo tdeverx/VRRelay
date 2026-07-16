@@ -793,22 +793,47 @@ export async function createServer(
 
   app.get('/api/v1/portal/catalog', async (request) => {
     const principal = await services.portal.authenticate(request);
-    return services.providers.browseAs(
+    const result = await services.providers.browseAs(
       principal.providerId,
       await services.portal.credential(principal),
       principal.userId,
       parse(CatalogQuerySchema, request.query)
     );
+    return {
+      ...result,
+      items: result.items.map((item) => ({
+        ...item,
+        imageUrl: `/api/v1/portal/items/${encodeURIComponent(item.id)}/image`
+      }))
+    };
   });
 
   app.get('/api/v1/portal/items/:itemId', async (request) => {
     const principal = await services.portal.authenticate(request);
-    return services.providers.itemAs(
+    const item = await services.providers.itemAs(
       principal.providerId,
       await services.portal.credential(principal),
       principal.userId,
       (request.params as { itemId: string }).itemId
     );
+    return {
+      ...item,
+      imageUrl: `/api/v1/portal/items/${encodeURIComponent(item.id)}/image`
+    };
+  });
+
+  app.get('/api/v1/portal/items/:itemId/image', async (request, reply) => {
+    const principal = await services.portal.authenticate(request);
+    const artwork = await services.providers.artworkAs(
+      principal.providerId,
+      await services.portal.credential(principal),
+      principal.userId,
+      (request.params as { itemId: string }).itemId
+    );
+    return reply
+      .type(artwork.contentType)
+      .header('Cache-Control', 'private, max-age=3600')
+      .send(Buffer.from(artwork.data));
   });
 
   app.get('/api/v1/portal/profiles', async (request) => {

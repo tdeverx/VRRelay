@@ -18,6 +18,42 @@ function response(
 }
 
 describe('Jellyfin request transport', () => {
+  it('loads artwork through the pinned authenticated transport', async () => {
+    const requests: JellyfinConnectorRequest[] = [];
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async (request) => {
+        requests.push(request);
+        return response(200, 'fixture-image', { 'content-type': 'image/jpeg' });
+      }
+    });
+    const now = new Date().toISOString();
+    const connection = {
+      id: 'provider',
+      type: 'jellyfin',
+      name: 'Jellyfin',
+      baseUrl: 'https://jellyfin.invalid',
+      authMode: 'delegated',
+      secretRef: 'provider:delegated',
+      capabilities: ['artwork'],
+      healthy: true,
+      allowPublicHttp: false,
+      createdAt: now,
+      updatedAt: now
+    } satisfies ProviderConnection;
+
+    await expect(provider.artwork(connection, 'sensitive-user-token', 'movie/1')).resolves.toEqual({
+      data: Buffer.from('fixture-image'),
+      contentType: 'image/jpeg'
+    });
+    expect(requests[0]?.url.pathname).toBe('/Items/movie%2F1/Images/Primary');
+    expect(requests[0]?.options.headers).toMatchObject({
+      Accept: 'image/*',
+      'X-Emby-Token': 'sensitive-user-token'
+    });
+  });
+
   it('rejects private HTTP that resolves publicly on the pinned connection lookup', async () => {
     const addresses = ['192.168.10.20', '203.0.113.10'];
     const lookup = async () => [{ address: addresses.shift()!, family: 4 }];

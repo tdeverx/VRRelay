@@ -1233,6 +1233,33 @@ export type GetPortalItemResponses = {
 
 export type GetPortalItemResponse = GetPortalItemResponses[keyof GetPortalItemResponses];
 
+export type GetPortalItemImageData = {
+    body?: never;
+    path: {
+        itemId: string;
+    };
+    query?: never;
+    url: '/portal/items/{itemId}/image';
+};
+
+export type GetPortalItemImageErrors = {
+    /**
+     * Request failed
+     */
+    404: ApiError;
+};
+
+export type GetPortalItemImageError = GetPortalItemImageErrors[keyof GetPortalItemImageErrors];
+
+export type GetPortalItemImageResponses = {
+    /**
+     * Provider artwork for a media item
+     */
+    200: Blob | File;
+};
+
+export type GetPortalItemImageResponse = GetPortalItemImageResponses[keyof GetPortalItemImageResponses];
+
 export type ListPortalProfilesData = {
     body?: never;
     path?: never;

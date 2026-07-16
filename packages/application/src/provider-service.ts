@@ -10,6 +10,7 @@ import { providerAllowsPublicHttp, publicProvider } from '@vrrelay/domain';
 import type { CatalogQuery, CreateProviderRequest } from '@vrrelay/contracts';
 import type {
   ClusterRepository,
+  MediaArtwork,
   PlaybackEvent,
   ProviderIdentity,
   ProviderRegistry,
@@ -315,6 +316,18 @@ export class ProviderService {
   ): Promise<MediaItem> {
     const connection = await this.#delegatedConnection(providerId);
     return this.providers.get(connection.type).item({ ...connection, userId }, accessToken, itemId);
+  }
+
+  async artworkAs(
+    providerId: string,
+    accessToken: string,
+    userId: string,
+    itemId: string
+  ): Promise<MediaArtwork> {
+    const connection = await this.#delegatedConnection(providerId);
+    const provider = this.providers.get(connection.type);
+    if (!provider.artwork) throw new NotFoundError('Artwork is not available for this provider');
+    return provider.artwork({ ...connection, userId }, accessToken, itemId);
   }
 
   async validate(providerId: string): Promise<void> {

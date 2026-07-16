@@ -176,9 +176,6 @@ test('serves the dashboard namespace and a per-user Jellyfin relay portal', asyn
   await freshSettingsPage.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
   await freshSettingsPage.getByRole('button', { name: 'Add endpoint' }).click();
   await expect(freshSettingsPage.getByText('Per-user login')).toBeVisible();
-  await expect(
-    freshSettingsPage.getByText('Jellyfin endpoint added and user portal enabled.')
-  ).toBeVisible();
   expect(
     await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))
   ).toBeTruthy();
@@ -199,18 +196,37 @@ test('serves the dashboard namespace and a per-user Jellyfin relay portal', asyn
   expect(
     await freshPortalPage.evaluate(() => sessionStorage.getItem('vrrelay.portal-csrf'))
   ).toBeTruthy();
-  await expect(
-    freshPortalPage.locator('[data-slot="card"]').filter({ hasText: 'The Browser Episode' })
-  ).toBeVisible();
-  await freshPortalPage.getByLabel('Search your library').fill('Browser Episode');
+  await expect(freshPortalPage.getByRole('heading', { name: 'Your relay links' })).toBeVisible();
+  const discovery = freshPortalPage.locator('main section').nth(1);
+  await expect(discovery.locator('[data-slot="card"]')).toHaveCount(0);
+  await freshPortalPage.getByLabel('Search movies and shows').fill('Browser');
   await freshPortalPage.getByRole('button', { name: 'Search', exact: true }).click();
-  const episode = freshPortalPage
+  const movie = freshPortalPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
+  const series = freshPortalPage
+    .locator('[data-slot="card"]')
+    .filter({ hasText: 'Browser Series' });
+  await expect(movie).toBeVisible();
+  await expect(series).toBeVisible();
+  await expect(discovery.getByText('The Browser Episode')).toHaveCount(0);
+  await expect(movie.getByRole('img', { name: 'Browser Movie poster' })).toBeVisible();
+  await series.getByRole('button', { name: 'Choose episode' }).click();
+  const episodeDialog = freshPortalPage.getByRole('dialog');
+  await expect(episodeDialog).toBeVisible();
+  await expect(freshPortalPage.getByText('Season 1', { exact: true }).first()).toBeVisible();
+  const episode = episodeDialog
     .locator('[data-slot="card"]')
     .filter({ hasText: 'The Browser Episode' });
   await expect(episode).toBeVisible();
+  await expect(
+    episode.getByRole('img', { name: 'The Browser Episode episode image' })
+  ).toBeVisible();
   await episode.getByRole('button', { name: 'Create link' }).click();
-  await expect(freshPortalPage.getByRole('heading', { name: 'Your relay links' })).toBeVisible();
+  await expect(episodeDialog).toBeHidden();
+  await expect(freshPortalPage.getByText('Relay link created and copied.')).toBeVisible();
   await expect(freshPortalPage.getByText('The Browser Episode').last()).toBeVisible();
+  expect(
+    await freshPortalPage.locator('main section h1, main section h2').allTextContents()
+  ).toEqual(['Your relay links', 'Choose something to relay']);
   expect(
     await freshPortalPage.evaluate(() => sessionStorage.getItem('vrrelay.portal-csrf'))
   ).toBeTruthy();

@@ -11,6 +11,9 @@ semantic versioning after the first public release.
   administrator Luma interface is also available under `/dashboard/*`; `/new/*` remains a preview
   alias, while the base URL selects the portal or dashboard unless the legacy interface was
   explicitly selected for the current browser session.
+- Refined portal discovery to stay empty until a user searches, return only movies and shows, and
+  open a show-specific season and episode chooser. Active relay links now stay above discovery, and
+  movie, show, season, and episode artwork is fetched through an authenticated same-origin proxy.
 - User Jellyfin passwords are now transient login inputs. Provider access tokens live in the secret
   backend for the browser session, and each created relay receives its own secret copy so logging
   out does not invalidate an existing playback link. User session listing and deletion are isolated

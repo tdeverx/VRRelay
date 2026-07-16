@@ -68,6 +68,11 @@ implementation: the session copies the user's provider token into a session-owne
 hashed owner identity in provider-neutral session metadata, and removes the secret with the session.
 Remote per-user credential staging is not inferred from administrator bindings.
 
+Portal discovery searches only top-level movies and shows. Selecting a show performs account-scoped
+season and episode browsing before a playable source can be selected. Provider artwork is streamed
+through an authenticated VRRelay endpoint so the browser never receives a provider access token or
+private provider URL.
+
 Binding identifiers are insert-only and ownership fields cannot be changed through CAS. Creation serializes on the target node and provider: the node must exist, be an unrevoked source worker, and the provider must match its expected revision/server and not be deleting. Concurrent/replayed creation reconciles to the committed binding and removes only the losing staged secret. If commit status cannot be read safely, the worker retains the staged credential for later reconciliation instead of risking deletion of a committed secret.
 
 Node removal follows the same dependency discipline. It requires the expected revision, a terminal `revoked` state, and no provider bindings; binding creation cannot target a missing, revoked, or non-source-worker node.

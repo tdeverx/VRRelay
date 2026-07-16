@@ -31,11 +31,12 @@ the Sidebar becomes a Sheet and dense tables become Card summaries. The legacy
 interface remains canonical until a separate, explicit visual and workflow
 approval authorizes cutover.
 
-The user portal intentionally has a smaller surface: Jellyfin login, account-scoped search,
-administrator-approved profile selection, relay-link creation/copying, and removal of the signed-in
-user's own links. Provider endpoint and profile policy live in administrator Settings. The portal
-does not expose cluster placement, encoding internals, live ingest, compatibility evidence, tokens,
-or runtime configuration.
+The user portal intentionally has a smaller surface: Jellyfin login, active links first, explicit
+movie/show search, a show-to-season-to-episode picker, provider artwork, administrator-approved
+profile selection, relay-link creation/copying, and removal of the signed-in user's own links.
+Discovery remains empty until a search is submitted. Provider endpoint and profile policy live in
+administrator Settings. The portal does not expose cluster placement, encoding internals, live
+ingest, compatibility evidence, tokens, or runtime configuration.
 
 ## Legacy Nova interface
 
