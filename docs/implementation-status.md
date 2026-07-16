@@ -286,9 +286,12 @@ pending.
   and the Helm migration hook now forces PostgreSQL with writable migration
   backup storage. Provider-neutral OpenTofu now renders role-specific VM
   cloud-init with persistent data/cache, MediaMTX sidecars, digest-pinned image
-  inputs, and post-enrollment join-token cleanup, but true multi-host boot
-  evidence, rendered Helm/TLS behavior, real cloud-VM boot evidence, native
-  installers, signing/notarization,
+  inputs, and post-enrollment join-token cleanup. PostgreSQL and SQLite
+  backup/restore scripts now create private atomic artifacts, validate schema
+  metadata, write checksum/metadata sidecars, support optional encryption, and
+  enforce rollback backups before restore, but true multi-host boot evidence,
+  rendered Helm/TLS behavior, live backup/restore rehearsal, real cloud-VM boot
+  evidence, native installers, signing/notarization,
   supply-chain evidence, upgrade/rollback, and clean-target installation have
   not passed their release gates.
 

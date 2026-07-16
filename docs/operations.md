@@ -23,7 +23,7 @@ VRRelay sends `{"type":"health"}` for validation. Selection requests contain `ty
 
 ## Backup, restore, upgrade, and rollback
 
-Back up PostgreSQL with `deploy/docker/backup.sh`, object-store configuration, TLS material, and each node's secret backend. Valkey is coordination state, not the authoritative backup. Test restores in an isolated cluster.
+Back up PostgreSQL or SQLite with `deploy/docker/backup.sh`, object-store configuration, TLS material, and each node's secret backend. Set `VRRELAY_REPOSITORY_DRIVER=postgres` with `POSTGRES_URL`, or `VRRELAY_REPOSITORY_DRIVER=sqlite` with `SQLITE_PATH` or `VRRELAY_DATA_DIR`. The script writes private atomic artifacts, validates schema metadata, writes `.sha256` and `.meta` sidecars, and can encrypt artifacts when `BACKUP_ENCRYPTION_PASSPHRASE_FILE` points at an operator-managed passphrase file. `deploy/docker/restore.sh` verifies checksums when sidecars are present and creates a rollback backup before destructive restore unless `RESTORE_SKIP_ROLLBACK_BACKUP=1` is set explicitly. For SQLite restores, stop VRRelay first and set `RESTORE_RELAY_STOPPED=1`; PostgreSQL restores run through `pg_restore --single-transaction --exit-on-error`. Valkey is coordination state, not the authoritative backup. Test restores in an isolated cluster.
 
 Before upgrading, take a backup and verify release checksums/SBOM. Drain non-controller roles one at a time, upgrade the single controller, then agents. Keep the previous artifacts and backup until VRChat smoke tests pass. Roll back binaries only with a compatible schema; otherwise restore the matching pre-upgrade database and node data. Native uninstallers retain data unless explicitly purged.
 

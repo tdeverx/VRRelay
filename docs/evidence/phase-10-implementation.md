@@ -44,6 +44,13 @@ release-candidate deployment evidence.
   `cluster:node-identity` appears in the encrypted file secret store.
 - `script/check-cloud-init.mjs` statically guards the OpenTofu/cloud-init
   contract without requiring provider credentials or an OpenTofu binary.
+- `deploy/docker/backup.sh` and `deploy/docker/restore.sh` now cover both
+  PostgreSQL and SQLite repositories. They create private atomic artifacts,
+  validate schema metadata and archive integrity, emit checksum/metadata
+  sidecars, support optional OpenSSL encryption, and make destructive restores
+  take a rollback backup unless explicitly bypassed.
+- `script/check-backup-restore.mjs` runs shell syntax checks and guards the
+  backup/restore hardening contract in local CI.
 
 ## Lean guardrails run
 
@@ -53,6 +60,9 @@ Commands:
 npm run check:compose
 npm run check:kubernetes
 npm run check:cloud-init
+npm run check:backup
+SQLite temp backup/restore rehearsal
+SQLite encrypted temp backup/restore rehearsal
 npm run ci
 ```
 
@@ -65,13 +75,19 @@ template checker confirmed that the migration hook cannot silently use SQLite
 defaults and that runtime deployments continue to load role-scoped Secrets. The
 cloud-init/OpenTofu checker confirmed role-specific VM user-data rendering,
 persistent data/cache mounts, digest-pinned image inputs, MediaMTX sidecars, and
-post-enrollment join-token cleanup. The local full CI gate passed 373 tests with
-23 intentional skips and reported zero npm vulnerabilities.
+post-enrollment join-token cleanup. The backup/restore checker confirmed shell
+syntax, PostgreSQL/SQLite coverage, artifact validation, checksum/metadata
+sidecars, optional encryption, and rollback-backup enforcement. Local temporary
+SQLite rehearsals restored schema versions from both plain and encrypted
+artifacts and created rollback backup sidecars before restore. The local full CI
+gate passed 373 tests with 23 intentional skips and reported zero npm
+vulnerabilities.
 
 ## Deferred to later Phase 10 and final high-pass verification
 
 - True multi-host-equivalent boot evidence with separate hosts or separate
   network namespaces.
 - Rendered Helm, Kubernetes TLS, network-policy, upgrade, and recovery evidence.
-- Backup/restore rehearsal, true cloud-VM boot evidence, release OCI digest
-  selection, GPU-path deployment evidence, and rollback evidence.
+- Live PostgreSQL/object-store/cluster backup-restore rehearsal, true cloud-VM
+  boot evidence, release OCI digest selection, GPU-path deployment evidence, and
+  rollback evidence.

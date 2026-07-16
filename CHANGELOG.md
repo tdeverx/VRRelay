@@ -33,6 +33,9 @@ retained evidence belong in the
 - Provider-neutral OpenTofu cloud-init rendering for role-specific VMs, with
   digest-pinned images, persistent node data/cache, MediaMTX sidecars, and
   post-enrollment join-token cleanup.
+- Hardened PostgreSQL and SQLite backup/restore scripts with private atomic
+  artifacts, schema validation, checksum/metadata sidecars, optional encryption,
+  and rollback-backup enforcement before destructive restores.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.
