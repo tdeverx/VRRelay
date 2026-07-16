@@ -31,7 +31,7 @@ describe('runtime configuration', () => {
     try {
       await persistRuntimeConfiguration(config, { ...configuration, maxWorkers: 6 });
       expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ maxWorkers: 6 });
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
       await expect(
         persistRuntimeConfiguration(config, { ...configuration, listenAddr: 'invalid' })
       ).rejects.toThrow();

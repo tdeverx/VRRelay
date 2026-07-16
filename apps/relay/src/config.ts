@@ -317,7 +317,8 @@ function readRuntimeConfiguration(path: string | undefined): RuntimeConfiguratio
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw new Error(
-      `VRRELAY_RUNTIME_CONFIG could not be loaded: ${error instanceof Error ? error.message : String(error)}`
+      `VRRELAY_RUNTIME_CONFIG could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 }
