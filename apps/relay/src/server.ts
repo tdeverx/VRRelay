@@ -93,6 +93,16 @@ export interface ProviderBindingDeletionOutcome {
 
 export type ControlPlaneHttpSurface = 'controller' | 'standalone';
 
+export function placementNodeConnectivity(
+  surface: ControlPlaneHttpSurface,
+  localNodeId: string,
+  agentConnected?: (nodeId: string) => boolean
+): ((nodeId: string) => boolean) | undefined {
+  if (surface === 'standalone')
+    return (nodeId) => nodeId === localNodeId || Boolean(agentConnected?.(nodeId));
+  return agentConnected;
+}
+
 export function isLoopbackPeer(address: string | undefined): boolean {
   if (!address) return false;
   const normalized = address.toLowerCase();
@@ -436,6 +446,13 @@ export async function createServer(
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID()
   });
+  const isPlacementNodeConnected = placementNodeConnectivity(
+    surface,
+    config.nodeId,
+    services.agentController
+      ? (nodeId) => Boolean(services.agentController?.connected(nodeId))
+      : undefined
+  );
 
   const configuredLivePaths = new Map<string, Promise<void>>();
   const ensureLiveEdgePath = async (path: string): Promise<void> => {
@@ -721,7 +738,10 @@ export async function createServer(
     return {
       items: (await services.cluster.list()).map((node) => ({
         ...node,
-        agent: services.agentController?.status(node.id) ?? { connected: false }
+        agent:
+          surface === 'standalone' && node.id === config.nodeId
+            ? { connected: true }
+            : (services.agentController?.status(node.id) ?? { connected: false })
       }))
     };
   });
@@ -880,12 +900,7 @@ export async function createServer(
         return services.cluster.previewPlacement({
           policy: body.placementPolicy,
           profile,
-          ...(services.agentController
-            ? {
-                isNodeConnected: (nodeId: string) =>
-                  Boolean(services.agentController?.connected(nodeId))
-              }
-            : {}),
+          ...(isPlacementNodeConnected ? { isNodeConnected: isPlacementNodeConnected } : {}),
           ...(body.providerId ? { providerId: body.providerId } : {}),
           ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
           ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
@@ -1031,12 +1046,7 @@ export async function createServer(
             policy: body.placementPolicy,
             providerId: body.source.providerId,
             profile,
-            ...(services.agentController
-              ? {
-                  isNodeConnected: (nodeId: string) =>
-                    Boolean(services.agentController?.connected(nodeId))
-                }
-              : {}),
+            ...(isPlacementNodeConnected ? { isNodeConnected: isPlacementNodeConnected } : {}),
             ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
             ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
           });

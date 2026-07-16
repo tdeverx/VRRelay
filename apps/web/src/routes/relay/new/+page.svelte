@@ -237,9 +237,12 @@
     placementError = '';
 
     if (placementPolicy === 'local') {
-      placementPreview = { reason: 'local-runtime' };
+      const localPlacement: { node?: ClusterNode | null; reason: string } = {
+        reason: 'local-runtime'
+      };
+      placementPreview = localPlacement;
       placementLoading = false;
-      return placementPreview;
+      return localPlacement;
     }
     if (!profile || !providerId) {
       placementPreview = null;
