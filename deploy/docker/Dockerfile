@@ -1,5 +1,5 @@
 ARG VRRELAY_VERSION=0.1.0
-FROM node:22.23.1-bookworm-slim AS build
+FROM node:26.5.0-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json tsconfig.base.json ./
 COPY apps/relay/package.json apps/relay/package.json
@@ -37,7 +37,7 @@ RUN set -eu; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -F 'libx264'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -filters | grep -F 'subtitles'
 
-FROM node:22.23.1-bookworm-slim
+FROM node:26.5.0-bookworm-slim
 ARG VRRELAY_VERSION
 LABEL org.opencontainers.image.title="VRRelay" \
       org.opencontainers.image.version="$VRRELAY_VERSION" \
