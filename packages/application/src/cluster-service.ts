@@ -443,22 +443,23 @@ export class ClusterService {
     let expectedRevision = initialRevision;
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+      let attemptError: unknown;
       try {
         const result = await this.repository.finalizeProviderBindingDeletion(id, expectedRevision);
         if (result.applied || result.reason === 'not-found') return;
         if (result.reason === 'invalid-state')
           throw new ConflictError('Provider binding deletion is not pending');
       } catch (error) {
-        lastError = error;
+        attemptError = error;
       }
       try {
         const pending = await this.beginBindingDeletion(id);
         if (!pending) return;
         expectedRevision = pending.revision;
-        lastError = undefined;
       } catch (error) {
-        lastError = error;
+        attemptError = error;
       }
+      lastError = attemptError;
     }
     if (lastError instanceof Error) throw lastError;
     if (lastError !== undefined)

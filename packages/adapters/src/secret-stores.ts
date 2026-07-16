@@ -180,7 +180,8 @@ export class MacKeychainSecretStore implements SecretStore {
       return stdout.trimEnd();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('could not be found')) throw new Error(`Secret not found: ${ref}`);
+      if (message.includes('could not be found'))
+        throw new Error(`Secret not found: ${ref}`, { cause: error });
       throw error;
     }
   }

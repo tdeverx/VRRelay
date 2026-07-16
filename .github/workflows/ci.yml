@@ -6,12 +6,12 @@ permissions: { contents: read }
 env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
 jobs:
   test:
-    strategy: { matrix: { os: [ubuntu-latest, windows-latest], node: [22.23.1] } }
+    strategy: { matrix: { os: [ubuntu-latest, windows-latest], node: [26.5.0] } }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with: { node-version: '22.23.1', cache: npm }
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: '26.5.0', cache: npm }
       - if: runner.os == 'Linux'
         name: Install the pinned FFmpeg runtime
         run: |
@@ -28,9 +28,9 @@ jobs:
   macos-host:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with: { node-version: '22.23.1', cache: npm }
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: '26.5.0', cache: npm }
       - name: Select the Swift 6.2 toolchain
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
       - run: swift test --package-path apps/macos
@@ -54,9 +54,9 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with: { node-version: '22.23.1', cache: npm }
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: '26.5.0', cache: npm }
       - name: Install the pinned FFmpeg runtime
         run: |
           runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
@@ -73,7 +73,7 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - run: script/check-compose.sh
       - run: script/container-smoke.sh 0.0.0-ci
       - run: script/compose-smoke.sh
@@ -89,8 +89,8 @@ jobs:
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.2.3 }
       - run: script/check-workflows.sh
       - run: helm lint deploy/kubernetes

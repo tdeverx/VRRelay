@@ -63,7 +63,7 @@ for binary in "${MACH_O_FILES[@]}"; do
   fi
 done
 
-require_equal "$("$RUNTIME/bin/node" --version)" v22.23.1 'Node version'
+require_equal "$("$RUNTIME/bin/node" --version)" v26.5.0 'Node version'
 "$RUNTIME/bin/mediamtx" --version > "$EXPANDED/mediamtx-version.txt"
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -version > "$EXPANDED/ffmpeg-version.txt"
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -encoders > "$EXPANDED/ffmpeg-encoders.txt" 2>/dev/null

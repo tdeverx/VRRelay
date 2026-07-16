@@ -869,7 +869,8 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
             } catch (cleanupError) {
               throw new AggregateError(
                 [error, cleanupError],
-                'SQLite pre-migration backup failed and its partial file could not be removed'
+                'SQLite pre-migration backup failed and its partial file could not be removed',
+                { cause: cleanupError }
               );
             }
           }

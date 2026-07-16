@@ -347,18 +347,14 @@ export class ProviderService {
   async #finalizeDeletion(providerId: string, initialRevision: number): Promise<void> {
     let expectedRevision = initialRevision;
     for (let attempt = 0; attempt < MAX_PROVIDER_WRITE_ATTEMPTS; attempt += 1) {
-      let shouldReconcile = false;
       try {
         const result = await this.repository.finalizeProviderDeletion(providerId, expectedRevision);
         if (result.applied || result.reason === 'not-found') return;
         if (result.reason === 'dependency-conflict')
           throw new ConflictError('Delete every session and node binding for this provider first');
-        shouldReconcile = true;
       } catch (error) {
         if (error instanceof ConflictError) throw error;
-        shouldReconcile = true;
       }
-      if (!shouldReconcile) continue;
       // Active-provider reads intentionally hide deletion-pending records.
       // Re-enter the atomic begin operation to determine whether finalize
       // committed and lost its acknowledgement, or still needs retrying.

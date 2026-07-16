@@ -463,7 +463,7 @@ export class JellyfinProvider implements MediaProvider {
       });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? 'request_error';
-      throw new Error(`Jellyfin transport failed (${code})`);
+      throw new Error(`Jellyfin transport failed (${code})`, { cause: error });
     }
   }
 

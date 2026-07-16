@@ -397,7 +397,7 @@ export class BackendService {
       throw new AggregateError(
         [activationError, rollbackError],
         'Backend activation failed and desired-state rollback could not be written',
-        { cause: activationError }
+        { cause: rollbackError }
       );
     }
     if (!rollback.applied)

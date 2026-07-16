@@ -34,7 +34,7 @@ records.
 
 ## Included today
 
-- Node 22 TypeScript relay API with an embedded SvelteKit operator dashboard.
+- Node 26 TypeScript relay API with an embedded SvelteKit operator dashboard.
 - Jellyfin authentication, catalog/source mapping, and playback activity.
 - Finite, seekable, just-in-time HLS VOD with structured FFmpeg profiles.
 - MediaMTX-backed OBS live ingest and live HLS fan-out.
@@ -50,7 +50,7 @@ production defaults. Experimental formats are not compatibility claims.
 
 ## Requirements
 
-- Node.js `22.23.1` and npm `10.9.2` (`.nvmrc` pins the Node version).
+- Node.js `26.5.0` and npm `11.17.0` (`.nvmrc` pins the Node version).
 - FFmpeg 7.x with `libx264`, AAC, HLS, and MPEG-TS support.
 - Git.
 

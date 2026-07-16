@@ -15,7 +15,7 @@ not release evidence by themselves.
 
 ## Implemented foundation
 
-- A Node 22 TypeScript monorepo with provider-neutral domain/application
+- A Node 26 TypeScript monorepo with provider-neutral domain/application
   packages, infrastructure adapters, a Fastify relay, and a SvelteKit operator
   dashboard.
 - First-run administrator authentication, HTTP-only sessions, CSRF protection,

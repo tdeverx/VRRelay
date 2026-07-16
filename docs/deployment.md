@@ -77,7 +77,7 @@ For generic VMs, `deploy/opentofu` creates no cloud resources. It renders one se
 
 The Windows package registers the TypeScript relay with WinSW as an automatic service. That relay supervises the bundled MediaMTX process, and WinSW restarts the complete stack if either process fails. The Electron tray uses Windows Service Control Manager and may be closed independently. Release packaging supplies validated Node, FFmpeg (AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
 
-The Windows packager downloads the immutable FFmpeg 7.1.5 BtbN GPL archive and Electron 39.8.10 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
+The Windows packager downloads the immutable FFmpeg 7.1.5 BtbN GPL archive and Electron 43.1.1 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
 
 ## TLS modes
 
