@@ -9,6 +9,12 @@ PACKAGE_VERSION="${VRRELAY_VERSION:-$(node -p "require('$ROOT/package.json').ver
 VERSION="$(node "$ROOT/script/release-version.mjs" "$PACKAGE_VERSION")"
 BUILD_NUMBER="${VRRELAY_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}"
 [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "VRRELAY_BUILD_NUMBER must be a positive integer" >&2; exit 1; }
+RELEASE_PACKAGING="${VRRELAY_RELEASE_PACKAGING:-0}"
+if [[ "$RELEASE_PACKAGING" == "1" ]]; then
+  [[ -n "${APPLE_DEVELOPER_ID:-}" ]] || { echo "APPLE_DEVELOPER_ID is required for release packaging" >&2; exit 1; }
+  [[ -n "${APPLE_INSTALLER_ID:-}" ]] || { echo "APPLE_INSTALLER_ID is required for release packaging" >&2; exit 1; }
+  [[ -n "${APPLE_NOTARY_PROFILE:-}" ]] || { echo "APPLE_NOTARY_PROFILE is required for release packaging" >&2; exit 1; }
+fi
 STAGE="$ROOT/dist/macos/root"
 COMPONENT="$ROOT/dist/macos/VRRelay-component.pkg"
 OUTPUT="$ROOT/dist/VRRelay-$VERSION-macOS-arm64.pkg"
@@ -74,6 +80,7 @@ plutil -lint "$APP/Contents/Info.plist" "$STAGE/Library/LaunchDaemons/org.vrrela
 pkgbuild --root "$STAGE" --scripts "$ROOT/deploy/macos/scripts" --identifier org.vrrelay.pkg --version "$VERSION" "$COMPONENT"
 if [[ -n "${APPLE_INSTALLER_ID:-}" ]]; then productsign --sign "$APPLE_INSTALLER_ID" "$COMPONENT" "$OUTPUT"; else cp "$COMPONENT" "$OUTPUT"; fi
 pkgutil --check-signature "$OUTPUT" || [[ -z "${APPLE_INSTALLER_ID:-}" ]]
+if [[ "$RELEASE_PACKAGING" == "1" ]]; then export VRRELAY_REQUIRE_PACKAGE_SIGNATURE=1; fi
 "$ROOT/script/verify-macos-package.sh" "$OUTPUT" "$VERSION" "$BUILD_NUMBER"
 if [[ -n "${APPLE_NOTARY_PROFILE:-}" ]]; then xcrun notarytool submit "$OUTPUT" --keychain-profile "$APPLE_NOTARY_PROFILE" --wait; xcrun stapler staple "$OUTPUT"; xcrun stapler validate "$OUTPUT"; fi
 rm -rf "$ROOT/dist/macos"

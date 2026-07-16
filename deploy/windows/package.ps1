@@ -4,6 +4,15 @@ $Root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $PackageVersion = if ($env:VRRELAY_VERSION) { $env:VRRELAY_VERSION } else { (Get-Content "$Root\package.json" | ConvertFrom-Json).version }
 $Version = (& node "$Root\script\release-version.mjs" $PackageVersion).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'VRRELAY_VERSION is invalid' }
+$ReleasePackaging = $env:VRRELAY_RELEASE_PACKAGING -eq '1'
+if ($ReleasePackaging) {
+  if (-not $env:WINDOWS_CERTIFICATE) { throw 'WINDOWS_CERTIFICATE is required for release packaging' }
+  if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw 'WINDOWS_CERTIFICATE_PASSWORD is required for release packaging' }
+  if (-not $env:VRRELAY_FFMPEG_SOURCE_BUNDLE) { throw 'VRRELAY_FFMPEG_SOURCE_BUNDLE is required for release packaging' }
+  if (-not (Test-Path $env:VRRELAY_FFMPEG_SOURCE_BUNDLE)) { throw "FFmpeg source bundle not found: $env:VRRELAY_FFMPEG_SOURCE_BUNDLE" }
+  node "$Root\script\windows-source-bundle.mjs" --verify $env:VRRELAY_FFMPEG_SOURCE_BUNDLE
+  if ($LASTEXITCODE -ne 0) { throw 'FFmpeg source bundle verification failed' }
+}
 $Stage = "$Root\dist\windows"
 Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$Stage\runtime\apps\relay", "$Stage\runtime\apps\web", "$Stage\runtime\apps\windows", "$Stage\runtime\packages", "$Stage\runtime\bin", "$Stage\runtime\licenses", "$Stage\host\app", "$Stage\downloads" | Out-Null

@@ -29,7 +29,8 @@ not release evidence by themselves.
   Valkey, filesystem/S3-compatible/Azure/GCS adapters, and a distributed
   acceptance harness.
 - macOS, Windows, OCI, Compose, Helm, backup, release, SBOM, and provenance
-  scaffolding.
+  scaffolding, with native release-mode guardrails for signing, notarization,
+  runtime provenance, and FFmpeg corresponding-source bundle presence.
 
 These bullets inventory code and assets; they do not assert that every exposed
 setting, failure mode, deployment topology, or administrator workflow is
@@ -301,6 +302,14 @@ pending.
   evidence, native installers, signing/notarization,
   supply-chain evidence, upgrade/rollback, and clean-target installation have
   not passed their release gates.
+- Native packaging release mode now fails closed when required macOS signing,
+  installer-signing, notarization, Windows signing, or FFmpeg
+  corresponding-source bundle inputs are missing. The checked-in native
+  packaging guard also validates runtime manifest pins, notices/license
+  inclusion, runtime provenance wiring, and FFmpeg source recipe metadata, but
+  actual signed/notarized artifacts, clean-machine install/upgrade/uninstall
+  evidence, final SBOMs, final vulnerability scans, and release attestations
+  remain pending.
 
 ## Release gates requiring target infrastructure or people
 

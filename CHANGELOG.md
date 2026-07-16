@@ -42,6 +42,10 @@ retained evidence belong in the
 - Kubernetes network-policy and rollout hardening, including explicit relay
   egress CIDR blocks, scoped MediaMTX WebRTC UDP egress, operator-supplied
   runtime Secret rollout checksums, and bounded migration-hook deadlines.
+- Native release-packaging guardrails that require macOS signing/notarization
+  inputs, Windows signing inputs, runtime provenance, bundled notices/licenses,
+  and a verified FFmpeg corresponding-source bundle for release-mode Windows
+  packaging.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.

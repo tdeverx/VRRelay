@@ -10,7 +10,7 @@ VRRELAY_LISTEN_ADDR=127.0.0.1:8099 node apps/relay/dist/main.js
 
 The SwiftPM menu-bar host builds with `swift build --package-path apps/macos`. The `.pkg` installs the `org.vrrelay.service` system LaunchDaemon, which supervises both the TypeScript relay and bundled MediaMTX process, so closing the menu application or logging out does not stop active streams. Start, stop, and restart actions request administrator approval and target that installed service; the separate “Open menu controller at login” setting uses the native macOS login-item service. Upgrades retain service data; the uninstall script removes binaries and retains data unless `--purge-data` is explicit.
 
-Release packaging requires the Homebrew `ffmpeg@7` executable through `VRRELAY_FFMPEG_BINARY`. The packager verifies version 7.1.5, copies every non-system dynamic library, rewrites loader paths to the package, signs the finalized runtime, and writes `runtime-provenance.json` containing the exact bundled hashes. It does not silently fall back to another FFmpeg on `PATH`.
+Release packaging requires the Homebrew `ffmpeg@7` executable through `VRRELAY_FFMPEG_BINARY`. The packager verifies version 7.1.5, copies every non-system dynamic library, rewrites loader paths to the package, signs the finalized runtime, and writes `runtime-provenance.json` containing the exact bundled hashes. It does not silently fall back to another FFmpeg on `PATH`. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires Developer ID application signing, Developer ID installer signing, and notarization credentials before the package can be produced.
 
 ## Docker Compose
 
@@ -51,7 +51,7 @@ For generic VMs, `deploy/opentofu` creates no cloud resources. It renders one se
 
 The Windows package registers the TypeScript relay with WinSW as an automatic service. That relay supervises the bundled MediaMTX process, and WinSW restarts the complete stack if either process fails. The Electron tray uses Windows Service Control Manager and may be closed independently. Release packaging supplies validated Node, FFmpeg (AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
 
-The Windows packager downloads the immutable FFmpeg 7.1.5 BtbN GPL archive and Electron 39.8.10 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer.
+The Windows packager downloads the immutable FFmpeg 7.1.5 BtbN GPL archive and Electron 39.8.10 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
 
 ## TLS modes
 
