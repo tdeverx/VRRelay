@@ -7,6 +7,7 @@
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import { Field, FieldGroup, FieldLabel } from '$lib/components/ui/field';
+  import { switchUi } from '$lib/new-ui/state.svelte';
 
   let password = $state('');
   let pending = $state(false);
@@ -52,6 +53,7 @@
         {pending ? 'Signing in…' : 'Sign in'}
       </Button>
     </form>
+    <Button variant="ghost" onclick={() => switchUi('/login', 'new')}>Try the new interface</Button>
   </section>
 </main>
 

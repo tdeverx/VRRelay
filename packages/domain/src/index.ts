@@ -4,7 +4,7 @@ import { z } from 'zod';
 export const ProviderTypeSchema = z.enum(['jellyfin', 'fake']);
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
 
-export const AuthenticationModeSchema = z.enum(['user_token', 'api_key']);
+export const AuthenticationModeSchema = z.enum(['user_token', 'api_key', 'delegated']);
 export type AuthenticationMode = z.infer<typeof AuthenticationModeSchema>;
 
 export const UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE = 'Unsafe public HTTP transport is enabled.';
@@ -219,6 +219,7 @@ export const RelaySessionSchema = z
     assignedNodeId: z.string().optional(),
     placementLocked: z.boolean().default(false),
     preferredRegion: z.string().optional(),
+    ownerId: z.string().min(1).optional(),
     outputUrls: z.record(z.string(), z.url()),
     errorMessage: z.string().optional(),
     createdAt: z.iso.datetime(),

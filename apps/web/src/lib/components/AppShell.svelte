@@ -20,6 +20,7 @@
   import { Button } from '$lib/components/ui/button';
   import { cn } from '$lib/utils';
   import { api } from '$lib/api';
+  import { switchUi } from '$lib/new-ui/state.svelte';
 
   let {
     children,
@@ -143,12 +144,17 @@
         </a>
       {/each}
     </nav>
-    <div class="sidebar-status">
-      <span class="health-dot"></span>
-      <div>
-        <strong>{health?.status === 'ok' ? 'Relay reachable' : 'Relay unavailable'}</strong>
-        <small>{health ? `VRRelay v${health.version}` : 'VRRelay version unavailable'}</small>
+    <div class="sidebar-footer">
+      <div class="sidebar-status">
+        <span class="health-dot"></span>
+        <div>
+          <strong>{health?.status === 'ok' ? 'Relay reachable' : 'Relay unavailable'}</strong>
+          <small>{health ? `VRRelay v${health.version}` : 'VRRelay version unavailable'}</small>
+        </div>
       </div>
+      <Button variant="outline" onclick={() => switchUi(page.url.pathname, 'new')}
+        >Try new UI</Button
+      >
     </div>
   </aside>
 
@@ -268,18 +274,24 @@
     background: var(--primary);
     content: '';
   }
-  .sidebar-status {
+  .sidebar-footer {
     display: flex;
-    align-items: flex-start;
+    flex-direction: column;
     gap: 10px;
     margin-top: auto;
     border-top: 1px solid var(--border);
     padding: 20px;
   }
-  .app-shell.collapsed:not(.mobile-navigation) .sidebar-status {
+  .sidebar-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) .sidebar-footer {
     justify-content: center;
     padding: 20px 8px;
   }
+  .app-shell.collapsed:not(.mobile-navigation) .sidebar-footer :global(button),
   .app-shell.collapsed:not(.mobile-navigation) .sidebar-status div {
     display: none;
   }

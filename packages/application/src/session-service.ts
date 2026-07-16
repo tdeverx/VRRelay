@@ -118,6 +118,12 @@ export interface SessionServiceInfrastructure {
   ensureRequester?: RemoteSegmentRequester;
 }
 
+export interface SessionCreateContext {
+  ownerId: string;
+  providerAccessToken: string;
+  providerUserId: string;
+}
+
 export class SessionService {
   readonly #inflight = new Map<string, Promise<string>>();
   readonly #sourceGrants = new Map<
@@ -162,7 +168,9 @@ export class SessionService {
     );
   }
 
-  async create(input: CreateSessionRequest): Promise<RelaySession> {
+  async create(input: CreateSessionRequest, context?: SessionCreateContext): Promise<RelaySession> {
+    if (context && (input.kind !== 'vod' || input.placementPolicy !== 'local'))
+      throw new ConflictError('User portal sessions must be local VOD sessions');
     const profile = await this.repository.getProfile(input.profileId, input.profileRevision);
     if (!profile) throw new NotFoundError('Profile revision was not found');
     const id = randomUUID();
@@ -174,15 +182,22 @@ export class SessionService {
     if (input.kind === 'vod') {
       const connection = await this.repository.getProvider(input.source.providerId);
       if (!connection) throw new NotFoundError('Provider connection was not found');
-      const remoteNode = await this.#remoteProviderNode(connection.id);
+      const sourceConnection = context
+        ? { ...connection, userId: context.providerUserId }
+        : connection;
+      const remoteNode = context ? undefined : await this.#remoteProviderNode(connection.id);
       const item = remoteNode
         ? await this.infrastructure.providerGateway!.call<MediaItem>(remoteNode, 'provider.item', {
             providerId: connection.id,
             itemId: input.source.itemId
           })
         : await this.providers
-            .get(connection.type)
-            .item(connection, await this.#providerSecret(connection), input.source.itemId);
+            .get(sourceConnection.type)
+            .item(
+              sourceConnection,
+              context?.providerAccessToken ?? (await this.#providerSecret(connection)),
+              input.source.itemId
+            );
       durationSeconds = item.durationSeconds;
       if (!durationSeconds || durationSeconds <= 0)
         throw new Error('Selected media does not expose a finite duration');
@@ -216,6 +231,7 @@ export class SessionService {
       ...(input.preferredNodeId ? { assignedNodeId: input.preferredNodeId } : {}),
       placementLocked: input.placementLocked,
       ...(input.preferredRegion ? { preferredRegion: input.preferredRegion } : {}),
+      ...(context ? { ownerId: context.ownerId } : {}),
       outputUrls: { primary: `${this.options.publicUrl}/play/${token}/${path}` },
       createdAt: now,
       updatedAt: now
@@ -223,18 +239,32 @@ export class SessionService {
     const expiresAt = input.playbackTtlSeconds
       ? new Date(Date.now() + input.playbackTtlSeconds * 1_000).toISOString()
       : null;
-    const created = await this.repository.createSessionWithPlaybackGrant(
-      session,
-      {
-        tokenHash: hashToken(token),
-        sessionId: id,
-        expiresAt,
-        revokedAt: null,
-        createdAt: now
-      },
-      liveChannelRevision
-    );
+    if (context)
+      await this.secrets.put(
+        this.#sessionSourceSecretRef(id),
+        JSON.stringify({ accessToken: context.providerAccessToken, userId: context.providerUserId })
+      );
+    let created;
+    try {
+      created = await this.repository.createSessionWithPlaybackGrant(
+        session,
+        {
+          tokenHash: hashToken(token),
+          sessionId: id,
+          expiresAt,
+          revokedAt: null,
+          createdAt: now
+        },
+        liveChannelRevision
+      );
+    } catch (error) {
+      if (context)
+        await this.secrets.delete(this.#sessionSourceSecretRef(id)).catch(() => undefined);
+      throw error;
+    }
     if (!created.applied) {
+      if (context)
+        await this.secrets.delete(this.#sessionSourceSecretRef(id)).catch(() => undefined);
       if (session.kind === 'live') {
         if (created.reason === 'not-found') throw new NotFoundError('Live channel was not found');
         throw new ConflictError(
@@ -359,6 +389,7 @@ export class SessionService {
     await this.#reportActivity(session, session.durationSeconds ?? 0, 'stop').catch(
       () => undefined
     );
+    if (session.ownerId) await this.secrets.delete(this.#sessionSourceSecretRef(id));
     await this.repository.deleteSessionAndRevokePlaybackGrants(id);
     await rm(join(this.options.cacheDir, 'vod', id), { recursive: true, force: true });
     this.events.publish(event('session.deleted', { name: session.name }, id));
@@ -529,9 +560,14 @@ export class SessionService {
     }
     const connection = await this.repository.getProvider(session.source.providerId);
     if (!connection) throw new NotFoundError('Provider connection was not found');
-    const secret = await this.#providerSecret(connection);
+    const credential = await this.#providerCredential(connection, session);
     const provider = this.providers.get(connection.type);
-    const source = await provider.resolveSource(connection, secret, session.source, signal);
+    const source = await provider.resolveSource(
+      credential.connection,
+      credential.secret,
+      session.source,
+      signal
+    );
     await this.transcoder.streamFragmentedMp4(
       this.#proxySource(source, provider),
       profile,
@@ -713,9 +749,14 @@ export class SessionService {
     try {
       const connection = await this.repository.getProvider(session.source!.providerId);
       if (!connection) throw new NotFoundError('Provider connection was not found');
-      const secret = await this.#providerSecret(connection);
+      const credential = await this.#providerCredential(connection, session);
       const provider = this.providers.get(connection.type);
-      const source = await provider.resolveSource(connection, secret, session.source!, signal);
+      const source = await provider.resolveSource(
+        credential.connection,
+        credential.secret,
+        session.source!,
+        signal
+      );
       const segmentDuration = profile.delivery.segmentDuration;
       await mkdir(dirname(destination), { recursive: true });
       await this.transcoder.generateSegment(
@@ -856,7 +897,7 @@ export class SessionService {
     if (activityEvent === 'progress' && Date.now() - last < 10_000) return;
     const connection = await this.repository.getProvider(session.source.providerId);
     if (!connection || !connection.capabilities.includes('activity_reporting')) return;
-    const remoteNode = await this.#remoteProviderNode(connection.id);
+    const remoteNode = session.ownerId ? undefined : await this.#remoteProviderNode(connection.id);
     if (remoteNode) {
       await this.infrastructure.providerGateway!.call(remoteNode, 'provider.activity', {
         providerId: connection.id,
@@ -870,16 +911,39 @@ export class SessionService {
       else this.#activity.set(session.id, Date.now());
       return;
     }
-    const secret = await this.#providerSecret(connection);
-    await this.providers.get(connection.type).reportPlayback(connection, secret, {
-      sessionId: session.id,
-      itemId: session.source.itemId,
-      positionTicks: Math.round(positionSeconds * 10_000_000),
-      paused: activityEvent === 'stop',
-      event: activityEvent
-    });
+    const credential = await this.#providerCredential(connection, session);
+    await this.providers
+      .get(connection.type)
+      .reportPlayback(credential.connection, credential.secret, {
+        sessionId: session.id,
+        itemId: session.source.itemId,
+        positionTicks: Math.round(positionSeconds * 10_000_000),
+        paused: activityEvent === 'stop',
+        event: activityEvent
+      });
     if (activityEvent === 'stop') this.#activity.delete(session.id);
     else this.#activity.set(session.id, Date.now());
+  }
+
+  #sessionSourceSecretRef(sessionId: string): string {
+    return `session-source:${sessionId}`;
+  }
+
+  async #providerCredential(
+    connection: ProviderConnection,
+    session: RelaySession
+  ): Promise<{ connection: ProviderConnection; secret: string }> {
+    if (!session.ownerId) return { connection, secret: await this.#providerSecret(connection) };
+    const stored = JSON.parse(await this.secrets.get(this.#sessionSourceSecretRef(session.id))) as {
+      accessToken?: unknown;
+      userId?: unknown;
+    };
+    if (typeof stored.accessToken !== 'string' || typeof stored.userId !== 'string')
+      throw new UnauthorizedError('Session source credential is invalid');
+    return {
+      connection: { ...connection, userId: stored.userId },
+      secret: stored.accessToken
+    };
   }
 
   async #providerSecret(connection: ProviderConnection): Promise<string> {

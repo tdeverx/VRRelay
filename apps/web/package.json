@@ -12,10 +12,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@vrrelay/domain": "*",
+    "@fontsource-variable/inter": "^5.2.8",
     "@vrrelay/contracts": "*",
+    "@vrrelay/domain": "*",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
+    "shadcn-svelte": "^1.4.2",
     "svelte-sonner": "^1.1.1",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
@@ -28,6 +30,7 @@
     "@sveltejs/kit": "^2.69.3",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@tailwindcss/vite": "^4.3.2",
+    "mode-watcher": "^1.1.0",
     "svelte": "^5.56.5",
     "svelte-check": "^4.7.3",
     "tailwindcss": "^4.3.2",

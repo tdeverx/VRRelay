@@ -66,7 +66,7 @@
     "lint": "node --import ./script/typescript-compat-loader.mjs ./node_modules/eslint/bin/eslint.js .",
     "test": "vitest run",
     "pretest:browser": "npm run build",
-    "test:browser": "playwright test",
+    "test:browser": "playwright test --project=desktop-chromium && playwright test --project=mobile-chromium",
     "test:compose": "script/compose-smoke.sh",
     "test:cluster-compose": "node script/cluster-compose-smoke.mjs",
     "test:container": "script/container-smoke.sh",

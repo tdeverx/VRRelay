@@ -24,6 +24,7 @@ import {
   SqliteRepository
 } from '@vrrelay/adapters';
 import { AuthService } from './auth.js';
+import { PortalAuthService } from './portal-auth.js';
 import { loadConfig } from './config.js';
 import { createServer, type ServerServices } from './server.js';
 
@@ -40,10 +41,10 @@ const capabilities = {
 const provider: MediaProvider = {
   type: 'jellyfin',
   capabilities: ['search', 'direct_source'],
-  authenticate: async () => ({
+  authenticate: async (_baseUrl, credentials) => ({
     accessToken: 'fixture-provider-token',
-    userId: 'fixture-user',
-    username: 'fixture-user',
+    userId: credentials.username ?? 'fixture-user',
+    username: credentials.username ?? 'fixture-user',
     serverName: 'Fixture',
     serverVersion: '1.0.0'
   }),
@@ -161,10 +162,12 @@ async function securityFixture(): Promise<SecurityFixture> {
     delete: async () => {},
     authorizeMediaMtx: async () => false
   };
+  const providerService = new ProviderService(repository, secrets, registry);
   const services = {
     repository,
     auth,
-    providers: new ProviderService(repository, secrets, registry),
+    portal: new PortalAuthService(repository, secrets, providerService),
+    providers: providerService,
     profiles,
     sessions,
     live,
@@ -216,6 +219,19 @@ async function login(app: FastifyInstance): Promise<{ cookie: string; csrfToken:
     method: 'POST',
     url: '/api/v1/auth/login',
     payload: { password: adminPassword }
+  });
+  expect(response.statusCode).toBe(200);
+  return { cookie: cookieFrom(response), csrfToken: response.json().csrfToken as string };
+}
+
+async function portalLogin(
+  app: FastifyInstance,
+  username: string
+): Promise<{ cookie: string; csrfToken: string }> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/portal/auth/login',
+    payload: { username, password: 'provider-password' }
   });
   expect(response.statusCode).toBe(200);
   return { cookie: cookieFrom(response), csrfToken: response.json().csrfToken as string };
@@ -338,10 +354,19 @@ describe('HTTP authentication boundary', () => {
     });
     const setCookie = String(authenticated.headers['set-cookie']);
     expect(setCookie).toMatch(/vrrelay_session=/);
+    expect(setCookie).toMatch(/vrrelay_csrf=/);
     expect(setCookie).toMatch(/HttpOnly/i);
     expect(setCookie).toMatch(/SameSite=Strict/i);
     expect(setCookie).toMatch(/Secure/i);
     expect(setCookie).toMatch(/Path=\//i);
+    const setCookies = Array.isArray(authenticated.headers['set-cookie'])
+      ? authenticated.headers['set-cookie']
+      : [authenticated.headers['set-cookie']];
+    const csrfCookie = setCookies.find((cookie) => String(cookie).startsWith('vrrelay_csrf='));
+    expect(csrfCookie).toBeDefined();
+    expect(csrfCookie).not.toMatch(/HttpOnly/i);
+    expect(csrfCookie).toMatch(/SameSite=Strict/i);
+    expect(csrfCookie).toMatch(/Secure/i);
   });
 
   it('enforces browser CSRF and PAT scopes, expiry, and revocation at route level', async () => {
@@ -449,6 +474,107 @@ describe('HTTP authentication boundary', () => {
     expect(malformedJson.statusCode).toBe(400);
     expect(malformedJson.json()).toMatchObject({ error: { code: 'invalid_request' } });
     expect(malformedJson.body).not.toContain(secretSentinel);
+  });
+});
+
+describe('delegated provider user portal', () => {
+  it('isolates user sessions, enforces CSRF, and keeps created playback links valid after logout', async () => {
+    const { app, auth } = await securityFixture();
+    await auth.initialize(adminPassword);
+    const admin = await login(app);
+    const adminHeaders = { cookie: admin.cookie, 'x-csrf-token': admin.csrfToken };
+
+    const createdProvider = await app.inject({
+      method: 'POST',
+      url: '/api/v1/providers',
+      headers: adminHeaders,
+      payload: {
+        type: 'jellyfin',
+        name: 'User Jellyfin',
+        baseUrl: 'http://127.0.0.1:8096',
+        authMode: 'delegated',
+        allowPublicHttp: false
+      }
+    });
+    expect(createdProvider.statusCode).toBe(201);
+    const providerId = createdProvider.json().id as string;
+
+    const configuration = {
+      providerId,
+      defaultProfileId: 'universal-h264-hls-vod',
+      allowedProfileIds: ['universal-h264-hls-vod']
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/v1/portal/configuration',
+          headers: adminHeaders,
+          payload: configuration
+        })
+      ).statusCode
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/v1/portal/status' })).json()
+    ).toMatchObject({
+      configured: true,
+      providerName: 'User Jellyfin'
+    });
+
+    const alice = await portalLogin(app, 'alice');
+    const createPayload = {
+      source: { providerId, itemId: 'movie-alice' },
+      profileId: 'universal-h264-hls-vod'
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/portal/sessions',
+          headers: { cookie: alice.cookie },
+          payload: createPayload
+        })
+      ).statusCode
+    ).toBe(401);
+    const createdSession = await app.inject({
+      method: 'POST',
+      url: '/api/v1/portal/sessions',
+      headers: { cookie: alice.cookie, 'x-csrf-token': alice.csrfToken },
+      payload: createPayload
+    });
+    expect(createdSession.statusCode).toBe(201);
+    const session = createdSession.json();
+
+    const bob = await portalLogin(app, 'bob');
+    const bobSessions = await app.inject({
+      method: 'GET',
+      url: '/api/v1/portal/sessions',
+      headers: { cookie: bob.cookie }
+    });
+    expect(bobSessions.json()).toEqual({ items: [] });
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: `/api/v1/portal/sessions/${session.id}`,
+          headers: { cookie: bob.cookie, 'x-csrf-token': bob.csrfToken }
+        })
+      ).statusCode
+    ).toBe(404);
+
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/portal/auth/logout',
+          headers: { cookie: alice.cookie, 'x-csrf-token': alice.csrfToken }
+        })
+      ).statusCode
+    ).toBe(204);
+    const playbackPath = new URL(session.outputUrls.primary).pathname;
+    const manifest = await app.inject({ method: 'GET', url: playbackPath });
+    expect(manifest.statusCode).toBe(200);
+    expect(manifest.body).toContain('#EXT-X-ENDLIST');
   });
 });
 

@@ -8,6 +8,25 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='none' stroke='%2333d6f1' stroke-width='2.5' stroke-linejoin='round' d='M6 4v24l20-12z'/%3E%3C/svg%3E"
     />
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const isNew = ['/new', '/dashboard', '/portal'].some(
+          (prefix) => location.pathname === prefix || location.pathname.startsWith(prefix + '/')
+        );
+        if (!isNew) {
+          root.removeAttribute('data-ui');
+          root.classList.add('dark');
+          return;
+        }
+        root.dataset.ui = 'new';
+        const preference = localStorage.getItem('vrrelay.theme') || 'system';
+        const dark =
+          preference === 'dark' ||
+          (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        root.classList.toggle('dark', dark);
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
