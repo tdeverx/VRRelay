@@ -292,9 +292,9 @@ pending.
   enforce rollback backups before restore. TLS Compose now blocks public access
   to relay/MediaMTX internal control paths, multi-host Compose requires
   digest-pinned VRRelay/MediaMTX images for release-style rendering, and Helm
-  relay workloads can render `repository@sha256:...`. Kubernetes runtime
-  policies now use explicit egress blocks instead of unrestricted relay egress,
-  externally managed Secret changes can drive pod rollouts through
+  relay plus MediaMTX workloads can render `repository@sha256:...`. Kubernetes
+  runtime policies now use explicit egress blocks instead of unrestricted relay
+  egress, externally managed Secret changes can drive pod rollouts through
   `rollout.runtimeSecretChecksum`, and the migration hook has an active
   deadline, but true multi-host boot evidence, rendered Helm/TLS behavior, final
   release digest selection, live backup/restore rehearsal, real cloud-VM boot

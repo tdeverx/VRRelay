@@ -58,8 +58,9 @@ release-candidate deployment evidence.
 - Compose deployment artifacts now accept digest-pinned operational images, and
   the multi-host profile requires digest-pinned VRRelay and MediaMTX images for
   release-style rendering. The Helm chart now supports
-  `image.repository@image.digest` for relay workloads instead of only
-  `repository:tag`.
+  `image.repository@image.digest` for relay workloads and
+  `mediaMtx.image.repository@mediaMtx.image.digest` for MediaMTX workloads
+  instead of only `repository:tag`.
 - `script/check-tls-fronts.mjs`, `script/check-compose-semantics.mjs`, and
   `script/check-kubernetes-templates.mjs` guard those TLS and image-pinning
   assumptions locally.
@@ -101,10 +102,10 @@ artifacts and created rollback backup sidecars before restore. The TLS checker
 confirmed separate relay/ingest front doors, internal/control path blocking, and
 no HTTP proxy publication of the raw agent mTLS port. Compose semantic checks
 confirmed multi-host digest-pinned relay/MediaMTX images, and Kubernetes
-template checks confirmed digest-aware relay image rendering. The local full CI
-gate also confirmed explicit Kubernetes egress ipBlocks, runtime Secret checksum
-rollout annotations, and the migration active deadline. It passed 373 tests with
-23 intentional skips and reported zero npm vulnerabilities.
+template checks confirmed digest-aware relay and MediaMTX image rendering. The
+local full CI gate also confirmed explicit Kubernetes egress ipBlocks, runtime
+Secret checksum rollout annotations, and the migration active deadline. It
+passed 373 tests with 23 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 10 and final high-pass verification
 

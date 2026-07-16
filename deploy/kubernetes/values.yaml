@@ -73,7 +73,7 @@ edge:
 mediaMtx:
   enabled: true
   replicas: 1
-  image: bluenviron/mediamtx:1.18.2
+  image: { repository: bluenviron/mediamtx, tag: 1.18.2, digest: '', pullPolicy: IfNotPresent }
   resources: {}
   publicUrls:
     rtmp: rtmp://ingest.example.com:1935

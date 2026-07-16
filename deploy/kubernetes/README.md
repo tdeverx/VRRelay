@@ -57,6 +57,8 @@ The chart cannot hash externally managed Secret contents by itself. When changin
 
 NetworkPolicies are enabled by default. `networkPolicy.externalEgress` allows the relay roles to reach PostgreSQL, Valkey, object storage, and external APIs by CIDR while excluding link-local metadata ranges by default. Tighten those CIDRs to your VPC, private network, or egress gateway before release. `networkPolicy.webrtcUdpEgress` separately scopes the MediaMTX origin's high UDP range used for WebRTC ICE.
 
+Release-style Helm installs should set both `image.digest` and `mediaMtx.image.digest`. When a digest is supplied, the chart renders `repository@sha256:...` for the relay and MediaMTX workloads instead of relying on mutable tags.
+
 ## Public endpoints
 
 - The normal `ingress` values expose the controller API/dashboard and clean playback director URL.

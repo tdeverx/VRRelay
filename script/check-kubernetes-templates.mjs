@@ -47,12 +47,28 @@ for (const [source, text, message] of [
     'activeDeadlineSeconds',
     'Helm values must configure an upgrade-safe migration deadline'
   ],
+  [
+    values,
+    'repository: bluenviron/mediamtx',
+    'Helm values must expose structured MediaMTX image identity'
+  ],
   [schema, 'sha256:[0-9a-fA-F]{64}', 'Helm values schema must validate digest-shaped image pins'],
+  [schema, '"imageRef"', 'Helm values schema must reuse digest-aware image references'],
   [schema, '"networkPolicy"', 'Helm values schema must validate network policy controls'],
   [
     runtime,
     '$relayImage = printf "%s@%s"',
     'runtime template must render relay images by digest when configured'
+  ],
+  [
+    runtime,
+    '$mediaMtxImage = printf "%s@%s"',
+    'runtime template must render MediaMTX images by digest when configured'
+  ],
+  [
+    runtime,
+    'imagePullPolicy: {{ $root.Values.mediaMtx.image.pullPolicy }}',
+    'runtime template must render MediaMTX edge pull policy from values'
   ],
   [
     runtime,

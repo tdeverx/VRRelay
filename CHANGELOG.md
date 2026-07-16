@@ -38,7 +38,7 @@ retained evidence belong in the
   and rollback-backup enforcement before destructive restores.
 - TLS front-door and image-pinning hardening for deployment artifacts, including
   internal/control path blocking, digest-required multi-host operational images,
-  and digest-aware Helm relay image rendering.
+  and digest-aware Helm relay/MediaMTX image rendering.
 - Kubernetes network-policy and rollout hardening, including explicit relay
   egress CIDR blocks, scoped MediaMTX WebRTC UDP egress, operator-supplied
   runtime Secret rollout checksums, and bounded migration-hook deadlines.
