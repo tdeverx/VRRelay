@@ -121,8 +121,8 @@ if (!macFfmpegRecipe) {
   }
 
   const expectedInputs = new Map([
-    ['ffmpeg', ['7.1.5', 'GPL-3.0-or-later']],
-    ['x264', ['r3222-b35605ace3ddf7c1a5d67a2eb553f034aef41d55', 'GPL-2.0-or-later']],
+    ['ffmpeg', ['8.1.2', 'GPL-3.0-or-later']],
+    ['x264', ['r3223-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee', 'GPL-2.0-or-later']],
     ['libass', ['0.17.5', 'ISC']],
     ['freetype', ['2.14.3', 'FTL']],
     ['fribidi', ['1.0.16', 'LGPL-2.1-or-later']],
@@ -175,13 +175,13 @@ if (!macFfmpegRecipe) {
 for (const [source, text, message] of [
   [
     ciWorkflow,
-    'macos-host:\n    runs-on: macos-15',
-    'macOS host verification must run on the minimum supported macOS 15 runner'
+    'macos-host:\n    runs-on: macos-26',
+    'macOS host verification must run on the Swift 6.3 macOS 26 runner'
   ],
   [
     releaseWorkflow,
-    'include: [{ os: macos-15, artifact: macos }',
-    'macOS release packaging must run on the minimum supported macOS 15 runner'
+    'include: [{ os: macos-26, artifact: macos }',
+    'macOS release packaging must run on the Swift 6.3 macOS 26 runner'
   ],
   [
     packageJson.scripts.check ?? '',
@@ -330,7 +330,7 @@ for (const [source, text, message] of [
   ],
   [
     windowsSource,
-    'FFMPEG_COMMIT="7d0e8420048cffd0ca3883b877ead2390496d0b2"',
+    'FFMPEG_COMMIT="94138f6973dd1ac6208ace92148ac0d172455d65"',
     'Windows corresponding-source recipe must pin the FFmpeg source commit'
   ],
   [

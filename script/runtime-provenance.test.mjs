@@ -13,9 +13,9 @@ afterEach(async () => {
 
 describe('runtime provenance', () => {
   it('matches exact versions without accepting a numeric suffix', () => {
-    expect(runtimeVersionMatches('ffmpeg version n7.1.5-1-gabc', '7.1.5')).toBe(true);
+    expect(runtimeVersionMatches('ffmpeg version n8.1.2-22-gabc', '8.1.2')).toBe(true);
     expect(runtimeVersionMatches('v26.5.0', '26.5.0')).toBe(true);
-    expect(runtimeVersionMatches('ffmpeg version 7.1.50', '7.1.5')).toBe(false);
+    expect(runtimeVersionMatches('ffmpeg version 8.1.20', '8.1.2')).toBe(false);
   });
 
   it('records a bundled binary hash without leaking its source path', async () => {

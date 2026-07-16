@@ -353,7 +353,7 @@ Phase 9 has an automated-verification checkpoint, not a completed exit gate.
   `rollout.runtimeSecretChecksum`, and the migration hook has an active
   deadline. Helm 4.2.3 now lint/renders the chart after quoting IPv6 CIDRs and
   scoping controller-to-origin policy to an enabled ingest origin; the OpenTofu
-  module is formatted and validates with OpenTofu 1.10.6. True multi-host boot
+  module is formatted and validates with OpenTofu 1.12.4. True multi-host boot
   evidence, Kubernetes TLS/upgrade/recovery behavior, final release digest
   selection, live backup/restore rehearsal, real cloud-VM boot
   evidence, native installers, signing/notarization,
@@ -361,7 +361,7 @@ Phase 9 has an automated-verification checkpoint, not a completed exit gate.
   not passed their release gates.
 - Native packaging release mode now builds macOS FFmpeg from eight
   checksum-pinned source inputs and rejects arbitrary runtime binaries. A local
-  Apple Silicon build produced a thin arm64 FFmpeg 7.1.5 binary with only system
+  Apple Silicon build produced a thin arm64 FFmpeg 8.1.2 binary with only system
   dynamic dependencies and passed capability plus MPEG-TS smoke checks. Release
   mode also fails closed when required macOS signing, installer-signing,
   notarization, Windows signing, or FFmpeg corresponding-source inputs are

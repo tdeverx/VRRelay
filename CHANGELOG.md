@@ -6,6 +6,14 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Refreshed the full runtime and deployment stack to FFmpeg 8.1.2, MediaMTX 1.19.2,
+  npm 12.0.1, TypeScript 7.0.2, UUID 14.0.1, PostgreSQL 18, Valkey 9.1, the latest
+  published MinIO community image, Debian 13, Swift 6.3, and the latest x264 revision.
+- Added narrow TypeScript 6 tooling and cookie 2 API adapters so current
+  `typescript-eslint`, `svelte-check`, and SvelteKit remain usable while the project
+  compiler and cookie implementation run on their latest major releases.
+- Made standalone and clustered Compose host ports configurable while preserving the
+  existing defaults, and moved the PostgreSQL 18 volume to its required versioned layout.
 - Simplified the macOS and Windows controllers to menu-bar/tray-only utilities with start, stop,
   restart, and system-browser dashboard actions; removed their embedded dashboard windows and
   native settings surface.

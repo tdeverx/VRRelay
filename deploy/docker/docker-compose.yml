@@ -24,7 +24,7 @@ services:
       - vrrelay-data:/data
       - vrrelay-cache:/cache
     ports:
-      - '8099:8099'
+      - '${VRRELAY_HTTP_PORT:-8099}:8099'
     healthcheck:
       test:
         [
@@ -38,7 +38,7 @@ services:
       retries: 5
 
   mediamtx:
-    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.18.2}
+    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.19.2}
     restart: unless-stopped
     depends_on:
       relay:
@@ -56,10 +56,10 @@ services:
       MTX_API: 'yes'
       MTX_APIADDRESS: :9997
     ports:
-      - '1935:1935'
-      - '8889:8889'
-      - '8189:8189/udp'
-      - '8890:8890/udp'
+      - '${VRRELAY_RTMP_PORT:-1935}:1935'
+      - '${VRRELAY_WHIP_PORT:-8889}:8889'
+      - '${VRRELAY_WEBRTC_UDP_PORT:-8189}:8189/udp'
+      - '${VRRELAY_SRT_PORT:-8890}:8890/udp'
 
 volumes:
   vrrelay-data:

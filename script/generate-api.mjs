@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(root, 'apps/web/src/lib/generated/vrrelay-api');
 const executable = process.platform === 'win32' ? 'openapi-ts.cmd' : 'openapi-ts';
+const compatibilityLoader = new URL('./typescript-compat-loader.mjs', import.meta.url).href;
 
 function generate(target) {
   const result = spawnSync(
@@ -22,7 +23,17 @@ function generate(target) {
       '@hey-api/sdk',
       '@hey-api/client-fetch'
     ],
-    { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' }
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${compatibilityLoader}`]
+          .filter(Boolean)
+          .join(' ')
+      },
+      stdio: 'inherit',
+      shell: process.platform === 'win32'
+    }
   );
   if (result.error) throw result.error;
   if (result.status !== 0)

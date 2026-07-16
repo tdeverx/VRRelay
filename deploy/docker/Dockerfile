@@ -1,18 +1,19 @@
 ARG VRRELAY_VERSION=0.1.0
-FROM node:26.5.0-bookworm-slim AS build
+FROM node:26.5.0-trixie-slim AS build
 WORKDIR /app
-COPY package*.json tsconfig.base.json ./
+COPY package*.json .npmrc tsconfig.base.json ./
 COPY apps/relay/package.json apps/relay/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/application/package.json packages/application/package.json
 COPY packages/adapters/package.json packages/adapters/package.json
+RUN npm install --global npm@12.0.1
 RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-FROM debian:bookworm-slim AS ffmpeg
+FROM debian:trixie-slim AS ffmpeg
 ARG TARGETARCH
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl xz-utils && \
@@ -20,24 +21,24 @@ RUN apt-get update && \
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) \
-        archive='ffmpeg-n7.1.5-1-g7d0e842004-linux64-gpl-7.1.tar.xz'; \
-        sha256='f0c580f5f12af54e8c9c649c70b2d25f264edb35393203d34b20cf4f9c126288' ;; \
+        archive='ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz'; \
+        sha256='68e304f5518d3e22cd825e6fb738d0d9a04a8f36127873a18fc6646457e95b92' ;; \
       arm64) \
-        archive='ffmpeg-n7.1.5-1-g7d0e842004-linuxarm64-gpl-7.1.tar.xz'; \
-        sha256='8b61e22e674c9f3530a8953a684d6789dd94de26fffd614b9234b15673b85d04' ;; \
+        archive='ffmpeg-n8.1.2-22-g94138f6973-linuxarm64-gpl-8.1.tar.xz'; \
+        sha256='d8f8ad1568cf4247a7a834a6cd88c5c4c2c5115b02d4b5e49bdd1a51a3a6cd0b' ;; \
       *) echo "Unsupported FFmpeg architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
     curl --fail --location --retry 3 \
-      "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/$archive" \
+      "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-15-14-01/$archive" \
       --output /tmp/ffmpeg.tar.xz; \
     echo "$sha256  /tmp/ffmpeg.tar.xz" | sha256sum --check --strict; \
     mkdir -p /opt/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1; \
-    /opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep -F '7.1.5'; \
+    /opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep -F '8.1.2'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -F 'libx264'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -filters | grep -F 'subtitles'
 
-FROM node:26.5.0-bookworm-slim
+FROM node:26.5.0-trixie-slim
 ARG VRRELAY_VERSION
 LABEL org.opencontainers.image.title="VRRelay" \
       org.opencontainers.image.version="$VRRELAY_VERSION" \

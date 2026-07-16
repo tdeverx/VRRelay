@@ -9,11 +9,17 @@ compose_file='deploy/docker/docker-compose.yml'
 relay_container="${project}-relay-1"
 mediamtx_container="${project}-mediamtx-1"
 image="${project}-relay:latest"
+host_port="${VRRELAY_SMOKE_PORT:-18099}"
 
 export VRRELAY_MASTER_KEY='standalone-smoke-master-key-000000000'
 export VRRELAY_MEDIAMTX_READ_TOKEN='standalone-smoke-read-token-000000000'
 export VRRELAY_SETUP_TOKEN='standalone-smoke-setup-token-000000000'
-export VRRELAY_PUBLIC_URL='http://127.0.0.1:8099'
+export VRRELAY_HTTP_PORT="$host_port"
+export VRRELAY_PUBLIC_URL="http://127.0.0.1:$host_port"
+export VRRELAY_RTMP_PORT="${VRRELAY_SMOKE_RTMP_PORT:-11935}"
+export VRRELAY_WHIP_PORT="${VRRELAY_SMOKE_WHIP_PORT:-18889}"
+export VRRELAY_WEBRTC_UDP_PORT="${VRRELAY_SMOKE_WEBRTC_UDP_PORT:-18189}"
+export VRRELAY_SRT_PORT="${VRRELAY_SMOKE_SRT_PORT:-18890}"
 
 cleanup() {
   docker compose --project-name "$project" -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -21,8 +27,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if docker ps --format '{{.Ports}}' | grep -Eq '(^|,)0\.0\.0\.0:8099->|(^|,)\[::\]:8099->'; then
-  echo 'Port 8099 is already in use by another Docker container' >&2
+if docker ps --format '{{.Ports}}' | grep -Eq "(^|,)0\\.0\\.0\\.0:${host_port}->|(^|,)\\[::\\]:${host_port}->"; then
+  echo "Port $host_port is already in use by another Docker container" >&2
   exit 1
 fi
 
@@ -63,8 +69,8 @@ done
   exit 1
 }
 
-curl --fail --silent --show-error http://127.0.0.1:8099/api/v1/health >/dev/null
-curl --fail --silent --show-error http://127.0.0.1:8099/ >/dev/null
+curl --fail --silent --show-error "http://127.0.0.1:$host_port/api/v1/health" >/dev/null
+curl --fail --silent --show-error "http://127.0.0.1:$host_port/" >/dev/null
 
 docker exec "$relay_container" node --input-type=module -e "
   import { connect } from 'node:net';

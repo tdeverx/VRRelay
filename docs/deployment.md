@@ -24,7 +24,7 @@ Kubernetes, and other orchestrated deployments are displayed as read-only instea
 declarative configuration silently overridden. A saved native configuration becomes active only
 after the administrator selects **Restart relay**.
 
-The default macOS packager builds FFmpeg 7.1.5 from the structured,
+The default macOS packager builds FFmpeg 8.1.2 from the structured,
 checksum-pinned Apple Silicon recipe in `deploy/runtime-manifest.json`; it no
 longer packages Homebrew's FFmpeg dependency graph. Install the recipe's build
 tools and exercise the builder directly with:
@@ -62,7 +62,9 @@ docker compose -f deploy/docker/docker-compose.yml up --build
 
 Use `compose.gpu.yml` as a host-specific example for `/dev/dri` or NVIDIA access. Hardware presets stay disabled unless FFmpeg discovers the relevant encoder. When using the TLS overlay, set `VRRELAY_CADDY_IMAGE` to a digest-pinned Caddy image and keep the controller agent port on raw TCP/TLS passthrough rather than behind the HTTP proxy.
 
-The OCI image does not install the host distribution's moving FFmpeg package. Its x64 and arm64 builds download the architecture-specific FFmpeg 7.1.5 GPL artifact recorded in `deploy/runtime-manifest.json`, verify SHA-256 before extraction, and self-test version, `libx264`, and subtitle-filter availability during the image build.
+The standalone host ports remain 8099 (HTTP), 1935 (RTMP), 8889 (WHIP), 8189/UDP (WebRTC), and 8890/UDP (SRT). Override them with `VRRELAY_HTTP_PORT`, `VRRELAY_RTMP_PORT`, `VRRELAY_WHIP_PORT`, `VRRELAY_WEBRTC_UDP_PORT`, and `VRRELAY_SRT_PORT` when running parallel stacks or avoiding a host-port conflict.
+
+The OCI image does not install the host distribution's moving FFmpeg package. Its x64 and arm64 builds download the architecture-specific FFmpeg 8.1.2 GPL artifact recorded in `deploy/runtime-manifest.json`, verify SHA-256 before extraction, and self-test version, `libx264`, and subtitle-filter availability during the image build.
 
 MediaMTX authenticates publishers and readers through VRRelay's internal callback. RTMP, SRT, and WHIP are ingest methods; standard HLS is the initial live playback output.
 
@@ -81,6 +83,10 @@ docker compose -f deploy/docker/docker-compose.cluster.yml up --build
 
 This topology bundles PostgreSQL, Valkey, MinIO, and separate controller, source-worker, ingest-origin, and edge services. For different machines, use `compose.multi-host.yml` with exactly one role profile per host and external database, coordination, and object-store endpoints. The multi-host file defines each role explicitly rather than inheriting the controller service, so source workers publish no ports, ingest origins publish only MediaMTX ingest ports, and edges publish only the relay playback port. Set digest-pinned `VRRELAY_IMAGE` and `VRRELAY_MEDIAMTX_IMAGE` values for multi-host release deployments. Enroll every non-controller node with a single-use token, then remove that token from its environment. Set `VRRELAY_LIVE_ORIGIN_URL` on every edge to the ingest origin's reachable SRT URL (preferred across regions) or RTSP URL. When SRT crosses an untrusted network, set the same 10–79 character `VRRELAY_LIVE_SRT_PASSPHRASE` on the origin and its edges; keep it in the platform secret environment instead of embedding it in the origin URL. WHIP additionally requires trusted HTTPS signaling, the advertised public/LAN host in `VRRELAY_WEBRTC_ADDITIONAL_HOSTS`, and UDP 8189 forwarded to the MediaMTX origin; the TLS Compose overlay includes a dedicated WHIP reverse proxy domain and blocks MediaMTX control/API paths at the public front door. The edge relay creates the MediaMTX path through its private Control API on first playback; MediaMTX then pulls that path on demand and fans it out locally, producing one origin-to-edge stream rather than one upstream per viewer. Do not expose the edge Control API or its internal HLS port publicly.
 
+PostgreSQL 18 stores its versioned data directory below `/var/lib/postgresql`. Upgrade an existing PostgreSQL 17 cluster with `pg_upgrade` or a dump/restore before starting the refreshed Compose stack; do not attach the old PostgreSQL 17 volume directly to the PostgreSQL 18 service.
+
+The clustered topology accepts the same media-port overrides plus `VRRELAY_CONTROLLER_HTTP_PORT`, `VRRELAY_CONTROLLER_AGENT_PORT`, and `VRRELAY_EDGE_HTTP_PORT`; their defaults remain 8099, 8101, and 8100 respectively.
+
 ## Kubernetes and generic VMs
 
 `deploy/kubernetes` is a provider-neutral Helm chart with all four role workloads, persistent storage, probes, service accounts, network policy, TLS ingress, GPU resource overrides, and upgrade migration hooks. It accepts externally managed PostgreSQL, Valkey, and object-store endpoints. The migration hook uses the controller Secret, forces PostgreSQL repository mode, mounts writable data/tmp storage for schema checks and migration-backup artifacts, and has a bounded active deadline. The controller remains one replica for v1. Live ingest runs through the authenticated `vrrelay-mediamtx-origin` workload; every edge pod contains a private MediaMTX sidecar and creates an on-demand SRT pull from that origin. The chart renders both relay and MediaMTX workloads by digest when `image.digest` and `mediaMtx.image.digest` are set. Set `mediaMtx.ingestService.type` to `LoadBalancer` (and provider-neutral service annotations as required) when OBS must reach the Kubernetes origin from outside the cluster. Expose `controller.agentService` only through raw TCP/TLS passthrough, and use `edge.ingress` for the public edge URL. The origin Control API/HLS service and all edge sidecars remain cluster-private. Kubernetes installation is staged because every role consumes a distinct single-use token; set `rollout.runtimeSecretChecksum` when externally managed Secrets change and tighten `networkPolicy.externalEgress` to your runtime CIDRs before release. See the chart's `README.md`.
@@ -96,7 +102,7 @@ start, stop, and restart through Windows Service Control Manager. It may be clos
 without stopping the service. Release packaging supplies validated Node, FFmpeg
 (AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
 
-The Windows packager downloads the immutable FFmpeg 7.1.5 BtbN GPL archive and Electron 43.1.1 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
+The Windows packager downloads the immutable FFmpeg 8.1.2 BtbN GPL archive and Electron 43.1.1 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
 
 ## TLS modes
 

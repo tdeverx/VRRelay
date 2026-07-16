@@ -30,7 +30,7 @@ actual_label="$(docker image inspect --format '{{ index .Config.Labels "org.open
 docker run --rm --entrypoint sh "$image" -ec '
   test "$(id -u)" != 0
   node --version | grep -F "v26.5.0"
-  ffmpeg -hide_banner -version | head -1 | grep -F "7.1.5"
+  ffmpeg -hide_banner -version | head -1 | grep -F "8.1.2"
   ffmpeg -hide_banner -encoders 2>/dev/null | grep -F "libx264"
   ffmpeg -hide_banner -filters 2>/dev/null | grep -F "subtitles"
 '

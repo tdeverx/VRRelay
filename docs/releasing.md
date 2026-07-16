@@ -35,7 +35,7 @@ candidate tag.
 
 ## Corresponding source
 
-The macOS package builds FFmpeg 7.1.5 from the checksum-pinned arm64 recipe in
+The macOS package builds FFmpeg 8.1.2 from the checksum-pinned arm64 recipe in
 the runtime manifest. That builder collects every FFmpeg, x264, subtitle, font,
 text-shaping, line-breaking, and zimg source input; the exact recipe; build
 metadata; configuration; licenses; rebuild instructions; and a per-file
@@ -48,7 +48,7 @@ Windows and both OCI architectures use the checksum-pinned BtbN GPL builds
 recorded in the runtime manifest. Before a tag can publish, maintainers must
 generate and host one complete corresponding-source archive covering those
 three exact binaries, including FFmpeg commit
-`7d0e8420048cffd0ca3883b877ead2390496d0b2`, the matching BtbN build scripts,
+`94138f6973dd1ac6208ace92148ac0d172455d65`, the matching BtbN build scripts,
 patches, configuration, and every covered linked-library source needed to
 rebuild them.
 

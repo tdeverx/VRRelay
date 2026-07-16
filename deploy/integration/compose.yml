@@ -27,7 +27,7 @@ x-relay-common: &relay-common
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: vrrelay
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -39,7 +39,7 @@ services:
       retries: 30
 
   valkey:
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:9.1-alpine
     command: [valkey-server, --save, '', --appendonly, 'no']
     healthcheck:
       test: [CMD, valkey-cli, ping]
@@ -104,7 +104,7 @@ services:
       retries: 30
 
   mediamtx-origin:
-    image: bluenviron/mediamtx:1.18.2
+    image: bluenviron/mediamtx:1.19.2
     environment:
       MTX_AUTHMETHOD: http
       MTX_AUTHHTTPADDRESS: http://ingest-origin:8099/internal/mediamtx/auth
@@ -219,7 +219,7 @@ services:
       - edge-a-cache:/cache
 
   mediamtx-edge-a:
-    image: bluenviron/mediamtx:1.18.2
+    image: bluenviron/mediamtx:1.19.2
     profiles: [agents]
     volumes:
       - ../docker/mediamtx-edge.yml:/mediamtx.yml:ro
@@ -251,7 +251,7 @@ services:
       - edge-b-cache:/cache
 
   mediamtx-edge-b:
-    image: bluenviron/mediamtx:1.18.2
+    image: bluenviron/mediamtx:1.19.2
     profiles: [agents]
     volumes:
       - ../docker/mediamtx-edge.yml:/mediamtx.yml:ro

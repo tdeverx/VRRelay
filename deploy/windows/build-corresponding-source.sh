@@ -4,14 +4,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUTPUT="${1:-$ROOT/dist/ffmpeg-btbn-corresponding-source.tar.xz}"
-BTBN_TAG="autobuild-2026-06-30-13-34"
-BTBN_COMMIT="7a83528ea3431e9eca982a712bc3a7cd0789d5d0"
-FFMPEG_COMMIT="7d0e8420048cffd0ca3883b877ead2390496d0b2"
+BTBN_TAG="autobuild-2026-07-15-14-01"
+BTBN_COMMIT="1f74efed63f467dbf0d1e5dd8548bf2188f4ad21"
+FFMPEG_COMMIT="94138f6973dd1ac6208ace92148ac0d172455d65"
 TARGET="win64"
 LINUX_TARGETS=(linux64 linuxarm64)
 VARIANT="gpl"
-ADDINS="7.1"
-SOURCE_DATE_EPOCH="1782826542"
+ADDINS="8.1"
+SOURCE_DATE_EPOCH="1784124135"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -78,7 +78,7 @@ docker run --rm \
   -e SOURCE_DATE_EPOCH \
   -v "$WORK/bundle:/source:ro" \
   -v "$(dirname "$OUTPUT"):/output" \
-  debian:bookworm-slim \
+  debian:trixie-slim \
   sh -ec 'apt-get update >/dev/null && apt-get install -y --no-install-recommends xz-utils >/dev/null && tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -C /source -cJf "/output/'"$(basename "$OUTPUT")"'" vrrelay-ffmpeg-source'
 
 node "$ROOT/script/windows-source-bundle.mjs" --verify "$OUTPUT"

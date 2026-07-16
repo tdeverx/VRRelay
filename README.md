@@ -50,11 +50,11 @@ production defaults. Experimental formats are not compatibility claims.
 
 ## Requirements
 
-- Node.js `26.5.0` and npm `11.17.0` (`.nvmrc` pins the Node version).
-- FFmpeg 7.x with `libx264`, AAC, HLS, and MPEG-TS support.
+- Node.js `26.5.0` and npm `12.0.1` (`.nvmrc` pins the Node version).
+- FFmpeg 8.1.2 with `libx264`, AAC, HLS, and MPEG-TS support.
 - Git.
 
-MediaMTX 1.18.2, Docker, Swift, Windows packaging tools, and Helm are needed
+MediaMTX 1.19.2, Docker, Swift 6.3, Windows packaging tools, and Helm are needed
 only for the corresponding live, deployment, or native workflows. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the complete tool matrix.
 

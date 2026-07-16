@@ -15,15 +15,15 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Required tools:
 
-- Node.js 26.5.0 and npm 11.17.0. The exact Node version is in `.nvmrc`.
-- FFmpeg 7.x with `libx264`, AAC, HLS, and MPEG-TS support.
+- Node.js 26.5.0 and npm 12.0.1. The exact Node version is in `.nvmrc`.
+- FFmpeg 8.1.2 with `libx264`, AAC, HLS, and MPEG-TS support.
 - Git.
 
 Optional tools depend on the area being changed:
 
-- MediaMTX 1.18.2 for OBS/live work.
+- MediaMTX 1.19.2 for OBS/live work.
 - Docker with Compose for deployment and distributed integration work.
-- Swift 6.2 and macOS 15 for the menu controller.
+- Swift 6.3 and macOS 15 for the menu controller.
 - Windows x64, PowerShell, Inno Setup 6, and WinSW for Windows packaging.
 - Helm 4.2.3 for Kubernetes chart work.
 

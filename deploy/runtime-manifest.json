@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-14",
+  "updatedAt": "2026-07-16",
   "components": [
     {
       "name": "node",
@@ -29,14 +29,14 @@
     },
     {
       "name": "ffmpeg",
-      "version": "7.1.5",
+      "version": "8.1.2",
       "license": "GPL-3.0-or-later",
-      "source": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
       "sourceNotes": {
         "darwin-arm64": "The native package builds a minimal headless arm64 binary from the checksum-pinned source recipe below. Third-party libraries are linked statically; Apple system frameworks remain dynamic.",
-        "linux-x64": "The pinned BtbN GPL build is based on FFmpeg commit 7d0e8420048cffd0ca3883b877ead2390496d0b2. OCI and Windows binaries share one complete corresponding-source bundle.",
-        "linux-arm64": "The pinned BtbN GPL build is based on FFmpeg commit 7d0e8420048cffd0ca3883b877ead2390496d0b2. OCI and Windows binaries share one complete corresponding-source bundle.",
-        "windows-x64": "The BtbN build is based on FFmpeg commit 7d0e8420048cffd0ca3883b877ead2390496d0b2 and its GPL dependency build scripts. Binary releases are blocked unless the complete corresponding-source bundle is attached."
+        "linux-x64": "The pinned BtbN GPL build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65. OCI and Windows binaries share one complete corresponding-source bundle.",
+        "linux-arm64": "The pinned BtbN GPL build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65. OCI and Windows binaries share one complete corresponding-source bundle.",
+        "windows-x64": "The BtbN build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65 and its GPL dependency build scripts. Binary releases are blocked unless the complete corresponding-source bundle is attached."
       },
       "capabilities": ["h264", "aac", "mpegts-hls", "fmp4-hls", "subtitles", "tonemap"],
       "sourceBuilds": {
@@ -53,19 +53,19 @@
           "inputs": [
             {
               "name": "ffmpeg",
-              "version": "7.1.5",
+              "version": "8.1.2",
               "license": "GPL-3.0-or-later",
-              "file": "ffmpeg-7.1.5.tar.xz",
-              "url": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz",
-              "sha256": "de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f"
+              "file": "ffmpeg-8.1.2.tar.xz",
+              "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+              "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
             },
             {
               "name": "x264",
-              "version": "r3222-b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+              "version": "r3223-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
               "license": "GPL-2.0-or-later",
-              "file": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2",
-              "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2",
-              "sha256": "6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224"
+              "file": "x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.bz2",
+              "url": "https://code.videolan.org/videolan/x264/-/archive/0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee/x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.bz2",
+              "sha256": "f05c59f2e83d494c36307025dca2d3afc6b4d185f3a3453d06cc4fecd7094057"
             },
             {
               "name": "libass",
@@ -120,72 +120,72 @@
       },
       "artifacts": {
         "source": {
-          "file": "ffmpeg-7.1.5.tar.xz",
-          "sha256": "de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f"
+          "file": "ffmpeg-8.1.2.tar.xz",
+          "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
         },
         "linux-x64": {
-          "file": "ffmpeg-n7.1.5-1-g7d0e842004-linux64-gpl-7.1.tar.xz",
-          "sha256": "f0c580f5f12af54e8c9c649c70b2d25f264edb35393203d34b20cf4f9c126288",
+          "file": "ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz",
+          "sha256": "68e304f5518d3e22cd825e6fb738d0d9a04a8f36127873a18fc6646457e95b92",
           "buildRecipe": {
             "provider": "BtbN/FFmpeg-Builds",
-            "releaseTag": "autobuild-2026-06-30-13-34",
-            "repositoryCommit": "7a83528ea3431e9eca982a712bc3a7cd0789d5d0",
-            "ffmpegCommit": "7d0e8420048cffd0ca3883b877ead2390496d0b2",
+            "releaseTag": "autobuild-2026-07-15-14-01",
+            "repositoryCommit": "1f74efed63f467dbf0d1e5dd8548bf2188f4ad21",
+            "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
             "target": "linux64",
             "variant": "gpl",
-            "addins": ["7.1"]
+            "addins": ["8.1"]
           }
         },
         "linux-arm64": {
-          "file": "ffmpeg-n7.1.5-1-g7d0e842004-linuxarm64-gpl-7.1.tar.xz",
-          "sha256": "8b61e22e674c9f3530a8953a684d6789dd94de26fffd614b9234b15673b85d04",
+          "file": "ffmpeg-n8.1.2-22-g94138f6973-linuxarm64-gpl-8.1.tar.xz",
+          "sha256": "d8f8ad1568cf4247a7a834a6cd88c5c4c2c5115b02d4b5e49bdd1a51a3a6cd0b",
           "buildRecipe": {
             "provider": "BtbN/FFmpeg-Builds",
-            "releaseTag": "autobuild-2026-06-30-13-34",
-            "repositoryCommit": "7a83528ea3431e9eca982a712bc3a7cd0789d5d0",
-            "ffmpegCommit": "7d0e8420048cffd0ca3883b877ead2390496d0b2",
+            "releaseTag": "autobuild-2026-07-15-14-01",
+            "repositoryCommit": "1f74efed63f467dbf0d1e5dd8548bf2188f4ad21",
+            "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
             "target": "linuxarm64",
             "variant": "gpl",
-            "addins": ["7.1"]
+            "addins": ["8.1"]
           }
         },
         "windows-x64": {
-          "file": "ffmpeg-n7.1.5-1-g7d0e842004-win64-gpl-7.1.zip",
-          "sha256": "405b190f746db40539eb453967f72c0e69d8bf260b10ceff36e0c2149a9ad22f",
+          "file": "ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip",
+          "sha256": "0af1621d3a2e418b86d8ff4704f5d5a70bcce611edd6c5110d092533b170952c",
           "buildRecipe": {
             "provider": "BtbN/FFmpeg-Builds",
-            "releaseTag": "autobuild-2026-06-30-13-34",
-            "repositoryCommit": "7a83528ea3431e9eca982a712bc3a7cd0789d5d0",
-            "ffmpegCommit": "7d0e8420048cffd0ca3883b877ead2390496d0b2",
+            "releaseTag": "autobuild-2026-07-15-14-01",
+            "repositoryCommit": "1f74efed63f467dbf0d1e5dd8548bf2188f4ad21",
+            "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
             "target": "win64",
             "variant": "gpl",
-            "addins": ["7.1"]
+            "addins": ["8.1"]
           }
         }
       }
     },
     {
       "name": "mediamtx",
-      "version": "1.18.2",
+      "version": "1.19.2",
       "license": "MIT",
-      "source": "https://github.com/bluenviron/mediamtx/releases/tag/v1.18.2",
+      "source": "https://github.com/bluenviron/mediamtx/releases/tag/v1.19.2",
       "capabilities": ["rtmp", "srt", "whip", "hls", "rtsp"],
       "artifacts": {
         "darwin-arm64": {
-          "file": "mediamtx_v1.18.2_darwin_arm64.tar.gz",
-          "sha256": "6a9273ae22a9d0ba85d00d03fdd1b13b9eeaf129ea8b90999ec746367f20449a"
+          "file": "mediamtx_v1.19.2_darwin_arm64.tar.gz",
+          "sha256": "c225e46ab65295f95ee9fcda75703129c07add8852483abda09299a78524391f"
         },
         "windows-x64": {
-          "file": "mediamtx_v1.18.2_windows_amd64.zip",
-          "sha256": "945ab46c5fc6d2802ad18e2f1d7e49245ca5609657d85e310aa6eda4cdd72eec"
+          "file": "mediamtx_v1.19.2_windows_amd64.zip",
+          "sha256": "53028b551afcc8d9ddbd56eb8406d5b31e395e5505d52e28347f211696be9345"
         },
         "linux-x64": {
-          "file": "mediamtx_v1.18.2_linux_amd64.tar.gz",
-          "sha256": "73ed27c292e05ceb4990dcb34531f01872dfff5374b7515c45a202e0abf47706"
+          "file": "mediamtx_v1.19.2_linux_amd64.tar.gz",
+          "sha256": "f9c601cc303ceca8fad2883917b022882672c5bc56311e92dbceb16e5f20c60c"
         },
         "linux-arm64": {
-          "file": "mediamtx_v1.18.2_linux_arm64.tar.gz",
-          "sha256": "c78aa7a1bdab94b2b02be364661f17802143215dba37e1fa67c3e0849248b485"
+          "file": "mediamtx_v1.19.2_linux_arm64.tar.gz",
+          "sha256": "562f419912a8668c18216a9e8c95359ec82fbb754e4a44e2953ef62b98eec688"
         }
       }
     },

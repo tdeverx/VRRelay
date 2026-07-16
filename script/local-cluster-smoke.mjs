@@ -216,7 +216,7 @@ async function main() {
     'POSTGRES_DB=vrrelay',
     '-p',
     '19432:5432',
-    'postgres:16-alpine'
+    'postgres:18-alpine'
   ]);
   command('docker', [
     'run',
@@ -225,8 +225,8 @@ async function main() {
     redisName,
     '-p',
     '19379:6379',
-    'redis:8-alpine',
-    'redis-server',
+    'valkey/valkey:9.1-alpine',
+    'valkey-server',
     '--save',
     '',
     '--appendonly',

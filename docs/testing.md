@@ -77,7 +77,7 @@ coalescing, completed per-worker attempt history, node-local failover bindings, 
 revocation, PostgreSQL and Redis restart tolerance, controller restart, and playback-grant recovery.
 It uses ports `19096`, `19100`, `19110`, `19201`, `19202`, `19211`, `19212`, `19379`, and `19432`.
 
-Hosted Linux and Windows checks install checksum-pinned FFmpeg 7.1.5 runtimes
+Hosted Linux and Windows checks install checksum-pinned FFmpeg 8.1.2 runtimes
 from `deploy/runtime-manifest.json`; hosted macOS checks build the pinned source
 recipe before running the same repository gate. Local runs use the compatible
 FFmpeg on `PATH`. CI never falls back silently to a distribution package.
