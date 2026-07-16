@@ -86,8 +86,8 @@ Runtime used locally:
 - Node: `v22.22.3`
 - npm: `10.9.8`
 
-The repository pin is Node `22.23.1`; the pinned-runtime full gate remains part
-of the final high-pass verification bundle.
+The later combined closeout passed the pinned Node `22.23.1` full repository
+gate; its result is recorded below.
 
 Commands:
 
@@ -123,12 +123,12 @@ npm run build --workspace @vrrelay/relay
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 361 tests with 23
-intentional skips and reported zero npm vulnerabilities.
+Result: all commands passed. The later combined closeout reran the complete gate
+under pinned Node `22.23.1`: 395 tests passed, 23 intentional skips, all checks
+and builds passed, and the npm audit reported zero vulnerabilities.
 
 ## Deferred to later Phase 6 and final high-pass verification
 
 - Destructive external object-store outage evidence.
 - Destructive multi-process origin recovery evidence.
-- Full `npm run ci` under the checksum-verified pinned Node runtime and
-  destructive multi-process edge/live failure evidence.
+- Destructive multi-process edge/live failure evidence.

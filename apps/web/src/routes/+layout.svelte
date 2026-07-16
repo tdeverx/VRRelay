@@ -8,6 +8,7 @@
   import { api } from '$lib/api';
 
   let { children } = $props();
+  let ready = $state(false);
 
   onMount(async () => {
     try {
@@ -16,6 +17,8 @@
       if (setup.configured && page.url.pathname === '/setup') await goto('/login');
     } catch {
       // The route itself will present a useful connection error.
+    } finally {
+      ready = true;
     }
   });
 </script>
@@ -29,6 +32,6 @@
 </svelte:head>
 
 <TooltipProvider>
-  {@render children()}
-  <Toaster richColors position="bottom-right" />
+  {#if ready}{@render children()}{/if}
+  <Toaster richColors theme="dark" position="bottom-right" expand />
 </TooltipProvider>

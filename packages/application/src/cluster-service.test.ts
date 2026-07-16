@@ -1038,7 +1038,7 @@ describe('cluster service', () => {
     expect(await repository.listNodes()).toHaveLength(1);
   });
 
-  it('fails explicit placement when the requested encoder is unavailable', async () => {
+  it('excludes encoder-incompatible and disconnected workers from placement', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-placement-'));
     dirs.push(dir);
     const repository = new SqliteRepository(join(dir, 'state.sqlite'));
@@ -1059,45 +1059,87 @@ describe('cluster service', () => {
       capabilities,
       weight: 100
     });
+    const profile = {
+      profileId: 'hevc',
+      revision: 1,
+      name: 'HEVC',
+      platform: 'pc' as const,
+      state: 'experimental' as const,
+      video: {
+        codec: 'h265' as const,
+        encoder: 'hevc_nvenc',
+        hardwareMode: 'nvenc' as const,
+        decodeMode: 'auto' as const,
+        pixelFormat: 'yuv420p',
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        bitrateKbps: 6000,
+        maxrateKbps: 7000,
+        bufferKbps: 12000,
+        gop: 60,
+        bFrames: 0
+      },
+      audio: {
+        codec: 'aac' as const,
+        channels: 2,
+        layout: 'stereo',
+        sampleRate: 48000,
+        bitrateKbps: 192
+      },
+      delivery: {
+        method: 'hls' as const,
+        container: 'mpegts' as const,
+        segmentType: 'mpegts' as const,
+        segmentDuration: 4,
+        playlistType: 'vod' as const,
+        latencyMode: 'standard' as const
+      },
+      processing: {
+        toneMap: false,
+        burnSubtitles: false,
+        passthrough: 'never' as const,
+        maxWorkers: 1
+      },
+      createdAt: new Date().toISOString()
+    };
     const result = await cluster.previewPlacement({
       policy: 'hosted',
       preferredNodeId: 'worker',
       providerId: 'provider-1',
-      profile: {
-        profileId: 'hevc',
-        revision: 1,
-        name: 'HEVC',
-        platform: 'pc',
-        state: 'experimental',
-        video: {
-          codec: 'h265',
-          encoder: 'hevc_nvenc',
-          hardwareMode: 'nvenc',
-          decodeMode: 'auto',
-          pixelFormat: 'yuv420p',
-          width: 1920,
-          height: 1080,
-          frameRate: 30,
-          bitrateKbps: 6000,
-          maxrateKbps: 7000,
-          bufferKbps: 12000,
-          gop: 60,
-          bFrames: 0
-        },
-        audio: { codec: 'aac', channels: 2, layout: 'stereo', sampleRate: 48000, bitrateKbps: 192 },
-        delivery: {
-          method: 'hls',
-          container: 'mpegts',
-          segmentType: 'mpegts',
-          segmentDuration: 4,
-          playlistType: 'vod',
-          latencyMode: 'standard'
-        },
-        processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 1 },
-        createdAt: new Date().toISOString()
-      }
+      profile
     });
     expect(result).toEqual({ reason: 'preferred-node-unavailable' });
+
+    const h264Profile = {
+      ...profile,
+      profileId: 'h264',
+      name: 'H.264',
+      video: {
+        ...profile.video,
+        codec: 'h264' as const,
+        encoder: 'libx264',
+        hardwareMode: 'software' as const
+      }
+    };
+    await expect(
+      cluster.previewPlacement({
+        policy: 'hosted',
+        preferredNodeId: 'worker',
+        providerId: 'provider-1',
+        profile: h264Profile,
+        isNodeConnected: () => false
+      })
+    ).resolves.toEqual({ reason: 'preferred-node-unavailable' });
+    await expect(
+      cluster.previewPlacement({
+        policy: 'hosted',
+        preferredNodeId: 'worker',
+        providerId: 'provider-1',
+        profile: h264Profile,
+        isNodeConnected: () => true
+      })
+    ).resolves.toMatchObject({ node: { id: 'worker' }, reason: 'preferred-node' });
   });
 
   it('degrades nodes after 45 seconds and marks them offline after 90 seconds', async () => {

@@ -654,9 +654,13 @@ export class ClusterService {
     profile: ProfileRevision;
     preferredNodeId?: string;
     preferredRegion?: string;
+    isNodeConnected?: (nodeId: string) => boolean;
   }): Promise<{ node?: ClusterNode; reason: string }> {
     const nodes = (await this.list()).filter(
-      (node) => node.state === 'online' && node.roles.includes('source-worker')
+      (node) =>
+        node.state === 'online' &&
+        node.roles.includes('source-worker') &&
+        (!input.isNodeConnected || input.isNodeConnected(node.id))
     );
     const compatible = nodes.filter(
       (node) =>

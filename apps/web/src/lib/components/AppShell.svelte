@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
   import {
     Activity,
@@ -28,15 +28,35 @@
     active = ''
   }: { children: Snippet; rail?: Snippet; bottom?: Snippet; active?: string } = $props();
   let mobileOpen = $state(false);
+  let collapsed = $state(false);
   let health = $state<{ status: string; version: string } | null>(null);
+  let menuButton = $state<HTMLButtonElement | null>(null);
+  let mobileCloseButton = $state<HTMLButtonElement | null>(null);
 
   onMount(async () => {
+    collapsed = localStorage.getItem('vrrelay.navigation-collapsed') === 'true';
     try {
       health = await api.health();
     } catch {
       health = null;
     }
   });
+
+  function toggleCollapsed() {
+    collapsed = !collapsed;
+    localStorage.setItem('vrrelay.navigation-collapsed', String(collapsed));
+  }
+
+  async function openMobileNavigation() {
+    mobileOpen = true;
+    await tick();
+    mobileCloseButton?.focus();
+  }
+
+  function closeMobileNavigation() {
+    mobileOpen = false;
+    menuButton?.focus();
+  }
 
   const navigation = [
     { id: 'sessions', label: 'Sessions', href: '/', icon: Film },
@@ -50,13 +70,26 @@
   ];
 </script>
 
-<div class="app-shell" class:has-bottom={Boolean(bottom)} class:has-rail={Boolean(rail)}>
+<svelte:window
+  onkeydown={(event) => event.key === 'Escape' && mobileOpen && closeMobileNavigation()}
+/>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<div
+  class="app-shell"
+  class:has-bottom={Boolean(bottom)}
+  class:has-rail={Boolean(rail)}
+  class:collapsed
+  class:mobile-navigation={mobileOpen}
+>
   <header class="mobile-header">
     <Button
+      bind:ref={menuButton}
       variant="ghost"
       size="icon"
       aria-label="Open navigation"
-      onclick={() => (mobileOpen = true)}
+      onclick={openMobileNavigation}
     >
       <Menu />
     </Button>
@@ -64,30 +97,40 @@
   </header>
 
   {#if mobileOpen}
-    <button class="scrim" aria-label="Close navigation" onclick={() => (mobileOpen = false)}
-    ></button>
+    <button class="scrim" aria-label="Dismiss navigation" onclick={closeMobileNavigation}></button>
   {/if}
 
   <aside class:open={mobileOpen} class="sidebar">
     <div class="sidebar-brand">
-      <BrandMark />
-      <Button variant="ghost" size="icon" aria-label="Collapse navigation" class="desktop-collapse">
-        <ChevronLeft />
-      </Button>
+      <BrandMark compact={collapsed && !mobileOpen} />
       <Button
         variant="ghost"
         size="icon"
-        aria-label="Close navigation"
-        class="mobile-close"
-        onclick={() => (mobileOpen = false)}
+        aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+        aria-pressed={collapsed}
+        class="desktop-collapse"
+        onclick={toggleCollapsed}
       >
-        <X />
+        <ChevronLeft />
       </Button>
+      {#if mobileOpen}
+        <Button
+          bind:ref={mobileCloseButton}
+          variant="ghost"
+          size="icon"
+          aria-label="Close navigation"
+          class="mobile-close"
+          onclick={closeMobileNavigation}
+        >
+          <X />
+        </Button>
+      {/if}
     </div>
     <nav aria-label="Primary navigation">
       {#each navigation as item}
         <a
           href={item.href}
+          aria-label={collapsed && !mobileOpen ? item.label : undefined}
           aria-current={active === item.id || page.url.pathname === item.href ? 'page' : undefined}
           class={cn(
             'nav-item',
@@ -103,18 +146,34 @@
     <div class="sidebar-status">
       <span class="health-dot"></span>
       <div>
-        <strong>{health?.status === 'ok' ? 'System healthy' : 'System unavailable'}</strong>
+        <strong>{health?.status === 'ok' ? 'Relay reachable' : 'Relay unavailable'}</strong>
         <small>{health ? `VRRelay v${health.version}` : 'VRRelay version unavailable'}</small>
       </div>
     </div>
   </aside>
 
-  <main>{@render children()}</main>
+  <main id="main-content" tabindex="-1">{@render children()}</main>
   {#if rail}<aside class="rail">{@render rail()}</aside>{/if}
   {#if bottom}<footer class="capacity">{@render bottom()}</footer>{/if}
 </div>
 
 <style>
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: 8px;
+    left: 8px;
+    transform: translateY(-160%);
+    border-radius: 6px;
+    padding: 10px 14px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-weight: 650;
+    text-decoration: none;
+  }
+  .skip-link:focus {
+    transform: translateY(0);
+  }
   .app-shell {
     display: grid;
     min-height: 100vh;
@@ -124,6 +183,12 @@
   }
   .app-shell.has-rail {
     grid-template-columns: 228px minmax(0, 1fr) 350px;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+  .app-shell.has-rail.collapsed:not(.mobile-navigation) {
+    grid-template-columns: 76px minmax(0, 1fr) 350px;
   }
   .app-shell.has-bottom {
     grid-template-rows: minmax(0, 1fr) 154px;
@@ -144,6 +209,16 @@
     justify-content: space-between;
     padding: 0 20px;
   }
+  .app-shell.collapsed:not(.mobile-navigation) .sidebar-brand {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    height: 98px;
+    padding: 8px;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) .desktop-collapse :global(svg) {
+    transform: rotate(180deg);
+  }
   nav {
     display: flex;
     flex-direction: column;
@@ -163,6 +238,13 @@
     font-weight: 530;
     text-decoration: none;
     transition: 150ms ease;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) .nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) .nav-item span {
+    display: none;
   }
   .nav-item :global(svg) {
     width: 19px;
@@ -193,6 +275,13 @@
     margin-top: auto;
     border-top: 1px solid var(--border);
     padding: 20px;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) .sidebar-status {
+    justify-content: center;
+    padding: 20px 8px;
+  }
+  .app-shell.collapsed:not(.mobile-navigation) .sidebar-status div {
+    display: none;
   }
   .sidebar-status div {
     display: flex;
@@ -244,6 +333,9 @@
   @media (max-width: 1180px) {
     .app-shell.has-rail {
       grid-template-columns: 208px minmax(0, 1fr);
+    }
+    .app-shell.has-rail.collapsed:not(.mobile-navigation) {
+      grid-template-columns: 76px minmax(0, 1fr);
     }
     .rail {
       display: none;

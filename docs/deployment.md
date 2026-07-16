@@ -10,7 +10,33 @@ VRRELAY_LISTEN_ADDR=127.0.0.1:8099 node apps/relay/dist/main.js
 
 The SwiftPM menu-bar host builds with `swift build --package-path apps/macos`. The `.pkg` installs the `org.vrrelay.service` system LaunchDaemon, which supervises both the TypeScript relay and bundled MediaMTX process, so closing the menu application or logging out does not stop active streams. Start, stop, and restart actions request administrator approval and target that installed service; the separate “Open menu controller at login” setting uses the native macOS login-item service. Upgrades retain service data; the uninstall script removes binaries and retains data unless `--purge-data` is explicit.
 
-Release packaging requires the Homebrew `ffmpeg@7` executable through `VRRELAY_FFMPEG_BINARY`. The packager verifies version 7.1.5, copies every non-system dynamic library, rewrites loader paths to the package, signs the finalized runtime, and writes `runtime-provenance.json` containing the exact bundled hashes. It does not silently fall back to another FFmpeg on `PATH`. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires Developer ID application signing, Developer ID installer signing, and notarization credentials before the package can be produced.
+The default macOS packager builds FFmpeg 7.1.5 from the structured,
+checksum-pinned Apple Silicon recipe in `deploy/runtime-manifest.json`; it no
+longer packages Homebrew's FFmpeg dependency graph. Install the recipe's build
+tools and exercise the builder directly with:
+
+```sh
+brew install autoconf automake libtool meson ninja pkg-config
+deploy/macos/build-ffmpeg.sh tmp/macos-ffmpeg
+```
+
+The builder targets arm64 and macOS 15, disables FFplay, FFprobe, autodetection,
+and unnecessary device I/O, and links the eight recorded third-party inputs
+statically. Only Apple system frameworks and `/usr/lib` libraries may remain
+dynamic. It verifies the required encoders, filters, muxers, and protocols,
+decodes a generated H.264/AAC MPEG-TS smoke output, and emits build metadata,
+dependency licenses, and a complete source archive with per-file SHA-256 sums.
+`VRRELAY_FFMPEG_BINARY` remains a development-only package override; release
+mode rejects it and always uses the source recipe.
+
+The packager signs nested runtime binaries with the hardened runtime and a
+trusted timestamp when a Developer ID identity is present, signs the finalized
+app and installer, and writes `runtime-provenance.json` with the exact bundled
+hashes. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires
+Developer ID application signing, Developer ID installer signing, and
+notarization credentials before the package can be produced. The attached
+source archive and FriBidi license/source obligations must remain with the
+distributed macOS FFmpeg binary.
 
 ## Docker Compose
 

@@ -29,8 +29,10 @@ not release evidence by themselves.
   Valkey, filesystem/S3-compatible/Azure/GCS adapters, and a distributed
   acceptance harness.
 - macOS, Windows, OCI, Compose, Helm, backup, release, SBOM, and provenance
-  scaffolding, with native release-mode guardrails for signing, notarization,
-  runtime provenance, and FFmpeg corresponding-source bundle presence.
+  scaffolding, including a locally compiled macOS FFmpeg binary from a
+  checksum-pinned source recipe and native release-mode guardrails for signing,
+  notarization, runtime provenance, and FFmpeg corresponding-source bundle
+  presence.
 
 These bullets inventory code and assets; they do not assert that every exposed
 setting, failure mode, deployment topology, or administrator workflow is
@@ -118,6 +120,12 @@ multi-node verification is still pending.
 - Expired distributed segment jobs now close the latest running worker-history
   entry as failed before the job is requeued, preserving an auditable restart
   and retry trail.
+- A reusable provider-neutral contract suite now runs the same fourteen cases
+  against an in-memory fake and a Jellyfin adapter backed by a local HTTP
+  fixture. It covers authentication, validation, catalog hierarchy/pagination,
+  media versions/tracks, source resolution/ranges, playback activity,
+  cancellation, and rejected-secret redaction without using real provider
+  credentials.
 - Focused provider-binding and crash-recovery tests, format check,
   generated-contract and TypeScript checks, lint, and package builds passed. See
   [Phase 4 implementation evidence](evidence/phase-04-implementation.md).
@@ -201,15 +209,31 @@ edge-delivery and live-fan-out verification is still pending.
 
 ## Phase 7 implementation checkpoint
 
-Phase 7 has a first build-first implementation checkpoint. Its broader
-administrator workflow, browser, accessibility, and realtime verification is
-still pending.
+Phase 7 has an expanded build-first implementation checkpoint. Verification of
+the complete administrator workflow set and realtime behavior remains pending.
 
+- Dashboard requests now use operation-specific functions from the generated
+  OpenAPI SDK. Generated code owns public paths, methods, queries, and request
+  bodies; the remaining facade handles authentication, CSRF, normalized errors,
+  and small domain-facing conveniences. Repository checks reject a return to
+  literal API paths or the generated client's generic request method.
+- Session controls now expose stop/resume, pin/unpin, delete, detail/output
+  selection, and copy-link actions.
+- VOD creation previews placement, filters eligible source workers by provider
+  and encoder, supports preferred region or an exact locked worker, and shows
+  explicit rejection reasons. The server derives the durable lock from the
+  exact preferred-worker request.
+- Navigation collapse now persists, mobile open/close and Escape behavior
+  restore focus, and a skip link supports keyboard users.
 - The cluster dashboard node cache panel can target the local cache or a
   connected source-worker/edge node for inventory and bulk eviction.
 - The dashboard sends `nodeId` only for selected remote cache targets, falls
   back to local cache when the selected node disconnects or stops owning cache,
-  and now labels the workflow as node cache instead of edge-only cache. See
+  and now labels the workflow as node cache instead of edge-only cache.
+- Playwright setup/login/navigation and PAT create/revoke/logout workflows pass
+  across desktop and mobile Chromium with no captured page errors or
+  serious/critical Axe findings, and a dedicated CI job retains failure
+  artifacts. See
   [Phase 7 implementation evidence](evidence/phase-07-implementation.md).
 
 ## Phase 8 implementation checkpoint
@@ -247,7 +271,29 @@ pending.
   authenticated operations stream.
 - The benchmark runner now has explicit playlist, cached-egress,
   uncached-encode, live-fan-out, cache-ratio, and resource-snapshot scenarios
-  with sanitized target metadata and host resource snapshots.
+  with sanitized target metadata and host resource snapshots. Reports are now
+  schema-versioned and can be privately/atomically retained; optional gates
+  enforce zero request errors and comparable-baseline throughput/p95 limits.
+
+## Phase 9 implementation checkpoint
+
+Phase 9 has an automated-verification checkpoint, not a completed exit gate.
+
+- Reusable fake/Jellyfin provider contracts add fourteen common behavioral
+  cases without external secrets.
+- Four route-level security tests cover setup/login cookies, CSRF, PAT
+  scope/expiry/revocation, malformed and secret-bearing requests, and playback
+  grant tampering/revocation/expiry.
+- Playwright desktop/mobile coverage and CI integration exercise two critical
+  administrator journeys, browser errors, and serious/critical accessibility
+  findings.
+- Benchmark evidence can be retained atomically and enforced against request
+  failures and target-comparable throughput/p95 baselines.
+- The focused provider, HTTP-security, and benchmark bundle passed 26 of 26
+  tests; the browser matrix passed four of four project cases. The complete
+  pinned Node `22.23.1` repository gate passed 395 tests with 23 intentional
+  skips, all checks and builds green, and zero npm vulnerabilities. See
+  [Phase 9 implementation evidence](evidence/phase-09-implementation.md).
 
 ## Known gaps in the audited checkout
 
@@ -258,8 +304,7 @@ pending.
 - A real PostgreSQL `pg_dump`/restore drill has not yet been retained; unit-tested
   backup invocation is not a substitute for the Phase 9–11 recovery and
   deployment evidence.
-- Phase 3 still needs the final high-pass verification bundle: full pinned
-  runtime CI, audit, multi-process destructive cluster evidence, public-WSS and
+- Phase 3 still needs multi-process destructive cluster evidence, public-WSS and
   overlay-WSS acceptance evidence, and deployment-target proof. The current
   Phase 3 record is an implementation checkpoint, not a release claim.
 - Phase 4 still needs broader implementation and end-to-end gates for multi-node
@@ -277,12 +322,18 @@ pending.
   application tracking now have implementation checkpoints. Destructive
   external object-store outage evidence and destructive multi-process origin
   recovery evidence remain Phase 6 work.
-- The OpenAPI client is current and protected by a non-mutating freshness gate,
-  but the dashboard still uses a handwritten request facade and has unfinished
-  session, placement, catalog, live, binding, job, metrics, realtime,
-  mobile, keyboard, and accessibility workflows.
-- Adapter contracts, browser coverage, destructive cluster scenarios, and
-  retained target-environment benchmark evidence remain release work.
+- The OpenAPI client is current, protected by a non-mutating freshness gate,
+  and now supplies the dashboard's operation-specific requests. The thin
+  handwritten layer retains only auth/CSRF/error and domain-facing convenience
+  behavior. Hierarchical catalog navigation, complete live and binding/failover
+  flows, job/node dependency actions, metrics configuration, certificates,
+  realtime replacement of polling, and exhaustive keyboard/accessibility
+  coverage remain unfinished.
+- Fake/Jellyfin provider contracts, route-level HTTP security tests, and a
+  desktop/mobile browser smoke matrix are present. Real hosted-adapter
+  contracts, full administrator browser coverage, destructive cluster
+  scenarios, media matrices, and retained target-environment benchmark evidence
+  remain release work.
 - Multi-host Compose now has explicit role profiles and semantic render checks,
   and the Helm migration hook now forces PostgreSQL with writable migration
   backup storage. Provider-neutral OpenTofu now renders role-specific VM
@@ -297,18 +348,24 @@ pending.
   runtime policies now use explicit egress blocks instead of unrestricted relay
   egress, externally managed Secret changes can drive pod rollouts through
   `rollout.runtimeSecretChecksum`, and the migration hook has an active
-  deadline, but true multi-host boot evidence, rendered Helm/TLS behavior, final
-  release digest selection, live backup/restore rehearsal, real cloud-VM boot
+  deadline. Helm 4.2.3 now lint/renders the chart after quoting IPv6 CIDRs and
+  scoping controller-to-origin policy to an enabled ingest origin; the OpenTofu
+  module is formatted and validates with OpenTofu 1.10.6. True multi-host boot
+  evidence, Kubernetes TLS/upgrade/recovery behavior, final release digest
+  selection, live backup/restore rehearsal, real cloud-VM boot
   evidence, native installers, signing/notarization,
   supply-chain evidence, upgrade/rollback, and clean-target installation have
   not passed their release gates.
-- Native packaging release mode now fails closed when required macOS signing,
-  installer-signing, notarization, Windows signing, or FFmpeg
-  corresponding-source bundle inputs are missing. The checked-in native
-  packaging guard also validates runtime manifest pins, notices/license
-  inclusion, runtime provenance wiring, FFmpeg source recipe metadata, and the
-  release workflow's release-mode/source-bundle handoff, but actual
-  signed/notarized artifacts, clean-machine install/upgrade/uninstall evidence,
+- Native packaging release mode now builds macOS FFmpeg from eight
+  checksum-pinned source inputs and rejects arbitrary runtime binaries. A local
+  Apple Silicon build produced a thin arm64 FFmpeg 7.1.5 binary with only system
+  dynamic dependencies and passed capability plus MPEG-TS smoke checks. Release
+  mode also fails closed when required macOS signing, installer-signing,
+  notarization, Windows signing, or FFmpeg corresponding-source inputs are
+  missing. The release workflow wires temporary-Keychain certificate import,
+  notary profile provisioning, hardened/timestamped nested signing, and cleanup,
+  but actual signed/notarized artifacts, clean-machine
+  install/upgrade/uninstall evidence,
   final SBOMs, final vulnerability scans, and release attestations remain
   pending.
 - Publication metadata is now guarded in CI: community files, the security

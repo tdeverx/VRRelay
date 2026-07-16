@@ -47,7 +47,7 @@ codesign --verify --deep --strict "$APP"
 require_equal "$(lipo -archs "$APP/Contents/MacOS/VRRelayMac")" arm64 'Application architecture'
 
 typeset -a MACH_O_FILES
-MACH_O_FILES=("$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx" "$RUNTIME"/lib/*.dylib)
+MACH_O_FILES=("$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx" "$RUNTIME"/lib/*.dylib(N))
 for binary in "${MACH_O_FILES[@]}"; do
   codesign --verify --strict "$binary"
   require_equal "$(lipo -archs "$binary")" arm64 "Architecture for $(basename "$binary")"

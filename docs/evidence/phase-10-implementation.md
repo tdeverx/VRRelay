@@ -1,6 +1,6 @@
 # Phase 10 implementation checkpoint — multi-host Compose semantics
 
-Date: 2026-07-15
+Date: 2026-07-16
 
 This is a build-first deployment checkpoint for Phase 10. It is not final
 multi-host, Kubernetes, TLS, backup/restore, upgrade, rollback, cloud-VM, or
@@ -69,6 +69,12 @@ release-candidate deployment evidence.
   blocks. The chart also exposes `rollout.runtimeSecretChecksum` for externally
   managed Secret-change rollouts and gives the migration hook an active
   deadline.
+- Helm values quote both IPv4 and IPv6 CIDRs so Helm 4 parses the default policy
+  correctly. Controller egress references the MediaMTX origin only when both
+  MediaMTX and the ingest-origin workload are enabled, so a controller-only
+  staged bootstrap does not retain a selector for a disabled origin.
+- The OpenTofu module is formatted with OpenTofu 1.10.6 and validates without
+  provider credentials.
 
 ## Lean guardrails run
 
@@ -80,6 +86,11 @@ npm run check:kubernetes
 npm run check:cloud-init
 npm run check:backup
 npm run check:tls
+.data/toolchain/helm-v4.2.3/helm lint deploy/kubernetes
+.data/toolchain/helm-v4.2.3/helm template vrrelay deploy/kubernetes \
+  --values deploy/kubernetes/values.yaml
+.data/toolchain/tofu-v1.10.6/tofu -chdir=deploy/opentofu fmt -check
+.data/toolchain/tofu-v1.10.6/tofu -chdir=deploy/opentofu validate
 SQLite temp backup/restore rehearsal
 SQLite encrypted temp backup/restore rehearsal
 npm run ci
@@ -106,12 +117,16 @@ template checks confirmed digest-aware relay and MediaMTX image rendering. The
 local full CI gate also confirmed explicit Kubernetes egress ipBlocks, runtime
 Secret checksum rollout annotations, and the migration active deadline. It
 passed 373 tests with 23 intentional skips and reported zero npm vulnerabilities.
+Helm 4.2.3 linted one chart with zero failures and rendered the corrected
+default topology. OpenTofu 1.10.6 reported that the formatted module
+configuration is valid.
 
 ## Deferred to later Phase 10 and final high-pass verification
 
 - True multi-host-equivalent boot evidence with separate hosts or separate
   network namespaces.
-- Rendered Helm, Kubernetes TLS, network-policy, upgrade, and recovery evidence.
+- Disposable-cluster Kubernetes TLS, network-policy enforcement, upgrade, and
+  recovery evidence.
 - Live PostgreSQL/object-store/cluster backup-restore rehearsal, true cloud-VM
   boot evidence, final release OCI digest selection, GPU-path deployment
   evidence, and rollback evidence.

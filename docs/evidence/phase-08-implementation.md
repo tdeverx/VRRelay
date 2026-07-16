@@ -62,8 +62,9 @@ Runtime used locally:
 - Node: `v22.22.3`
 - npm: `10.9.8`
 
-The repository pin is Node `22.23.1`; the pinned-runtime full gate remains part
-of the final high-pass verification bundle.
+The later combined closeout passed the pinned Node `22.23.1` `npm run ci` gate:
+395 tests passed, 23 intentional skips, all checks and builds passed, and the
+npm audit reported zero vulnerabilities.
 
 Commands:
 
@@ -91,8 +92,8 @@ npm run check --workspace @vrrelay/web
 npm run ci
 ```
 
-Result: all commands passed. The local full CI gate passed 373 tests with 23
-intentional skips and reported zero npm vulnerabilities.
+Result: all commands passed. The earlier local gate passed 373 tests with 23
+intentional skips; the later combined closeout result is recorded above.
 
 ## Deferred to later Phase 8 and final high-pass verification
 

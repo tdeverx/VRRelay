@@ -261,7 +261,7 @@ export type NodeDrainRequest = z.infer<typeof NodeDrainRequestSchema>;
 export const SessionControlRequestSchema = z
   .object({
     pinned: z.boolean().optional(),
-    state: z.enum(['idle', 'stopped']).optional()
+    state: z.enum(['idle', 'live', 'stopped']).optional()
   })
   .refine(
     (value) => value.pinned !== undefined || value.state !== undefined,

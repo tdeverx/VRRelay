@@ -86,21 +86,21 @@ variable "common_env" {
 variable "nodes" {
   description = "Role-specific VM definitions. Each entry renders one cloud-init document."
   type = map(object({
-    role                    = string
-    node_id                 = optional(string, "")
-    name                    = string
-    region                  = string
-    public_url              = string
-    setup_token             = optional(string, "")
-    agent_tls_names         = optional(string, "")
-    controller_agent_url    = optional(string, "")
+    role                      = string
+    node_id                   = optional(string, "")
+    name                      = string
+    region                    = string
+    public_url                = string
+    setup_token               = optional(string, "")
+    agent_tls_names           = optional(string, "")
+    controller_agent_url      = optional(string, "")
     controller_enrollment_url = optional(string, "")
-    join_token              = optional(string, "")
-    live_origin_url         = optional(string, "")
-    live_srt_passphrase     = optional(string, "")
-    webrtc_additional_hosts = optional(string, "")
-    metrics_token           = optional(string, "")
-    extra_env               = optional(map(string), {})
+    join_token                = optional(string, "")
+    live_origin_url           = optional(string, "")
+    live_srt_passphrase       = optional(string, "")
+    webrtc_additional_hosts   = optional(string, "")
+    metrics_token             = optional(string, "")
+    extra_env                 = optional(map(string), {})
   }))
   sensitive = true
 

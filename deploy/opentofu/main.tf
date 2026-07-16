@@ -1,18 +1,18 @@
 locals {
   base_env = merge(
     {
-      VRRELAY_ENVIRONMENT           = "production"
-      VRRELAY_DATA_DIR              = "/data"
-      VRRELAY_CACHE_DIR             = "/cache"
-      VRRELAY_SECRET_BACKEND        = "encrypted-file"
-      VRRELAY_TRUSTED_PROXY_CIDRS   = var.trusted_proxy_cidrs
-      VRRELAY_REPOSITORY_DRIVER     = "postgres"
-      VRRELAY_POSTGRES_URL          = var.postgres_url
-      VRRELAY_COORDINATION_DRIVER   = "valkey"
-      VRRELAY_VALKEY_URL            = var.valkey_url
-      VRRELAY_MASTER_KEY            = var.master_key
-      VRRELAY_MEDIAMTX_READ_TOKEN   = var.media_mtx_read_token
-      VRRELAY_OBJECT_STORE_PREFIX   = lookup(var.object_store_env, "VRRELAY_OBJECT_STORE_PREFIX", "segments")
+      VRRELAY_ENVIRONMENT         = "production"
+      VRRELAY_DATA_DIR            = "/data"
+      VRRELAY_CACHE_DIR           = "/cache"
+      VRRELAY_SECRET_BACKEND      = "encrypted-file"
+      VRRELAY_TRUSTED_PROXY_CIDRS = var.trusted_proxy_cidrs
+      VRRELAY_REPOSITORY_DRIVER   = "postgres"
+      VRRELAY_POSTGRES_URL        = var.postgres_url
+      VRRELAY_COORDINATION_DRIVER = "valkey"
+      VRRELAY_VALKEY_URL          = var.valkey_url
+      VRRELAY_MASTER_KEY          = var.master_key
+      VRRELAY_MEDIAMTX_READ_TOKEN = var.media_mtx_read_token
+      VRRELAY_OBJECT_STORE_PREFIX = lookup(var.object_store_env, "VRRELAY_OBJECT_STORE_PREFIX", "segments")
     },
     var.object_store_env,
     var.common_env
@@ -21,11 +21,11 @@ locals {
   role_env = {
     for node_key, node in var.nodes : node_key => merge(
       {
-        VRRELAY_NODE_ID     = node.node_id != "" ? node.node_id : node_key
-        VRRELAY_NODE_NAME   = node.name
-        VRRELAY_NODE_REGION = node.region
-        VRRELAY_NODE_ROLES  = node.role
-        VRRELAY_PUBLIC_URL  = node.public_url
+        VRRELAY_NODE_ID       = node.node_id != "" ? node.node_id : node_key
+        VRRELAY_NODE_NAME     = node.name
+        VRRELAY_NODE_REGION   = node.region
+        VRRELAY_NODE_ROLES    = node.role
+        VRRELAY_PUBLIC_URL    = node.public_url
         VRRELAY_METRICS_TOKEN = node.metrics_token
       },
       node.role == "controller" ? {
@@ -48,12 +48,12 @@ locals {
         VRRELAY_LIVE_SRT_PASSPHRASE          = node.live_srt_passphrase
       } : {},
       node.role == "edge" ? {
-        VRRELAY_LISTEN_ADDR           = "0.0.0.0:8099"
-        VRRELAY_MEDIAMTX_HLS_URL      = "http://mediamtx-edge:8888"
-        VRRELAY_MEDIAMTX_API_URL      = "http://mediamtx-edge:9997"
-        VRRELAY_MEDIAMTX_RTSP_URL     = "rtsp://mediamtx-edge:8554"
-        VRRELAY_LIVE_ORIGIN_URL       = node.live_origin_url
-        VRRELAY_LIVE_SRT_PASSPHRASE   = node.live_srt_passphrase
+        VRRELAY_LISTEN_ADDR         = "0.0.0.0:8099"
+        VRRELAY_MEDIAMTX_HLS_URL    = "http://mediamtx-edge:8888"
+        VRRELAY_MEDIAMTX_API_URL    = "http://mediamtx-edge:9997"
+        VRRELAY_MEDIAMTX_RTSP_URL   = "rtsp://mediamtx-edge:8554"
+        VRRELAY_LIVE_ORIGIN_URL     = node.live_origin_url
+        VRRELAY_LIVE_SRT_PASSPHRASE = node.live_srt_passphrase
       } : {},
       node.extra_env
     )

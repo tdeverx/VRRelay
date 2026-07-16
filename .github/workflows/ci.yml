@@ -6,35 +6,48 @@ permissions: { contents: read }
 env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
 jobs:
   test:
-    strategy: { matrix: { os: [ubuntu-latest, macos-14, windows-latest], node: [22.23.1] } }
+    strategy: { matrix: { os: [ubuntu-latest, macos-15, windows-latest], node: [22.23.1] } }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: '22.23.1', cache: npm }
       - run: npm ci
-      - name: Check types, repository, and generated OpenAPI client
-        run: npm run check
-      - run: npm run lint
-      - run: npm test -- --run
-      - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run ci
   macos-host:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - run: swift test --package-path apps/macos
       - run: swift build --package-path apps/macos -c release --arch arm64
-      - name: Verify relocatable FFmpeg runtime
+      - name: Install pinned-FFmpeg build tools
+        run: brew install autoconf automake libtool meson ninja pkg-config
+      - name: Build and verify the pinned headless FFmpeg runtime
         run: |
-          brew install ffmpeg@7
-          mkdir -p "$RUNNER_TEMP/vrrelay-ffmpeg/bin" "$RUNNER_TEMP/vrrelay-ffmpeg/lib"
-          cp "$(brew --prefix ffmpeg@7)/bin/ffmpeg" "$RUNNER_TEMP/vrrelay-ffmpeg/bin/ffmpeg"
-          deploy/macos/bundle-dylibs.sh "$RUNNER_TEMP/vrrelay-ffmpeg/bin/ffmpeg" "$RUNNER_TEMP/vrrelay-ffmpeg/lib"
-          "$RUNNER_TEMP/vrrelay-ffmpeg/bin/ffmpeg" -hide_banner -encoders | grep -q h264_videotoolbox
-          "$RUNNER_TEMP/vrrelay-ffmpeg/bin/ffmpeg" -hide_banner -encoders | grep -q libx264
-          "$RUNNER_TEMP/vrrelay-ffmpeg/bin/ffmpeg" -hide_banner -filters | grep -q subtitles
-          node script/runtime-provenance.mjs --output "$RUNNER_TEMP/vrrelay-ffmpeg/provenance.json" "ffmpeg=$RUNNER_TEMP/vrrelay-ffmpeg/bin/ffmpeg"
+          deploy/macos/build-ffmpeg.sh "$RUNNER_TEMP/vrrelay-ffmpeg"
+          mkdir -p "$RUNNER_TEMP/vrrelay-ffmpeg/lib"
+          deploy/macos/bundle-dylibs.sh "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg" "$RUNNER_TEMP/vrrelay-ffmpeg/lib"
+          "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg" -hide_banner -encoders | grep -q h264_videotoolbox
+          "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg" -hide_banner -encoders | grep -q libx264
+          "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg" -hide_banner -filters | grep -q subtitles
+          test -s "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg-build-metadata.json"
+          test -s "$RUNNER_TEMP/vrrelay-ffmpeg/vrrelay-ffmpeg-7.1.5-darwin-arm64-source.tar.xz"
+          node script/runtime-provenance.mjs --output "$RUNNER_TEMP/vrrelay-ffmpeg/provenance.json" "ffmpeg=$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg"
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22.23.1', cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: browser-failure-artifacts
+          path: tmp/playwright-results/
+          if-no-files-found: ignore
   container:
     runs-on: ubuntu-latest
     steps:

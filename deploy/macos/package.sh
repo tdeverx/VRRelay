@@ -14,11 +14,13 @@ if [[ "$RELEASE_PACKAGING" == "1" ]]; then
   [[ -n "${APPLE_DEVELOPER_ID:-}" ]] || { echo "APPLE_DEVELOPER_ID is required for release packaging" >&2; exit 1; }
   [[ -n "${APPLE_INSTALLER_ID:-}" ]] || { echo "APPLE_INSTALLER_ID is required for release packaging" >&2; exit 1; }
   [[ -n "${APPLE_NOTARY_PROFILE:-}" ]] || { echo "APPLE_NOTARY_PROFILE is required for release packaging" >&2; exit 1; }
+  [[ -z "${VRRELAY_FFMPEG_BINARY:-}" ]] || { echo "VRRELAY_FFMPEG_BINARY is not accepted for release packaging; FFmpeg must be built from the pinned source recipe" >&2; exit 1; }
 fi
 STAGE="$ROOT/dist/macos/root"
 COMPONENT="$ROOT/dist/macos/VRRelay-component.pkg"
 OUTPUT="$ROOT/dist/VRRelay-$VERSION-macOS-arm64.pkg"
-rm -rf "$ROOT/dist/macos" "$OUTPUT"
+FFMPEG_SOURCE_OUTPUT="$ROOT/dist/VRRelay-$VERSION-macOS-FFmpeg-source.tar.xz"
+rm -rf "$ROOT/dist/macos" "$OUTPUT" "$FFMPEG_SOURCE_OUTPUT"
 mkdir -p "$STAGE/Applications" "$STAGE/Library/Application Support/VRRelay/runtime" "$STAGE/Library/LaunchDaemons"
 npm --prefix "$ROOT" run build
 swift build --package-path "$ROOT/apps/macos" -c "$CONFIGURATION" --arch arm64
@@ -44,15 +46,25 @@ MEDIAMTX_ARCHIVE="$DOWNLOADS/mediamtx_v1.18.2_darwin_arm64.tar.gz"
 FFMPEG_SOURCE="$DOWNLOADS/ffmpeg-7.1.5.tar.xz"
 [[ -f "$NODE_ARCHIVE" ]] || curl -fL "https://nodejs.org/download/release/v22.23.1/$(basename "$NODE_ARCHIVE")" -o "$NODE_ARCHIVE"
 [[ -f "$MEDIAMTX_ARCHIVE" ]] || curl -fL "https://github.com/bluenviron/mediamtx/releases/download/v1.18.2/$(basename "$MEDIAMTX_ARCHIVE")" -o "$MEDIAMTX_ARCHIVE"
-[[ -f "$FFMPEG_SOURCE" ]] || curl -fL "https://ffmpeg.org/releases/$(basename "$FFMPEG_SOURCE")" -o "$FFMPEG_SOURCE"
-node "$ROOT/script/verify-runtime.mjs" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE" "$FFMPEG_SOURCE"
-tar -xOf "$FFMPEG_SOURCE" ffmpeg-7.1.5/COPYING.GPLv3 > "$RUNTIME/licenses/FFmpeg-GPLv3.txt"
+node "$ROOT/script/verify-runtime.mjs" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE"
 tar -xzf "$NODE_ARCHIVE" -C "$DOWNLOADS"
 tar -xzf "$MEDIAMTX_ARCHIVE" -C "$DOWNLOADS"
 cp "$DOWNLOADS/node-v22.23.1-darwin-arm64/bin/node" "$RUNTIME/bin/node"
 cp "$DOWNLOADS/mediamtx" "$RUNTIME/bin/mediamtx"
-[[ -n "${VRRELAY_FFMPEG_BINARY:-}" && -x "$VRRELAY_FFMPEG_BINARY" ]] || { echo "VRRELAY_FFMPEG_BINARY must point to the pinned FFmpeg 7.1.5 executable" >&2; exit 1; }
-cp "$VRRELAY_FFMPEG_BINARY" "$RUNTIME/bin/ffmpeg"
+if [[ -n "${VRRELAY_FFMPEG_BINARY:-}" ]]; then
+  [[ -x "$VRRELAY_FFMPEG_BINARY" ]] || { echo "VRRELAY_FFMPEG_BINARY must point to an executable FFmpeg 7.1.5 development binary" >&2; exit 1; }
+  [[ -f "$FFMPEG_SOURCE" ]] || curl -fL "https://ffmpeg.org/releases/$(basename "$FFMPEG_SOURCE")" -o "$FFMPEG_SOURCE"
+  node "$ROOT/script/verify-runtime.mjs" "$FFMPEG_SOURCE"
+  tar -xOf "$FFMPEG_SOURCE" ffmpeg-7.1.5/COPYING.GPLv3 > "$RUNTIME/licenses/FFmpeg-GPLv3.txt"
+  cp "$VRRELAY_FFMPEG_BINARY" "$RUNTIME/bin/ffmpeg"
+else
+  FFMPEG_BUILD="$DOWNLOADS/ffmpeg-build"
+  "$ROOT/deploy/macos/build-ffmpeg.sh" "$FFMPEG_BUILD"
+  cp "$FFMPEG_BUILD/ffmpeg" "$RUNTIME/bin/ffmpeg"
+  cp "$FFMPEG_BUILD/licenses/"* "$RUNTIME/licenses/"
+  cp "$FFMPEG_BUILD/ffmpeg-build-metadata.json" "$RUNTIME/"
+  cp "$FFMPEG_BUILD/vrrelay-ffmpeg-7.1.5-darwin-arm64-source.tar.xz" "$FFMPEG_SOURCE_OUTPUT"
+fi
 "$ROOT/deploy/macos/bundle-dylibs.sh" "$RUNTIME/bin/ffmpeg" "$RUNTIME/lib"
 (cd "$RUNTIME" && PATH="$DOWNLOADS/node-v22.23.1-darwin-arm64/bin:$PATH" npm ci --omit=dev)
 rm -rf "$DOWNLOADS/node-v22.23.1-darwin-arm64" "$DOWNLOADS/mediamtx" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE" "$FFMPEG_SOURCE"
@@ -63,9 +75,12 @@ chmod +x "$ROOT/deploy/macos/scripts/"*
 chmod 0755 "$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx"
 find "$STAGE" -name '._*' -delete
 xattr -cr "$STAGE"
-SIGN_IDENTITY="${APPLE_DEVELOPER_ID:--}"
 for binary in "$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx" "$RUNTIME/lib"/*(.N); do
-  codesign --force --sign "$SIGN_IDENTITY" "$binary"
+  if [[ -n "${APPLE_DEVELOPER_ID:-}" ]]; then
+    codesign --force --options runtime --timestamp --sign "$APPLE_DEVELOPER_ID" "$binary"
+  else
+    codesign --force --sign - "$binary"
+  fi
 done
 "$RUNTIME/bin/ffmpeg" -hide_banner -version | sed -n '1p'
 node "$ROOT/script/runtime-provenance.mjs" --output "$RUNTIME/runtime-provenance.json" "node=$RUNTIME/bin/node" "ffmpeg=$RUNTIME/bin/ffmpeg" "mediamtx=$RUNTIME/bin/mediamtx"

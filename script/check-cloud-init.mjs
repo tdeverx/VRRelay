@@ -16,6 +16,10 @@ function requireText(source, text, message) {
   if (!source.includes(text)) failures.push(message);
 }
 
+function requirePattern(source, pattern, message) {
+  if (!pattern.test(source)) failures.push(message);
+}
+
 for (const [text, message] of [
   ['${image_ref}', 'cloud-init must receive the VRRelay image from OpenTofu'],
   ['${mediamtx_image_ref}', 'cloud-init must receive the MediaMTX image from OpenTofu'],
@@ -57,37 +61,42 @@ for (const [text, message] of [
   ],
   ['@sha256:[0-9a-fA-F]{64}$', 'OpenTofu module must require digest-pinned images'],
   [
-    'VRRELAY_REPOSITORY_DRIVER     = "postgres"',
-    'OpenTofu module must force PostgreSQL repository mode'
-  ],
-  [
-    'VRRELAY_COORDINATION_DRIVER   = "valkey"',
-    'OpenTofu module must force Valkey coordination mode'
-  ],
-  [
-    'VRRELAY_SECRET_BACKEND        = "encrypted-file"',
-    'OpenTofu module must use persistent encrypted-file secrets'
-  ],
-  [
     'VRRELAY_NODE_JOIN_TOKEN',
     'OpenTofu module must render single-use join tokens for data-plane nodes'
   ],
   ['VRRELAY_CONTROLLER_AGENT_URL', 'OpenTofu module must render controller agent transport URLs'],
-  ['VRRELAY_LIVE_ORIGIN_URL', 'OpenTofu module must render edge live-origin URLs'],
+  ['VRRELAY_LIVE_ORIGIN_URL', 'OpenTofu module must render edge live-origin URLs']
+]) {
+  requireText(combinedModule, text, message);
+}
+
+for (const [pattern, message] of [
   [
-    'VRRELAY_MEDIAMTX_API_URL             = "http://mediamtx-origin:9997"',
+    /VRRELAY_REPOSITORY_DRIVER\s*=\s*"postgres"/,
+    'OpenTofu module must force PostgreSQL repository mode'
+  ],
+  [
+    /VRRELAY_COORDINATION_DRIVER\s*=\s*"valkey"/,
+    'OpenTofu module must force Valkey coordination mode'
+  ],
+  [
+    /VRRELAY_SECRET_BACKEND\s*=\s*"encrypted-file"/,
+    'OpenTofu module must use persistent encrypted-file secrets'
+  ],
+  [
+    /VRRELAY_MEDIAMTX_API_URL\s*=\s*"http:\/\/mediamtx-origin:9997"/,
     'OpenTofu module must wire ingest-origin MediaMTX API'
   ],
   [
-    'VRRELAY_LISTEN_ADDR                  = "0.0.0.0:8099"',
+    /VRRELAY_LISTEN_ADDR\s*=\s*"0\.0\.0\.0:8099"/,
     'OpenTofu module must let ingest-origin relay receive MediaMTX sidecar callbacks'
   ],
   [
-    'VRRELAY_MEDIAMTX_API_URL      = "http://mediamtx-edge:9997"',
+    /VRRELAY_MEDIAMTX_API_URL\s*=\s*"http:\/\/mediamtx-edge:9997"/,
     'OpenTofu module must wire edge MediaMTX API'
   ]
 ]) {
-  requireText(combinedModule, text, message);
+  requirePattern(combinedModule, pattern, message);
 }
 
 if (/\bresource\s+"/.test(combinedModule))

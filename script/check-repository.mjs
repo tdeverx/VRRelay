@@ -11,7 +11,8 @@ const excludedDirectories = new Set([
   '.svelte-kit',
   'build',
   'dist',
-  'node_modules'
+  'node_modules',
+  'tmp'
 ]);
 
 async function files(directory) {
@@ -97,6 +98,14 @@ for (const route of documentedRoutes) {
   if (!runtimeRoutes.has(route)) failures.push(`OpenAPI documents absent runtime route ${route}`);
 }
 
+const webApiFacade = await readFile(resolve(root, 'apps/web/src/lib/api.ts'), 'utf8');
+if (!webApiFacade.includes('$lib/generated/vrrelay-api/sdk.gen'))
+  failures.push('web API facade does not use generated OpenAPI operations');
+if (webApiFacade.includes('generatedClient.request('))
+  failures.push('web API facade bypasses generated OpenAPI operations with a handwritten request');
+if (webApiFacade.includes('/api/v1/'))
+  failures.push('web API facade owns a handwritten API path instead of a generated operation');
+
 for (const workflow of repositoryFiles.filter((path) => path.includes('/.github/workflows/'))) {
   const content = await readFile(workflow, 'utf8');
   for (const match of content.matchAll(/uses:\s+([^\s#]+)@([^\s#]+)/g)) {
@@ -140,6 +149,8 @@ const releaseWorkflow = await readFile(resolve(root, '.github/workflows/release.
 for (const required of [
   'npm run test:local-cluster',
   'npm run test:integration',
+  'npx playwright install --with-deps chromium',
+  'npm run test:browser',
   'node script/check-kubernetes.mjs rendered.yaml',
   'aquasecurity/trivy-action@',
   'needs: [gate, security]'
@@ -339,8 +350,10 @@ for (const required of ['release-version.mjs', 'CFBundleShortVersionString', 'VR
   if (!macPackager.includes(required))
     failures.push(`macOS packager does not propagate release version through ${required}`);
 }
-if (!releaseWorkflow.includes('brew install ffmpeg@7'))
-  failures.push('release workflow does not install the pinned macOS FFmpeg formula');
+if (releaseWorkflow.includes('brew install ffmpeg@7'))
+  failures.push('release workflow installs the macOS FFmpeg runtime from Homebrew');
+if (!macPackager.includes('deploy/macos/build-ffmpeg.sh'))
+  failures.push('macOS packager does not consume the pinned FFmpeg source builder');
 if (/choco install ffmpeg/.test(releaseWorkflow))
   failures.push('release workflow installs an unpinned Chocolatey FFmpeg package');
 

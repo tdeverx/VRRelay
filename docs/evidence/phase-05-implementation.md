@@ -33,8 +33,9 @@ Runtime used locally:
 - Node: `v22.22.3`
 - npm: `10.9.8`
 
-The repository pin is Node `22.23.1`; the pinned-runtime full gate remains part
-of the final high-pass verification bundle.
+The later combined closeout passed the pinned Node `22.23.1` `npm run ci` gate:
+395 tests passed, 23 intentional skips, all checks and builds passed, and the
+npm audit reported zero vulnerabilities.
 
 Commands:
 
@@ -51,7 +52,6 @@ Result: all commands passed.
 
 ## Deferred to final high-pass verification
 
-- Full `npm run ci` under the checksum-verified pinned Node runtime.
 - Media matrix evidence for H.265, AV1, copy codecs, hardware-specific encoders,
   tone mapping, subtitle burn-in, fMP4/fragmented-MP4 concurrency, corrupt-input
   behavior, and dual PC/Quest output claims.

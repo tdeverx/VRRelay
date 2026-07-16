@@ -1154,7 +1154,7 @@ components:
       minProperties: 1
       properties:
         pinned: { type: boolean }
-        state: { type: string, enum: [idle, stopped] }
+        state: { type: string, enum: [idle, live, stopped] }
     RelaySession:
       type: object
       required:

@@ -10,9 +10,47 @@ VRRelay releases are created from signed semantic-version tags such as `v1.0.0`.
 4. Review dependency and container scans, update `deploy/runtime-manifest.json`, and confirm every runtime checksum from its authoritative upstream release.
 5. Confirm the Apple and Windows signing secrets are present when publishing signed native artifacts.
 
+The macOS release job expects these repository secrets:
+
+- `APPLE_DEVELOPER_ID` and `APPLE_INSTALLER_ID`: the Developer ID Application
+  and Developer ID Installer identity names.
+- `APPLE_SIGNING_CERTIFICATE`: the base64-encoded PKCS#12 certificate and
+  private-key bundle.
+- `APPLE_SIGNING_CERTIFICATE_PASSWORD` and `APPLE_KEYCHAIN_PASSWORD`: the
+  PKCS#12 and temporary-Keychain passwords.
+- `APPLE_NOTARY_PROFILE`: the temporary `notarytool` profile name.
+- `APPLE_NOTARY_KEY`: the base64-encoded App Store Connect API `.p8` key,
+  together with `APPLE_NOTARY_KEY_ID` and `APPLE_NOTARY_ISSUER_ID`.
+
+On a fresh runner the workflow writes the certificate and notary key with
+private permissions, creates and unlocks a temporary Keychain, imports the
+certificate, provisions the `notarytool` profile, and then runs release-mode
+packaging. Nested runtime executables are hardened-runtime signed and
+timestamped before the app and installer are signed; the installer is submitted,
+stapled, and validated by the packager. An `always()` cleanup step deletes the
+temporary Keychain, certificate, and notary-key files. The workflow wiring is a
+guardrail, not evidence that a signed/notarized release has run successfully;
+retain the release-job, notarization, stapling, and Gatekeeper results for the
+candidate tag.
+
 ## Corresponding source
 
-The macOS package uses FFmpeg 7.1.5 and the workflow attaches that release source. Windows and both OCI architectures use the checksum-pinned BtbN GPL builds recorded in the runtime manifest. Before a tag can publish, maintainers must generate and host one complete corresponding-source archive covering all three exact binaries, including FFmpeg commit `7d0e8420048cffd0ca3883b877ead2390496d0b2`, the matching BtbN build scripts, patches, configuration, and every covered linked-library source needed to rebuild them.
+The macOS package builds FFmpeg 7.1.5 from the checksum-pinned arm64 recipe in
+the runtime manifest. That builder collects every FFmpeg, x264, subtitle, font,
+text-shaping, line-breaking, and zimg source input; the exact recipe; build
+metadata; configuration; licenses; rebuild instructions; and a per-file
+`SHA256SUMS` into
+`VRRelay-<version>-macOS-FFmpeg-source.tar.xz`. The release workflow publishes
+that archive beside the macOS installer. Preserve its FriBidi source, license,
+and relinking obligations.
+
+Windows and both OCI architectures use the checksum-pinned BtbN GPL builds
+recorded in the runtime manifest. Before a tag can publish, maintainers must
+generate and host one complete corresponding-source archive covering those
+three exact binaries, including FFmpeg commit
+`7d0e8420048cffd0ca3883b877ead2390496d0b2`, the matching BtbN build scripts,
+patches, configuration, and every covered linked-library source needed to
+rebuild them.
 
 Generate the archive on a machine with Docker, Git, Node, `tar`, `xz`, and ample temporary disk space:
 

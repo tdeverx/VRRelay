@@ -12,12 +12,17 @@
     Link2,
     LoaderCircle,
     MoreHorizontal,
+    Pin,
+    PinOff,
+    Play,
     Plus,
     Search,
+    Square,
     Trash2,
     Users
   } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
+  import type { SessionControlRequest } from '@vrrelay/contracts';
   import type { ProfileRevision, PublicProviderConnection, RelaySession } from '@vrrelay/domain';
   import AppShell from '$lib/components/AppShell.svelte';
   import ActivityRail from '$lib/components/ActivityRail.svelte';
@@ -47,6 +52,7 @@
   let selectedId = $state<string | null>(null);
   let pendingDelete = $state<RelaySession | null>(null);
   let deleting = $state(false);
+  let controllingId = $state<string | null>(null);
 
   let visible = $derived(
     sessions.filter(
@@ -131,6 +137,23 @@
       toast.error(error instanceof Error ? error.message : 'Could not delete the session.');
     } finally {
       deleting = false;
+    }
+  }
+
+  async function controlSession(
+    session: RelaySession,
+    control: SessionControlRequest,
+    success: string
+  ) {
+    controllingId = session.id;
+    try {
+      const updated = await api.controlSession(session.id, control);
+      sessions = sessions.map((candidate) => (candidate.id === updated.id ? updated : candidate));
+      toast.success(success);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update the session.');
+    } finally {
+      controllingId = null;
     }
   }
 </script>
@@ -325,6 +348,51 @@
                             >
                           </div>
                         </section>
+                        <section class="session-actions" aria-label="Session controls">
+                          <Button
+                            variant="outline"
+                            disabled={controllingId === session.id}
+                            onclick={() =>
+                              void controlSession(
+                                session,
+                                { pinned: !session.pinned },
+                                session.pinned ? 'Session unpinned.' : 'Session pinned.'
+                              )}
+                          >
+                            {#if session.pinned}<PinOff data-icon="inline-start" />Unpin{:else}<Pin
+                                data-icon="inline-start"
+                              />Pin{/if}
+                          </Button>
+                          <Button
+                            variant={session.state === 'stopped' ? 'default' : 'outline'}
+                            disabled={controllingId === session.id}
+                            onclick={() =>
+                              void controlSession(
+                                session,
+                                {
+                                  state:
+                                    session.state === 'stopped'
+                                      ? session.kind === 'live'
+                                        ? 'live'
+                                        : 'idle'
+                                      : 'stopped'
+                                },
+                                session.state === 'stopped'
+                                  ? 'Session resumed.'
+                                  : 'Session stopped.'
+                              )}
+                          >
+                            {#if session.state === 'stopped'}<Play
+                                data-icon="inline-start"
+                              />Resume{:else}<Square data-icon="inline-start" />Stop{/if}
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            disabled={controllingId === session.id}
+                            onclick={() => (pendingDelete = session)}
+                            ><Trash2 data-icon="inline-start" />Delete</Button
+                          >
+                        </section>
                       </div>
                     </Table.Cell>
                   </Table.Row>
@@ -401,6 +469,12 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: color-mix(in oklab, var(--card) 74%, transparent);
+  }
+  .session-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
   }
   .metrics article {
     display: grid;

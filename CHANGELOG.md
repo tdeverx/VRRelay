@@ -46,6 +46,13 @@ retained evidence belong in the
   inputs, Windows signing inputs, runtime provenance, bundled notices/licenses,
   and a verified FFmpeg corresponding-source bundle for release-mode Windows
   packaging, with release workflow enforcement for those native release gates.
+- A checksum-pinned, minimal headless macOS arm64 FFmpeg source builder with
+  required-capability and MPEG-TS smoke checks, static third-party linkage,
+  system-only dynamic dependency enforcement, build metadata, dependency
+  licenses, and a complete per-file-checksummed corresponding-source archive.
+- Fresh-runner Apple release wiring for temporary-Keychain certificate import,
+  App Store Connect notarization credentials, hardened/timestamped nested
+  signing, and unconditional credential cleanup.
 - Publication metadata guardrails that keep security reporting, community files,
   release checklist repository gates, issue templates, and Dependabot coverage
   present before the public repository gate.
@@ -56,6 +63,11 @@ retained evidence belong in the
   repository and CI check gate.
 - A non-mutating OpenAPI client freshness check that detects changed, missing,
   and obsolete generated files without silently repairing CI state.
+- Reusable fake/Jellyfin provider contracts and route-level HTTP security tests
+  for setup/login cookies, CSRF, PAT scope/expiry/revocation, malformed requests,
+  redaction, and playback-grant tamper/revocation/expiry behavior.
+- Desktop/mobile Playwright administrator smoke coverage with Axe assertions,
+  browser-error detection, a dedicated CI job, and retained failure artifacts.
 - A separate unauthenticated `/api/v1/ready` endpoint that reports redacted,
   dependency-aware readiness distinct from `/api/v1/health` liveness.
 - Low-cardinality aggregate viewer and egress metrics that avoid per-session
@@ -78,6 +90,9 @@ retained evidence belong in the
 - Reproducible playlist, cached-egress, uncached-encode, live-fan-out,
   cache-ratio, and resource-snapshot benchmark scenarios with sanitized target
   metadata and host resource snapshots.
+- Versioned retained benchmark reports with private atomic file publication,
+  request-error enforcement, and comparable-baseline throughput/p95 regression
+  gates for release evidence.
 - Dedicated controller, source-worker, ingest-origin, edge, and standalone
   composition roots with explicit runtime dependency graphs, role-owned HTTP
   surfaces, schema-startup policy, and ordered shutdown.
@@ -101,6 +116,26 @@ retained evidence belong in the
   intended production defaults while experimental formats remain unclaimed.
 - Make the v1 completion ledger the authoritative source for phase status and
   retained verification evidence.
+- Route dashboard requests through operation-specific generated OpenAPI
+  functions, leaving only auth, CSRF, normalized errors, and domain-facing
+  conveniences in the handwritten facade; guard against reintroducing literal
+  API paths or generic generated-client requests.
+- Add session stop/resume, pin/unpin, delete, details/output, and copy-link
+  controls; placement preview with preferred region or exact locked worker;
+  persisted navigation collapse; skip navigation; and mobile focus/Escape
+  behavior.
+- Preserve live-session kind across stop/resume, block stopped-session playback
+  until resume, and exclude disconnected workers from placement preview and
+  creation while preserving standalone placement.
+- Require the production-build-backed desktop/mobile browser suite in release
+  validation as well as CI.
+- Build the provider-neutral workspace packages before the root check gate so a
+  fresh `npm ci` checkout can validate the generated agent-protocol schema
+  without relying on stale local `dist` output; use the same complete
+  `npm run ci` gate in the operating-system CI matrix.
+- Correct Helm IPv4/IPv6 CIDR rendering and avoid controller network-policy
+  references to a disabled ingest origin; format and validate the provider-neutral
+  OpenTofu module with the pinned local toolchain.
 - Restore a green local engineering baseline under the checksum-verified pinned
   Node runtime while keeping later feature and deployment claims explicitly
   gated.

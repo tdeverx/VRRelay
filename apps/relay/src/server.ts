@@ -430,6 +430,9 @@ export async function createServer(
     },
     trustProxy: config.trustedProxyCidrs,
     bodyLimit: 1_048_576,
+    // Signed edge playback grants include bounded session and node metadata and
+    // therefore exceed Fastify's 100-character default parameter limit.
+    routerOptions: { maxParamLength: 1_024 },
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID()
   });
@@ -508,6 +511,20 @@ export async function createServer(
   await app.register(websocket);
 
   app.setErrorHandler((error, request, reply) => {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'FST_ERR_CTP_INVALID_JSON_BODY'
+    ) {
+      return reply.status(400).send({
+        error: {
+          code: 'invalid_request',
+          message: 'Request validation failed',
+          requestId: request.id
+        }
+      });
+    }
     if (error instanceof z.ZodError) {
       return reply.status(400).send({
         error: {
@@ -860,6 +877,12 @@ export async function createServer(
         return services.cluster.previewPlacement({
           policy: body.placementPolicy,
           profile,
+          ...(services.agentController
+            ? {
+                isNodeConnected: (nodeId: string) =>
+                  Boolean(services.agentController?.connected(nodeId))
+              }
+            : {}),
           ...(body.providerId ? { providerId: body.providerId } : {}),
           ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
           ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
@@ -1005,6 +1028,12 @@ export async function createServer(
             policy: body.placementPolicy,
             providerId: body.source.providerId,
             profile,
+            ...(services.agentController
+              ? {
+                  isNodeConnected: (nodeId: string) =>
+                    Boolean(services.agentController?.connected(nodeId))
+                }
+              : {}),
             ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
             ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
           });

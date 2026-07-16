@@ -20,6 +20,6 @@ export default defineConfig({
   test: {
     testTimeout: 15_000,
     hookTimeout: 15_000,
-    exclude: [...configDefaults.exclude, '**/dist/**']
+    exclude: [...configDefaults.exclude, '**/dist/**', 'tests/browser/**']
   }
 });

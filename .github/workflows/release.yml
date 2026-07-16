@@ -18,6 +18,8 @@ jobs:
         run: test "$(node script/release-version.mjs '${{ github.ref_name }}')" = "${GITHUB_REF_NAME#v}"
       - run: script/check-workflows.sh
       - run: npm run ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: helm lint deploy/kubernetes
       - run: helm template vrrelay deploy/kubernetes > rendered.yaml
       - run: node script/check-kubernetes.mjs rendered.yaml
@@ -100,7 +102,7 @@ jobs:
       {
         matrix:
           {
-            include: [{ os: macos-14, artifact: macos }, { os: windows-latest, artifact: windows }]
+            include: [{ os: macos-15, artifact: macos }, { os: windows-latest, artifact: windows }]
           }
       }
     runs-on: ${{ matrix.os }}
@@ -115,9 +117,41 @@ jobs:
           echo "VRRELAY_BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
       - run: npm run build
       - if: runner.os == 'macOS'
+        name: Install pinned-FFmpeg build tools
+        run: brew install autoconf automake libtool meson ninja pkg-config
+      - if: runner.os == 'macOS'
+        name: Import temporary Apple signing and notarization credentials
+        env:
+          APPLE_SIGNING_CERTIFICATE: ${{ secrets.APPLE_SIGNING_CERTIFICATE }}
+          APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          brew install ffmpeg@7
-          echo "VRRELAY_FFMPEG_BINARY=$(brew --prefix ffmpeg@7)/bin/ffmpeg" >> "$GITHUB_ENV"
+          test -n "$APPLE_SIGNING_CERTIFICATE"
+          test -n "$APPLE_SIGNING_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_KEYCHAIN_PASSWORD"
+          test -n "$APPLE_NOTARY_PROFILE"
+          test -n "$APPLE_NOTARY_KEY"
+          test -n "$APPLE_NOTARY_KEY_ID"
+          test -n "$APPLE_NOTARY_ISSUER_ID"
+          certificate="$RUNNER_TEMP/vrrelay-signing.p12"
+          keychain="$RUNNER_TEMP/vrrelay-signing.keychain-db"
+          notary_key="$RUNNER_TEMP/AuthKey_$APPLE_NOTARY_KEY_ID.p8"
+          printf '%s' "$APPLE_SIGNING_CERTIFICATE" | /usr/bin/base64 -D > "$certificate"
+          printf '%s' "$APPLE_NOTARY_KEY" | /usr/bin/base64 -D > "$notary_key"
+          chmod 0600 "$certificate" "$notary_key"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$APPLE_SIGNING_CERTIFICATE_PASSWORD" -A
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          xcrun notarytool store-credentials "$APPLE_NOTARY_PROFILE" \
+            --key "$notary_key" --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID"
       - if: runner.os == 'macOS'
         env:
           VRRELAY_RELEASE_PACKAGING: '1'
@@ -125,6 +159,11 @@ jobs:
           APPLE_INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
           APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
         run: deploy/macos/package.sh release pkg
+      - if: always() && runner.os == 'macOS'
+        name: Remove temporary Apple credentials
+        run: |
+          security delete-keychain "$RUNNER_TEMP/vrrelay-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/vrrelay-signing.p12" "$RUNNER_TEMP"/AuthKey_*.p8
       - if: runner.os == 'Windows'
         shell: pwsh
         env:

@@ -1,36 +1,89 @@
 import type {
-  CompatibilityResult,
+  AgentLogEntry,
   BackendStatus,
+  CachedObject,
   ClusterNode,
+  CompatibilityResult,
   JobLogEntry,
-  PublicLiveChannel,
   MediaItem,
+  PersonalAccessToken,
   ProfileRevision,
+  PublicLiveChannel,
+  PublicProviderBinding,
   PublicProviderConnection,
   RelaySession,
-  SegmentJob,
-  PublicProviderBinding,
-  CachedObject,
-  AgentLogEntry,
-  PersonalAccessToken
+  SegmentJob
 } from '@vrrelay/domain';
 import type {
-  CreateProviderRequest,
-  CreateProfileRevisionRequest,
-  CreateSessionRequest,
-  CreateCompatibilityResultRequest,
-  CreatePersonalTokenRequest,
-  CreateNodeJoinTokenRequest,
-  CreateProviderBindingRequest,
-  CacheEvictionRequest,
+  BackendActivationRequest,
   BackendValidationRequest,
-  BackendActivationRequest
+  CacheEvictionRequest,
+  CreateCompatibilityResultRequest,
+  CreateNodeJoinTokenRequest,
+  CreatePersonalTokenRequest,
+  CreateProfileRevisionRequest,
+  CreateProviderBindingRequest,
+  CreateProviderRequest,
+  CreateSessionRequest,
+  SessionControlRequest
 } from '@vrrelay/contracts';
 import { client as generatedClient } from '$lib/generated/vrrelay-api/client.gen';
-import { jsonBodySerializer } from '$lib/generated/vrrelay-api/core/bodySerializer.gen';
+import {
+  activateBackend,
+  browseCatalog,
+  cancelSegmentJob,
+  controlSession,
+  createLiveChannel,
+  createNodeJoinToken,
+  createPersonalToken,
+  createProfileRevision,
+  createProvider,
+  createProviderBinding,
+  createSession,
+  deleteLiveChannel,
+  deleteProvider,
+  deleteProviderBinding,
+  deleteSession,
+  drainNode,
+  evictCache,
+  getHealth,
+  getMediaCapabilities,
+  getProviderItem,
+  getReadiness,
+  getSession,
+  getSetupStatus,
+  initializeAdmin,
+  listBackendHealth,
+  listCacheInventory,
+  listClusterNodes,
+  listCompatibilityResults,
+  listJobLogs,
+  listLiveChannels,
+  listNodeLogs,
+  listPersonalTokens,
+  listProfiles,
+  listProviderBindings,
+  listProviders,
+  listRecentEvents,
+  listSegmentJobs,
+  listSessions,
+  login as loginOperation,
+  logout as logoutOperation,
+  previewPlacement,
+  recordCompatibilityResult,
+  removeNode,
+  replaceLivePublisher,
+  retrySegmentJob,
+  revokeNode,
+  revokePersonalToken,
+  rotateNodeCertificate,
+  validateBackend,
+  validateProvider
+} from '$lib/generated/vrrelay-api/sdk.gen';
 
-// The generated client owns URL construction and transport. Domain responses and
-// runtime-validated request payloads come from the shared provider-neutral packages.
+// OpenAPI-generated operations own paths, methods, query serialization, and
+// request bodies. This module only adds browser authentication concerns and a
+// small domain-facing convenience surface for Svelte components.
 
 export class ApiClientError extends Error {
   constructor(
@@ -45,98 +98,109 @@ export class ApiClientError extends Error {
 let csrfToken =
   typeof sessionStorage === 'undefined' ? '' : (sessionStorage.getItem('vrrelay.csrf') ?? '');
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const method = (init.method?.toUpperCase() ?? 'GET') as
-    'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE' | 'HEAD' | 'OPTIONS';
-  const result = await generatedClient.request({
-    url: path.replace(/^\/api\/v1/, ''),
-    method,
-    ...(init.body
-      ? {
-          body: typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : init.body,
-          bodySerializer: jsonBodySerializer.bodySerializer
-        }
-      : {}),
-    credentials: 'same-origin',
-    headers: {
-      Accept: 'application/json',
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(method !== 'GET' && method !== 'HEAD' && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-      ...init.headers
-    },
-    responseStyle: 'fields'
-  });
-  const response = result.response;
-  if (!response) throw new ApiClientError('The relay could not be reached', 0, 'network_error');
-  if (response.status === 204) return undefined as T;
-  const body: unknown = result.data ?? result.error;
-  if (!response.ok) {
-    const error = body as { error?: { message?: string; code?: string } };
-    throw new ApiClientError(
-      error.error?.message ?? `Request failed (${response.status})`,
-      response.status,
-      error.error?.code
-    );
-  }
-  return body as T;
+generatedClient.setConfig({
+  credentials: 'same-origin',
+  headers: { Accept: 'application/json' },
+  responseStyle: 'fields'
+});
+
+generatedClient.interceptors.request.use((request) => {
+  if (!csrfToken || request.method === 'GET' || request.method === 'HEAD') return request;
+  const headers = new Headers(request.headers);
+  headers.set('X-CSRF-Token', csrfToken);
+  return new Request(request, { headers });
+});
+
+generatedClient.interceptors.error.use((error, response) => {
+  if (error instanceof ApiClientError) return error;
+  const body = error as { error?: { message?: string; code?: string } } | undefined;
+  if (!response) return new ApiClientError('The relay could not be reached', 0, 'network_error');
+  return new ApiClientError(
+    body?.error?.message ?? `Request failed (${response.status})`,
+    response.status,
+    body?.error?.code
+  );
+});
+
+async function result<T>(operation: Promise<{ data: unknown }>): Promise<T> {
+  return (await operation).data as T;
 }
 
-function json(method: string, body?: unknown): RequestInit {
-  return { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) };
-}
+const required = { throwOnError: true } as const;
 
 export const api = {
   health: () =>
-    request<{
+    result<{
       status: string;
       version: string;
       now: string;
       workers: { active: number; limit: number; queued: number };
-    }>('/api/v1/health'),
-  setupStatus: () => request<{ configured: boolean; requiresToken: boolean }>('/api/v1/setup'),
+    }>(getHealth(required)),
+  readiness: () =>
+    result<{
+      status: string;
+      checkedAt: string;
+      dependencies: Array<{
+        category: string;
+        kind: string;
+        healthy: boolean;
+        checkedAt: string;
+        restartRequired: boolean;
+      }>;
+    }>(getReadiness(required)),
+  setupStatus: () =>
+    result<{ configured: boolean; requiresToken: boolean }>(getSetupStatus(required)),
   setup: (password: string, setupToken?: string) =>
-    request<{ configured: true; requiresToken: false }>(
-      '/api/v1/setup',
-      json('POST', { password, ...(setupToken ? { setupToken } : {}) })
+    result<{ configured: true; requiresToken: false }>(
+      initializeAdmin({
+        ...required,
+        body: { password, ...(setupToken ? { setupToken } : {}) }
+      })
     ),
   async login(password: string) {
-    const result = await request<{ csrfToken: string; expiresAt: string }>(
-      '/api/v1/auth/login',
-      json('POST', { password })
+    const login = await result<{ csrfToken: string; expiresAt: string }>(
+      loginOperation({ ...required, body: { password } })
     );
-    csrfToken = result.csrfToken;
-    sessionStorage.setItem('vrrelay.csrf', result.csrfToken);
-    return result;
+    csrfToken = login.csrfToken;
+    sessionStorage.setItem('vrrelay.csrf', login.csrfToken);
+    return login;
   },
   async logout() {
-    await request<void>('/api/v1/auth/logout', json('POST'));
+    await result<void>(logoutOperation(required));
     csrfToken = '';
     sessionStorage.removeItem('vrrelay.csrf');
   },
-  providers: () => request<{ items: PublicProviderConnection[] }>('/api/v1/providers'),
+  providers: () => result<{ items: PublicProviderConnection[] }>(listProviders(required)),
   createProvider: (body: CreateProviderRequest) =>
-    request<PublicProviderConnection>('/api/v1/providers', json('POST', body)),
+    result<PublicProviderConnection>(createProvider({ ...required, body })),
+  validateProvider: (providerId: string) =>
+    result<void>(validateProvider({ ...required, path: { providerId } })),
   deleteProvider: (providerId: string) =>
-    request<void>(`/api/v1/providers/${providerId}`, json('DELETE')),
+    result<void>(deleteProvider({ ...required, path: { providerId } })),
   catalog: (
     providerId: string,
-    query: { search?: string; parentId?: string; limit?: number } = {}
-  ) => {
-    const params = new URLSearchParams();
-    if (query.search) params.set('search', query.search);
-    if (query.parentId) params.set('parentId', query.parentId);
-    params.set('limit', String(query.limit ?? 50));
-    return request<{ items: MediaItem[]; total: number }>(
-      `/api/v1/providers/${providerId}/catalog?${params}`
-    );
-  },
+    query: {
+      search?: string;
+      parentId?: string;
+      kinds?: string[];
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) =>
+    result<{ items: MediaItem[]; total: number }>(
+      browseCatalog({
+        ...required,
+        path: { providerId },
+        query: { ...query, limit: query.limit ?? 50 }
+      })
+    ),
   item: (providerId: string, itemId: string) =>
-    request<MediaItem>(`/api/v1/providers/${providerId}/items/${itemId}`),
-  profiles: () => request<{ items: ProfileRevision[] }>('/api/v1/profiles'),
+    result<MediaItem>(getProviderItem({ ...required, path: { providerId, itemId } })),
+  profiles: () => result<{ items: ProfileRevision[] }>(listProfiles(required)),
   createProfileRevision: (body: CreateProfileRevisionRequest) =>
-    request<ProfileRevision>('/api/v1/profiles', json('POST', body)),
+    result<ProfileRevision>(createProfileRevision({ ...required, body })),
   capabilities: () =>
-    request<{
+    result<{
       ffmpegVersion: string;
       encoders: Array<{
         name: string;
@@ -148,17 +212,23 @@ export const api = {
       muxers: string[];
       filters: string[];
       pixelFormats: string[];
-    }>('/api/v1/capabilities'),
-  sessions: () => request<{ items: RelaySession[] }>('/api/v1/sessions'),
+    }>(getMediaCapabilities(required)),
+  sessions: () => result<{ items: RelaySession[] }>(listSessions(required)),
+  session: (sessionId: string) =>
+    result<RelaySession>(getSession({ ...required, path: { sessionId } })),
+  controlSession: (sessionId: string, body: SessionControlRequest) =>
+    result<RelaySession>(controlSession({ ...required, path: { sessionId }, body })),
   createVodSession: (
     body: Omit<
       Extract<CreateSessionRequest, { kind: 'vod' }>,
       'kind' | 'playbackTtlSeconds' | 'placementLocked'
     >
   ) =>
-    request<RelaySession>(
-      '/api/v1/sessions',
-      json('POST', { kind: 'vod', ...body, playbackTtlSeconds: null })
+    result<RelaySession>(
+      createSession({
+        ...required,
+        body: { kind: 'vod', ...body, playbackTtlSeconds: null }
+      })
     ),
   createLiveSession: (
     body: Omit<
@@ -171,22 +241,33 @@ export const api = {
       | 'placementPolicy'
     > & { placementPolicy?: Extract<CreateSessionRequest, { kind: 'live' }>['placementPolicy'] }
   ) =>
-    request<RelaySession>(
-      '/api/v1/sessions',
-      json('POST', {
-        kind: 'live',
-        placementPolicy: 'auto',
-        ...body,
-        pinned: true,
-        reportActivity: false,
-        playbackTtlSeconds: null
+    result<RelaySession>(
+      createSession({
+        ...required,
+        body: {
+          kind: 'live',
+          placementPolicy: 'auto',
+          ...body,
+          pinned: true,
+          reportActivity: false,
+          playbackTtlSeconds: null
+        }
       })
     ),
   deleteSession: (sessionId: string) =>
-    request<void>(`/api/v1/sessions/${sessionId}`, json('DELETE')),
-  liveChannels: () => request<{ items: PublicLiveChannel[] }>('/api/v1/live-channels'),
+    result<void>(deleteSession({ ...required, path: { sessionId } })),
+  previewPlacement: (body: {
+    providerId?: string;
+    profileId: string;
+    profileRevision: number;
+    placementPolicy: 'local' | 'hosted' | 'auto';
+    preferredNodeId?: string;
+    preferredRegion?: string;
+  }) =>
+    result<{ node?: ClusterNode | null; reason: string }>(previewPlacement({ ...required, body })),
+  liveChannels: () => result<{ items: PublicLiveChannel[] }>(listLiveChannels(required)),
   createLiveChannel: (name: string) =>
-    request<{
+    result<{
       channel: PublicLiveChannel;
       publisher: {
         publishToken: string;
@@ -196,9 +277,9 @@ export const api = {
         backupRtmpUrl?: string;
         backupSrtUrl?: string;
       };
-    }>('/api/v1/live-channels', json('POST', { name })),
+    }>(createLiveChannel({ ...required, body: { name } })),
   replaceLivePublisher: (channelId: string) =>
-    request<{
+    result<{
       channel: PublicLiveChannel;
       publisher: {
         publishToken: string;
@@ -208,21 +289,22 @@ export const api = {
         backupRtmpUrl?: string;
         backupSrtUrl?: string;
       };
-    }>(`/api/v1/live-channels/${channelId}/publisher/replacement`, json('POST')),
+    }>(replaceLivePublisher({ ...required, path: { channelId } })),
   deleteLiveChannel: (channelId: string) =>
-    request<void>(`/api/v1/live-channels/${channelId}`, json('DELETE')),
-  compatibility: () => request<{ items: CompatibilityResult[] }>('/api/v1/compatibility'),
+    result<void>(deleteLiveChannel({ ...required, path: { channelId } })),
+  compatibility: () => result<{ items: CompatibilityResult[] }>(listCompatibilityResults(required)),
   createCompatibility: (body: CreateCompatibilityResultRequest) =>
-    request<CompatibilityResult>('/api/v1/compatibility', json('POST', body)),
+    result<CompatibilityResult>(recordCompatibilityResult({ ...required, body })),
   createToken: (body: CreatePersonalTokenRequest) =>
-    request<Omit<PersonalAccessToken, 'tokenHash'> & { token: string }>(
-      '/api/v1/tokens',
-      json('POST', body)
+    result<Omit<PersonalAccessToken, 'tokenHash'> & { token: string }>(
+      createPersonalToken({ ...required, body })
     ),
-  tokens: () => request<{ items: Array<Omit<PersonalAccessToken, 'tokenHash'>> }>('/api/v1/tokens'),
-  revokeToken: (tokenId: string) => request<void>(`/api/v1/tokens/${tokenId}`, json('DELETE')),
+  tokens: () =>
+    result<{ items: Array<Omit<PersonalAccessToken, 'tokenHash'>> }>(listPersonalTokens(required)),
+  revokeToken: (tokenId: string) =>
+    result<void>(revokePersonalToken({ ...required, path: { tokenId } })),
   recentEvents: () =>
-    request<{
+    result<{
       items: Array<{
         version: 1;
         id: string;
@@ -231,60 +313,76 @@ export const api = {
         sessionId?: string;
         payload: Record<string, unknown>;
       }>;
-    }>('/api/v1/events/recent'),
+    }>(listRecentEvents(required)),
   clusterNodes: () =>
-    request<{
+    result<{
       items: Array<ClusterNode & { agent: { connected: boolean; connectedAt?: string } }>;
-    }>('/api/v1/nodes'),
-  clusterBackends: () => request<{ items: BackendStatus[] }>('/api/v1/backends'),
+    }>(listClusterNodes(required)),
+  clusterBackends: () => result<{ items: BackendStatus[] }>(listBackendHealth(required)),
   validateBackend: (body: BackendValidationRequest) =>
-    request<BackendStatus>('/api/v1/backends/validate', json('POST', body)),
+    result<BackendStatus>(validateBackend({ ...required, body })),
   activateBackend: (body: BackendActivationRequest) =>
-    request<BackendStatus>('/api/v1/backends/activate', json('POST', body)),
-  segmentJobs: () => request<{ items: SegmentJob[] }>('/api/v1/jobs'),
+    result<BackendStatus>(activateBackend({ ...required, body })),
+  segmentJobs: () => result<{ items: SegmentJob[] }>(listSegmentJobs(required)),
   createNodeJoinToken: (body: CreateNodeJoinTokenRequest) =>
-    request<{ token: string; expiresAt: string }>('/api/v1/nodes/join-tokens', json('POST', body)),
+    result<{ token: string; expiresAt: string }>(createNodeJoinToken({ ...required, body })),
   drainNode: (nodeId: string, draining: boolean) =>
-    request<ClusterNode>(`/api/v1/nodes/${nodeId}/drain`, json('POST', { draining })),
-  removeNode: (nodeId: string) => request<void>(`/api/v1/nodes/${nodeId}`, json('DELETE')),
-  cancelSegmentJob: (jobId: string) => request<void>(`/api/v1/jobs/${jobId}`, json('DELETE')),
+    result<ClusterNode>(drainNode({ ...required, path: { nodeId }, body: { draining } })),
+  removeNode: (nodeId: string) => result<void>(removeNode({ ...required, path: { nodeId } })),
+  cancelSegmentJob: (jobId: string) =>
+    result<void>(cancelSegmentJob({ ...required, path: { jobId } })),
   retrySegmentJob: (jobId: string) =>
-    request<SegmentJob>(`/api/v1/jobs/${jobId}/retry`, json('POST', {})),
+    result<SegmentJob>(retrySegmentJob({ ...required, path: { jobId } })),
   jobLogs: (jobId: string, limit?: number) =>
-    request<{ items: JobLogEntry[] }>(
-      `/api/v1/jobs/${jobId}/logs${limit ? `?limit=${encodeURIComponent(String(limit))}` : ''}`
+    result<{ items: JobLogEntry[] }>(
+      listJobLogs({
+        ...required,
+        path: { jobId },
+        ...(limit === undefined ? {} : { query: { limit } })
+      })
     ),
   providerBindings: (providerId?: string) =>
-    request<{ items: PublicProviderBinding[] }>(
-      `/api/v1/provider-bindings${providerId ? `?providerId=${encodeURIComponent(providerId)}` : ''}`
+    result<{ items: PublicProviderBinding[] }>(
+      listProviderBindings({
+        ...required,
+        ...(providerId === undefined ? {} : { query: { providerId } })
+      })
     ),
   createProviderBinding: (body: CreateProviderBindingRequest) =>
-    request<{ provider: PublicProviderConnection; binding: PublicProviderBinding }>(
-      '/api/v1/provider-bindings',
-      json('POST', body)
+    result<{ provider: PublicProviderConnection; binding: PublicProviderBinding }>(
+      createProviderBinding({ ...required, body })
     ),
   deleteProviderBinding: (bindingId: string, acknowledgeOrphanedCredential = false) =>
-    request<void>(
-      `/api/v1/provider-bindings/${bindingId}${acknowledgeOrphanedCredential ? '?acknowledgeOrphanedCredential=true' : ''}`,
-      json('DELETE')
+    result<void>(
+      deleteProviderBinding({
+        ...required,
+        path: { bindingId },
+        ...(acknowledgeOrphanedCredential ? { query: { acknowledgeOrphanedCredential: true } } : {})
+      })
     ),
   rotateNodeCertificate: (nodeId: string) =>
-    request<{ certificateExpiresAt: string }>(
-      `/api/v1/nodes/${nodeId}/certificate/rotate`,
-      json('POST', {})
+    result<{ certificateExpiresAt: string }>(
+      rotateNodeCertificate({ ...required, path: { nodeId } })
     ),
   revokeNode: (nodeId: string) =>
-    request<ClusterNode>(`/api/v1/nodes/${nodeId}/revoke`, json('POST', {})),
+    result<ClusterNode>(revokeNode({ ...required, path: { nodeId } })),
   nodeLogs: (nodeId: string, limit?: number) =>
-    request<{ items: AgentLogEntry[] }>(
-      `/api/v1/nodes/${nodeId}/logs${limit ? `?limit=${encodeURIComponent(String(limit))}` : ''}`
+    result<{ items: AgentLogEntry[] }>(
+      listNodeLogs({
+        ...required,
+        path: { nodeId },
+        ...(limit === undefined ? {} : { query: { limit } })
+      })
     ),
   cacheInventory: (nodeId?: string) =>
-    request<{ items: CachedObject[]; totalBytes: number }>(
-      `/api/v1/cache${nodeId ? `?nodeId=${encodeURIComponent(nodeId)}` : ''}`
+    result<{ items: CachedObject[]; totalBytes: number }>(
+      listCacheInventory({
+        ...required,
+        ...(nodeId === undefined ? {} : { query: { nodeId } })
+      })
     ),
   evictCache: (body: CacheEvictionRequest) =>
-    request<{ removed: number }>('/api/v1/cache', json('DELETE', body))
+    result<{ removed: number }>(evictCache({ ...required, body }))
 };
 
 export function isAuthenticatedError(error: unknown): boolean {

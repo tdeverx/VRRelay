@@ -632,6 +632,15 @@ describe('VOD relay service', () => {
     expect(a).toBe(b);
     expect(await readFile(a, 'utf8')).toBe('segment');
     expect(generated).toBe(1);
+    await expect(service.control(session.id, { state: 'stopped' })).resolves.toMatchObject({
+      state: 'stopped'
+    });
+    await expect(service.manifest(token)).rejects.toThrow('Session is stopped');
+    await expect(service.segment(token, 1)).rejects.toThrow('Session is stopped');
+    await expect(service.control(session.id, { state: 'idle' })).resolves.toMatchObject({
+      state: 'idle'
+    });
+    await expect(service.manifest(token)).resolves.toContain('#EXT-X-ENDLIST');
     const [completedJob] = await service.listJobs();
     expect(completedJob).toMatchObject({
       state: 'complete',
@@ -717,6 +726,9 @@ describe('VOD relay service', () => {
       state: 'stopped',
       viewers: 1
     });
+    await expect(service.control(session.id, { state: 'idle' })).resolves.toMatchObject({
+      state: 'idle'
+    });
 
     for (const [index, fail] of [[1, false]] as const) {
       const gate = blockSegment(index, fail);
@@ -739,6 +751,9 @@ describe('VOD relay service', () => {
     const failedGate = blockSegment(2, sensitiveFailure);
     const failedResult = service.segment(token, 2);
     await failedGate.started;
+    await expect(service.control(session.id, { state: 'stopped' })).resolves.toMatchObject({
+      state: 'stopped'
+    });
     failedGate.release();
     await expect(failedResult).rejects.toThrow('Simulated late worker failure');
     const failedJob = (await service.listJobs()).find((candidate) => candidate.segmentIndex === 2);
@@ -1524,21 +1539,33 @@ describe('Live relay service', () => {
         playbackTtlSeconds: null
       })
     ).rejects.toThrow('Live channel was not found');
-    await expect(
-      sessions.create({
-        kind: 'live',
-        name: 'OBS test',
-        liveChannelId: created.channel.id,
-        profileId: 'h264-live-hls',
-        profileRevision: 1,
-        platformMode: 'universal',
-        pinned: true,
-        reportActivity: false,
-        placementPolicy: 'local',
-        placementLocked: false,
-        playbackTtlSeconds: null
-      })
-    ).resolves.toMatchObject({ kind: 'live', liveChannelId: created.channel.id });
+    const livePlayback = await sessions.create({
+      kind: 'live',
+      name: 'OBS test',
+      liveChannelId: created.channel.id,
+      profileId: 'h264-live-hls',
+      profileRevision: 1,
+      platformMode: 'universal',
+      pinned: true,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    expect(livePlayback).toMatchObject({
+      kind: 'live',
+      liveChannelId: created.channel.id,
+      state: 'live'
+    });
+    await expect(sessions.control(livePlayback.id, { state: 'stopped' })).resolves.toMatchObject({
+      state: 'stopped'
+    });
+    await expect(sessions.control(livePlayback.id, { state: 'live' })).resolves.toMatchObject({
+      state: 'live'
+    });
+    await expect(sessions.control(livePlayback.id, { state: 'idle' })).rejects.toThrow(
+      'Only VOD sessions can resume to idle'
+    );
 
     const offlineChannel = (await repo.getVersionedLiveChannel(created.channel.id))!;
     await repo.compareAndSetLiveChannel(

@@ -274,7 +274,7 @@ spec:
       ports:
         - { port: 8099, protocol: TCP }
         - { port: 8100, protocol: TCP }
-    {{- if .Values.mediaMtx.enabled }}
+    {{- if and .Values.mediaMtx.enabled .Values.ingestOrigin.enabled }}
     - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay-mediamtx-origin } } }]
       ports:
         - { port: 1935, protocol: TCP }

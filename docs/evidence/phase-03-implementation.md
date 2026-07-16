@@ -44,9 +44,8 @@ representation, while the DER fingerprint remains canonical.
 
 ## Lean guardrails run
 
-These commands passed locally under Node `v22.22.3` and npm `10.9.8`. The pinned
-runtime remains Node `22.23.1`; the final verification pass must rerun on the
-pinned runtime.
+These commands passed locally under Node `v22.22.3` and npm `10.9.8` during the
+implementation pass.
 
 - `npx vitest run apps/relay/src/agent-transport.test.ts`: 5 passed.
 - `npm run format:check`: passed.
@@ -56,12 +55,16 @@ pinned runtime.
 - `npm run lint`: passed.
 - `npm run build`: passed.
 
+The later combined closeout passed the complete `npm run ci` gate under the
+pinned Node `22.23.1` runtime: 395 tests passed, 23 intentional skips, all
+formatting, generated-client, typecheck, lint, build, and repository gates
+passed, and the npm audit reported zero vulnerabilities.
+
 ## Deferred verification
 
 The build-first plan intentionally defers broad release verification until the
 high-pass testing phase. The following evidence is still pending:
 
-- Full `npm run ci` on Node `22.23.1`, including all tests and npm audit.
 - Docker Compose, container, Kubernetes, Helm, and clean-deployment checks.
 - Destructive cluster restart, revocation, drain, and certificate-rotation
   scenarios across real multi-process topologies.

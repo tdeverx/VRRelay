@@ -12,6 +12,8 @@
     "apps/**/*.test.ts",
     "packages/**/*.test.ts",
     "script/**/*.test.ts",
+    "tests/**/*.ts",
+    "playwright.config.ts",
     "vitest.config.ts"
   ]
 }

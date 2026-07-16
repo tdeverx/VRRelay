@@ -53,4 +53,8 @@ cached-egress, uncached-encode, live-fan-out, cache-ratio, and resource-snapshot
 checks. Benchmark output includes sanitized target metadata and CPU/RAM/GPU
 resource snapshots so retained evidence can be compared against the exact host
 and scenario that produced it. Treat the numbers as environment evidence, not a
-portable viewer-limit guarantee.
+portable viewer-limit guarantee. Release-candidate runs should add
+`--fail-on-errors --output <unique-report.json>`. Add
+`--fail-on-regression --baseline <baseline.json>` only when the baseline has the
+same scenario and load configuration; the resulting report records the baseline
+digest and the command exits nonzero when the enforced gate fails.

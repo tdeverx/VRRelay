@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { cpus, freemem, loadavg, platform, release, totalmem, type, arch } from 'node:os';
+import { basename, dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 
@@ -17,6 +20,21 @@ const SCENARIOS = new Set([
 const DEFAULT_CONCURRENCY = 20;
 const DEFAULT_REQUESTS = 200;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_REGRESSION_PERCENT = 10;
+const REPORT_SCHEMA_VERSION = 1;
+const BOOLEAN_OPTIONS = new Set(['failOnErrors', 'failOnRegression']);
+const VALUE_OPTIONS = new Set([
+  'scenario',
+  'url',
+  'urlTemplate',
+  'concurrency',
+  'requests',
+  'timeoutMs',
+  'hotRatio',
+  'output',
+  'baseline',
+  'maxRegressionPercent'
+]);
 
 export function usage() {
   return `Usage:
@@ -26,6 +44,13 @@ export function usage() {
   node script/benchmark.mjs --scenario live-fan-out --url <live-media-playlist-url>
   node script/benchmark.mjs --scenario cache-ratio --url <hot-segment-url> --url-template '<cold-url-with-{i}>' [--hot-ratio 0.8]
   node script/benchmark.mjs --scenario resource-snapshot
+
+Evidence and enforcement options:
+  --output <report.json>             Retain the complete sanitized JSON report
+  --fail-on-errors                   Exit 2 when any request or transport error occurs
+  --fail-on-regression               Exit 2 when throughput or p95 regresses from --baseline
+  --baseline <report.json>           Schema-compatible baseline for regression checks
+  --max-regression-percent <number>  Allowed throughput/p95 change (default: 10)
 
 Legacy mode is still accepted:
   node script/benchmark.mjs <playlist-or-segment-url> [concurrency] [requests]`;
@@ -49,6 +74,11 @@ export function parseArguments(argv) {
     const rawKey = equalsIndex === -1 ? item.slice(2) : item.slice(2, equalsIndex);
     const inlineValue = equalsIndex === -1 ? undefined : item.slice(equalsIndex + 1);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    if (BOOLEAN_OPTIONS.has(key)) {
+      options[key] = inlineValue === undefined ? true : booleanValue(inlineValue, rawKey);
+      continue;
+    }
+    if (!VALUE_OPTIONS.has(key)) throw new Error(`Unknown option: --${rawKey}\n\n${usage()}`);
     const value = inlineValue ?? argv[index + 1];
     if (value === undefined || value.startsWith('--'))
       throw new Error(`Missing value for --${rawKey}\n\n${usage()}`);
@@ -71,14 +101,25 @@ function normalizeOptions(input) {
   const requests = scenario === 'resource-snapshot' ? 0 : Math.max(concurrency, requestedRequests);
   const timeoutMs = positiveInteger(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, 'timeoutMs');
   const hotRatio = boundedRatio(input.hotRatio ?? 0.8);
+  const failOnErrors = Boolean(input.failOnErrors);
+  const failOnRegression = Boolean(input.failOnRegression);
+  const maxRegressionPercent = percentage(
+    input.maxRegressionPercent ?? DEFAULT_MAX_REGRESSION_PERCENT,
+    'max-regression-percent'
+  );
   const options = {
     scenario,
     concurrency,
     requests,
     timeoutMs,
     hotRatio,
+    failOnErrors,
+    failOnRegression,
+    maxRegressionPercent,
     ...(input.url ? { url: String(input.url) } : {}),
-    ...(input.urlTemplate ? { urlTemplate: String(input.urlTemplate) } : {})
+    ...(input.urlTemplate ? { urlTemplate: String(input.urlTemplate) } : {}),
+    ...(input.output ? { output: String(input.output) } : {}),
+    ...(input.baseline ? { baseline: String(input.baseline) } : {})
   };
 
   if (scenario !== 'resource-snapshot' && !options.url && !options.urlTemplate)
@@ -93,7 +134,21 @@ function normalizeOptions(input) {
     throw new Error('Scenario "cache-ratio" requires --url for the hot cached target.');
   if (['playlist', 'cached-egress', 'live-fan-out'].includes(scenario) && !options.url)
     throw new Error(`Scenario "${scenario}" requires --url.`);
+  if (failOnRegression && !options.baseline)
+    throw new Error('--fail-on-regression requires --baseline.');
+  if (!failOnRegression && options.baseline)
+    throw new Error('--baseline requires --fail-on-regression.');
+  if (!failOnRegression && input.maxRegressionPercent !== undefined)
+    throw new Error('--max-regression-percent requires --fail-on-regression.');
+  if (scenario === 'resource-snapshot' && failOnRegression)
+    throw new Error('The resource-snapshot scenario cannot use a regression gate.');
   return options;
+}
+
+function booleanValue(value, label) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${label} must be true or false when assigned a value`);
 }
 
 function positiveInteger(value, label) {
@@ -107,6 +162,13 @@ function boundedRatio(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 1)
     throw new Error('hot-ratio must be greater than 0 and less than 1');
+  return parsed;
+}
+
+function percentage(value, label) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100)
+    throw new Error(`${label} must be a number from 0 through 100`);
   return parsed;
 }
 
@@ -167,6 +229,7 @@ export async function runBenchmark(options) {
   const resourcesBefore = resourceSnapshot();
   if (options.scenario === 'resource-snapshot') {
     return {
+      schemaVersion: REPORT_SCHEMA_VERSION,
       scenario: options.scenario,
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -205,12 +268,138 @@ export async function runBenchmark(options) {
 
   const result = await load(makeUrl, options);
   return {
+    schemaVersion: REPORT_SCHEMA_VERSION,
     scenario: options.scenario,
     startedAt,
     finishedAt: new Date().toISOString(),
     metadata: metadata(options, resourcesBefore, resourceSnapshot()),
     result
   };
+}
+
+export async function readBenchmarkBaseline(file) {
+  const serialized = await readFile(file, 'utf8');
+  let report;
+  try {
+    report = JSON.parse(serialized);
+  } catch {
+    throw new Error('Benchmark baseline is not valid JSON.');
+  }
+  validateBaselineReport(report);
+  return {
+    report,
+    sha256: createHash('sha256').update(serialized).digest('hex')
+  };
+}
+
+function validateBaselineReport(report) {
+  if (!report || typeof report !== 'object' || Array.isArray(report))
+    throw new Error('Benchmark baseline must contain a JSON object.');
+  if (report.schemaVersion !== REPORT_SCHEMA_VERSION)
+    throw new Error(`Benchmark baseline must use schemaVersion ${REPORT_SCHEMA_VERSION}.`);
+  if (typeof report.scenario !== 'string' || !report.metadata?.command || !report.result)
+    throw new Error('Benchmark baseline is missing scenario, command metadata, or result data.');
+  for (const [label, value] of [
+    ['failures', report.result.failures],
+    ['requestsPerSecond', report.result.requestsPerSecond],
+    ['latencyMs.p95', report.result.latencyMs?.p95]
+  ]) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+      throw new Error(`Benchmark baseline has an invalid ${label} value.`);
+  }
+  if (report.result.failures !== 0)
+    throw new Error('Benchmark baseline cannot contain failed requests.');
+}
+
+export function applyBenchmarkGate(report, options, baseline) {
+  const checks = [];
+  if (options.failOnErrors) {
+    checks.push({
+      name: 'request-errors',
+      passed: report.result.failures === 0,
+      actual: report.result.failures,
+      maximum: 0
+    });
+  }
+
+  let baselineMetadata;
+  if (options.failOnRegression) {
+    if (!baseline) throw new Error('A loaded benchmark baseline is required.');
+    assertComparableBaseline(report, baseline.report);
+    const allowance = options.maxRegressionPercent / 100;
+    const minimumRequestsPerSecond = roundedMetric(
+      baseline.report.result.requestsPerSecond * (1 - allowance)
+    );
+    const maximumP95Ms = roundedMetric(baseline.report.result.latencyMs.p95 * (1 + allowance));
+    checks.push(
+      {
+        name: 'requests-per-second',
+        passed: report.result.requestsPerSecond >= minimumRequestsPerSecond,
+        actual: report.result.requestsPerSecond,
+        minimum: minimumRequestsPerSecond,
+        baseline: baseline.report.result.requestsPerSecond
+      },
+      {
+        name: 'latency-p95-ms',
+        passed: report.result.latencyMs.p95 <= maximumP95Ms,
+        actual: report.result.latencyMs.p95,
+        maximum: maximumP95Ms,
+        baseline: baseline.report.result.latencyMs.p95
+      }
+    );
+    baselineMetadata = {
+      sha256: baseline.sha256,
+      startedAt: baseline.report.startedAt,
+      maxRegressionPercent: options.maxRegressionPercent
+    };
+  }
+
+  return {
+    ...report,
+    gate: {
+      enforced: checks.length > 0,
+      passed: checks.every((check) => check.passed),
+      checks,
+      ...(baselineMetadata ? { baseline: baselineMetadata } : {})
+    }
+  };
+}
+
+function roundedMetric(value) {
+  return Number(value.toPrecision(12));
+}
+
+function assertComparableBaseline(report, baseline) {
+  const currentCommand = report.metadata.command;
+  const baselineCommand = baseline.metadata.command;
+  for (const field of ['scenario', 'requests', 'concurrency', 'timeoutMs', 'url', 'urlTemplate']) {
+    if (currentCommand[field] !== baselineCommand[field])
+      throw new Error(`Benchmark baseline ${field} does not match the current run.`);
+  }
+  if (
+    currentCommand.scenario === 'cache-ratio' &&
+    currentCommand.hotRatio !== baselineCommand.hotRatio
+  )
+    throw new Error('Benchmark baseline hotRatio does not match the current run.');
+}
+
+export async function writeBenchmarkReport(file, report) {
+  const destination = resolve(file);
+  const directory = dirname(destination);
+  const temporary = `${directory}/.${basename(destination)}.${process.pid}.${randomUUID()}.tmp`;
+  await mkdir(directory, { recursive: true });
+  try {
+    await writeFile(temporary, `${JSON.stringify(report, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+    await rename(temporary, destination);
+    await chmod(destination, 0o600);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 async function load(makeUrl, options) {
@@ -352,10 +541,17 @@ function gpuSnapshot() {
   return [];
 }
 
+export async function runBenchmarkCli(argv, stdout = console.log) {
+  const options = parseArguments(argv);
+  const baseline = options.baseline ? await readBenchmarkBaseline(options.baseline) : undefined;
+  const result = applyBenchmarkGate(await runBenchmark(options), options, baseline);
+  if (options.output) await writeBenchmarkReport(options.output, result);
+  stdout(JSON.stringify(result, null, 2));
+  return result.gate.passed ? 0 : 2;
+}
+
 async function main() {
-  const options = parseArguments(process.argv.slice(2));
-  const result = await runBenchmark(options);
-  console.log(JSON.stringify(result, null, 2));
+  process.exitCode = await runBenchmarkCli(process.argv.slice(2));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -301,16 +301,22 @@ export class SessionService {
 
   async control(
     id: string,
-    input: { pinned?: boolean; state?: 'idle' | 'stopped' }
+    input: { pinned?: boolean; state?: 'idle' | 'live' | 'stopped' }
   ): Promise<RelaySession> {
     const result = await this.#updateSession(
       id,
-      (session) => ({
-        ...session,
-        ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
-        ...(input.state ? { state: input.state } : {}),
-        updatedAt: new Date().toISOString()
-      }),
+      (session) => {
+        if (input.state === 'idle' && session.kind !== 'vod')
+          throw new ConflictError('Only VOD sessions can resume to idle');
+        if (input.state === 'live' && session.kind !== 'live')
+          throw new ConflictError('Only live sessions can resume to live');
+        return {
+          ...session,
+          ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
+          ...(input.state ? { state: input.state } : {}),
+          updatedAt: new Date().toISOString()
+        };
+      },
       'Session control conflicted with repeated concurrent updates'
     );
     const updated = result.session;
@@ -834,6 +840,7 @@ export class SessionService {
     const grant = await this.#resolvePlaybackGrant(token);
     const session = await this.repository.getSession(grant.sessionId);
     if (!session) throw new NotFoundError('Session was not found');
+    if (session.state === 'stopped') throw new ConflictError('Session is stopped');
     const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
     if (!profile) throw new NotFoundError('Profile revision was not found');
     return { session, profile };

@@ -15,6 +15,7 @@
   } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import type {
+    ClusterNode,
     MediaItem,
     PlatformMode,
     ProfileRevision,
@@ -35,6 +36,9 @@
 
   let providers = $state<PublicProviderConnection[]>([]);
   let profiles = $state<ProfileRevision[]>([]);
+  let nodes = $state<Array<ClusterNode & { agent: { connected: boolean; connectedAt?: string } }>>(
+    []
+  );
   let results = $state<MediaItem[]>([]);
   let selected = $state<MediaItem | null>(null);
   let providerId = $state('');
@@ -50,12 +54,33 @@
   let reportActivity = $state(true);
   let placementPolicy = $state<'local' | 'hosted' | 'auto'>('auto');
   let preferredRegion = $state('');
+  let preferredNodeId = $state('');
+  let placementLocked = $state(false);
+  let placementPreview = $state<{ node?: ClusterNode | null; reason: string } | null>(null);
+  let placementLoading = $state(false);
+  let placementError = $state('');
+  let nodeLoadError = $state('');
   let advancedOpen = $state(false);
+  let placementRequest = 0;
 
   let currentProfile = $derived(
     profiles.find((profile) => `${profile.profileId}:${profile.revision}` === profileKey)
   );
   let provider = $derived(providers.find((item) => item.id === providerId));
+  let eligibleNodes = $derived(
+    currentProfile
+      ? nodes.filter(
+          (node) =>
+            node.state === 'online' &&
+            node.agent.connected &&
+            node.roles.includes('source-worker') &&
+            node.capabilities.encoders.includes(currentProfile.video.encoder) &&
+            node.capabilities.providerIds.includes(providerId)
+        )
+      : []
+  );
+  let regions = $derived([...new Set(eligibleNodes.map((node) => node.region))].sort());
+  let preferredNode = $derived(eligibleNodes.find((node) => node.id === preferredNodeId) ?? null);
   let step = $derived(
     !selected
       ? 1
@@ -65,9 +90,27 @@
           ? 3
           : 4
   );
-  let ready = $derived(Boolean(selected && currentProfile && provider));
+  let placementReady = $derived(
+    placementPolicy === 'local' ||
+      (!placementLoading && !placementError && Boolean(placementPreview?.node))
+  );
+  let formReady = $derived(Boolean(selected && currentProfile && provider));
+  let ready = $derived(formReady && placementReady);
 
   onMount(load);
+
+  $effect(() => {
+    void [
+      loading,
+      providerId,
+      profileKey,
+      placementPolicy,
+      preferredRegion,
+      preferredNodeId,
+      placementLocked
+    ];
+    if (!loading) void refreshPlacement();
+  });
 
   async function load() {
     try {
@@ -84,6 +127,12 @@
       if (defaultProfile) {
         profileKey = `${defaultProfile.profileId}:${defaultProfile.revision}`;
         platformMode = defaultProfile.platform;
+      }
+      try {
+        nodes = (await api.clusterNodes()).items;
+      } catch (error) {
+        nodeLoadError =
+          error instanceof Error ? error.message : 'Could not load eligible cluster workers.';
       }
       if (providerId) await searchCatalog();
     } catch (error) {
@@ -106,6 +155,16 @@
     }
   }
 
+  async function setProvider(value: string) {
+    providerId = value;
+    selected = null;
+    audioTrackId = '';
+    subtitleTrackId = 'none';
+    preferredNodeId = '';
+    placementLocked = false;
+    await searchCatalog();
+  }
+
   async function choose(item: MediaItem) {
     try {
       selected = await api.item(item.providerId, item.id);
@@ -123,12 +182,109 @@
     profileKey = value;
     const profile = profiles.find((item) => `${item.profileId}:${item.revision}` === value);
     if (profile) platformMode = profile.platform;
+    if (preferredNodeId && !eligibleNodes.some((node) => node.id === preferredNodeId)) {
+      preferredNodeId = '';
+      placementLocked = false;
+    }
+  }
+
+  function setPlacementPolicy(value: string) {
+    if (value !== 'auto' && value !== 'hosted' && value !== 'local') return;
+    placementPolicy = value;
+    if (value === 'local') {
+      preferredRegion = '';
+      preferredNodeId = '';
+      placementLocked = false;
+    }
+  }
+
+  function setPreferredRegion(value: string) {
+    preferredRegion = value === '__any__' ? '' : value;
+    if (preferredNode && preferredNode.region !== preferredRegion && preferredRegion) {
+      preferredNodeId = '';
+      placementLocked = false;
+    }
+  }
+
+  function setPreferredNode(value: string) {
+    preferredNodeId = value === '__scheduler__' ? '' : value;
+    placementLocked = Boolean(preferredNodeId);
+    const node = eligibleNodes.find((item) => item.id === preferredNodeId);
+    if (node) preferredRegion = node.region;
+  }
+
+  function setPlacementLocked(value: boolean) {
+    placementLocked = value && Boolean(preferredNodeId);
+    if (!placementLocked) preferredNodeId = '';
+  }
+
+  function placementReason(reason: string): string {
+    if (reason === 'preferred-node') return 'The selected worker is eligible and locked.';
+    if (reason === 'preferred-region')
+      return 'Selected for compatible capacity in the preferred region.';
+    if (reason === 'hosted-capacity') return 'Selected from compatible hosted capacity.';
+    if (reason === 'auto-capacity') return 'Selected from the least-loaded compatible capacity.';
+    if (reason === 'preferred-node-unavailable')
+      return 'The selected worker is no longer online or compatible with this provider and profile.';
+    if (reason === 'no-compatible-source-worker')
+      return 'No online source worker has both the selected provider and required encoder.';
+    return reason.replaceAll('-', ' ');
+  }
+
+  async function refreshPlacement() {
+    const requestId = ++placementRequest;
+    const profile = currentProfile;
+    placementError = '';
+
+    if (placementPolicy === 'local') {
+      placementPreview = { reason: 'local-runtime' };
+      placementLoading = false;
+      return placementPreview;
+    }
+    if (!profile || !providerId) {
+      placementPreview = null;
+      placementLoading = false;
+      return null;
+    }
+
+    placementLoading = true;
+    placementPreview = null;
+    try {
+      const request: Parameters<typeof api.previewPlacement>[0] = {
+        providerId,
+        profileId: profile.profileId,
+        profileRevision: profile.revision,
+        placementPolicy,
+        ...(placementLocked && preferredNodeId ? { preferredNodeId } : {}),
+        ...(preferredRegion ? { preferredRegion } : {})
+      };
+      const result = await api.previewPlacement(request);
+      if (requestId !== placementRequest) return null;
+      placementPreview = result;
+      return result;
+    } catch (error) {
+      if (requestId !== placementRequest) return null;
+      placementError =
+        error instanceof Error ? error.message : 'Could not preview placement for this relay.';
+      return null;
+    } finally {
+      if (requestId === placementRequest) placementLoading = false;
+    }
   }
 
   async function createRelay() {
     if (!selected || !currentProfile) return;
     creating = true;
     try {
+      if (placementPolicy !== 'local') {
+        const placement = await refreshPlacement();
+        if (!placement?.node) {
+          toast.error('Placement is unavailable', {
+            description: 'Review the placement reason before creating this relay.'
+          });
+          return;
+        }
+      }
       const session = await api.createVodSession({
         name: selected.name,
         source: {
@@ -142,6 +298,7 @@
         profileRevision: currentProfile.revision,
         platformMode,
         placementPolicy,
+        preferredNodeId: placementLocked && preferredNodeId ? preferredNodeId : undefined,
         preferredRegion: preferredRegion.trim() || undefined,
         pinned,
         reportActivity
@@ -201,8 +358,8 @@
               <Field.FieldLabel>Media provider</Field.FieldLabel>
               <Select.Root
                 type="single"
-                bind:value={providerId}
-                onValueChange={() => void searchCatalog()}
+                value={providerId}
+                onValueChange={(value) => void setProvider(value ?? '')}
               >
                 <Select.Trigger class="w-full">{provider?.name ?? 'Select provider'}</Select.Trigger
                 >
@@ -374,32 +531,171 @@
                   ></span
                 ><Switch bind:checked={reportActivity} /></label
               >
-              <div class="placement-fields">
-                <Field.Field>
-                  <Field.FieldLabel>Placement policy</Field.FieldLabel>
-                  <Select.Root type="single" bind:value={placementPolicy}>
-                    <Select.Trigger class="w-full"
-                      >{{ auto: 'Automatic', local: 'This node', hosted: 'Cluster node' }[
-                        placementPolicy
-                      ]}</Select.Trigger
-                    >
-                    <Select.Content
-                      ><Select.Group
-                        ><Select.Item value="auto" label="Automatic">Automatic</Select.Item
-                        ><Select.Item value="local" label="This node">This node</Select.Item
-                        ><Select.Item value="hosted" label="Cluster node">Cluster node</Select.Item
-                        ></Select.Group
-                      ></Select.Content
-                    >
-                  </Select.Root>
-                </Field.Field>
-                <Field.Field>
-                  <Field.FieldLabel>Preferred region</Field.FieldLabel>
-                  <Input bind:value={preferredRegion} placeholder="Optional, for example eu-west" />
-                </Field.Field>
-              </div>
             </Collapsible.Content>
           </Collapsible.Root>
+
+          <div class="placement-panel">
+            <div class="placement-heading">
+              <span
+                ><strong>Placement preview</strong><small
+                  >Confirm compatible capacity before creating the relay.</small
+                ></span
+              >
+              <Badge
+                variant={placementPolicy === 'local'
+                  ? 'neutral'
+                  : placementLoading
+                    ? 'neutral'
+                    : placementPreview?.node
+                      ? 'success'
+                      : 'destructive'}
+                >{placementPolicy === 'local'
+                  ? 'Local'
+                  : placementLoading
+                    ? 'Checking'
+                    : placementPreview?.node
+                      ? 'Eligible'
+                      : 'Unavailable'}</Badge
+              >
+            </div>
+
+            <div class="placement-controls">
+              <Field.Field>
+                <Field.FieldLabel>Placement policy</Field.FieldLabel>
+                <Select.Root
+                  type="single"
+                  value={placementPolicy}
+                  onValueChange={(value) => setPlacementPolicy(value ?? '')}
+                >
+                  <Select.Trigger class="w-full" aria-label="Placement policy"
+                    >{{ auto: 'Automatic', local: 'This node', hosted: 'Cluster node' }[
+                      placementPolicy
+                    ]}</Select.Trigger
+                  >
+                  <Select.Content
+                    ><Select.Group
+                      ><Select.Item value="auto" label="Automatic">Automatic</Select.Item
+                      ><Select.Item value="local" label="This node">This node</Select.Item
+                      ><Select.Item value="hosted" label="Cluster node">Cluster node</Select.Item
+                      ></Select.Group
+                    ></Select.Content
+                  >
+                </Select.Root>
+              </Field.Field>
+
+              <Field.Field>
+                <Field.FieldLabel>Preferred region</Field.FieldLabel>
+                <Select.Root
+                  type="single"
+                  value={preferredRegion || '__any__'}
+                  disabled={placementPolicy === 'local'}
+                  onValueChange={(value) => setPreferredRegion(value ?? '__any__')}
+                >
+                  <Select.Trigger class="w-full" aria-label="Preferred region"
+                    >{preferredRegion || 'Any region'}</Select.Trigger
+                  >
+                  <Select.Content
+                    ><Select.Group
+                      ><Select.Item value="__any__" label="Any region">Any region</Select.Item
+                      >{#each regions as region}<Select.Item value={region} label={region}
+                          >{region}</Select.Item
+                        >{/each}</Select.Group
+                    ></Select.Content
+                  >
+                </Select.Root>
+              </Field.Field>
+
+              <Field.Field>
+                <Field.FieldLabel>Exact worker</Field.FieldLabel>
+                <Select.Root
+                  type="single"
+                  value={preferredNodeId || '__scheduler__'}
+                  disabled={placementPolicy === 'local'}
+                  onValueChange={(value) => setPreferredNode(value ?? '__scheduler__')}
+                >
+                  <Select.Trigger
+                    class="w-full"
+                    aria-label="Exact eligible worker"
+                    aria-describedby="placement-status"
+                    >{preferredNode
+                      ? `${preferredNode.name} · ${preferredNode.region}`
+                      : 'Scheduler choice'}</Select.Trigger
+                  >
+                  <Select.Content
+                    ><Select.Group
+                      ><Select.Item value="__scheduler__" label="Scheduler choice"
+                        >Scheduler choice</Select.Item
+                      >{#each eligibleNodes as node}<Select.Item value={node.id} label={node.name}
+                          >{node.name} · {node.region} · {node.capabilities.activeWorkers}/{node
+                            .capabilities.maxWorkers} workers</Select.Item
+                        >{/each}</Select.Group
+                    ></Select.Content
+                  >
+                </Select.Root>
+              </Field.Field>
+            </div>
+
+            <label class="placement-lock">
+              <span
+                ><strong>Lock placement</strong><small
+                  >Selecting an exact worker prevents failover to another worker.</small
+                ></span
+              >
+              <Switch
+                checked={placementLocked}
+                disabled={!preferredNodeId || placementPolicy === 'local'}
+                aria-label="Lock placement to selected worker"
+                onCheckedChange={setPlacementLocked}
+              />
+            </label>
+
+            {#if nodeLoadError && placementPolicy !== 'local'}
+              <p class="placement-note" role="status">
+                Exact worker choices could not be loaded: {nodeLoadError} Scheduler preview remains available.
+              </p>
+            {/if}
+
+            <div id="placement-status" class="placement-status" aria-live="polite">
+              {#if placementPolicy === 'local'}
+                <Alert.Root
+                  ><Info /><Alert.Title>This runtime</Alert.Title><Alert.Description
+                    >Standalone placement does not require a cluster worker.</Alert.Description
+                  ></Alert.Root
+                >
+              {:else if placementLoading}
+                <Alert.Root
+                  ><LoaderCircle class="spin" /><Alert.Title>Checking placement</Alert.Title
+                  ><Alert.Description
+                    >Matching the provider and encoder against online source workers.</Alert.Description
+                  ></Alert.Root
+                >
+              {:else if placementError}
+                <Alert.Root variant="destructive"
+                  ><AlertTriangle /><Alert.Title>Preview unavailable</Alert.Title><Alert.Description
+                    >{placementError}</Alert.Description
+                  ></Alert.Root
+                >
+              {:else if placementPreview?.node}
+                <Alert.Root
+                  ><Check /><Alert.Title>{placementPreview.node.name}</Alert.Title
+                  ><Alert.Description
+                    >{placementReason(placementPreview.reason)} Region {placementPreview.node
+                      .region};
+                    {placementPreview.node.capabilities.activeWorkers}/{placementPreview.node
+                      .capabilities.maxWorkers} workers active. Reason: {placementPreview.reason}.</Alert.Description
+                  ></Alert.Root
+                >
+              {:else}
+                <Alert.Root variant="destructive"
+                  ><AlertTriangle /><Alert.Title>Placement rejected</Alert.Title><Alert.Description
+                    >{placementReason(placementPreview?.reason ?? 'no-compatible-source-worker')}
+                    Reason: {placementPreview?.reason ??
+                      'no-compatible-source-worker'}.</Alert.Description
+                  ></Alert.Root
+                >
+              {/if}
+            </div>
+          </div>
         </section>
       </main>
 
@@ -442,6 +738,16 @@
             <dd>{currentProfile?.delivery.method.replace('_', ' ').toUpperCase() ?? '—'}</dd>
           </div>
           <div>
+            <dt>Placement</dt>
+            <dd>
+              {placementPolicy === 'local'
+                ? 'This runtime'
+                : placementLoading
+                  ? 'Checking…'
+                  : (placementPreview?.node?.name ?? 'Unavailable')}
+            </dd>
+          </div>
+          <div>
             <dt>Bitrate</dt>
             <dd>{currentProfile ? formatBitrate(currentProfile.video.bitrateKbps) : '—'}</dd>
           </div>
@@ -453,11 +759,17 @@
           >{/if}
         <Alert.Root
           ><Info /><Alert.Title
-            >{ready ? 'Ready to create' : 'Complete the source selection'}</Alert.Title
+            >{ready
+              ? 'Ready to create'
+              : formReady && !placementReady
+                ? 'Resolve placement before creating'
+                : 'Complete the source selection'}</Alert.Title
           ><Alert.Description
             >{ready
               ? 'Encoding begins only when a player requests segments.'
-              : 'No media is processed or stored yet.'}</Alert.Description
+              : formReady && !placementReady
+                ? 'Creation stays disabled while placement is unavailable.'
+                : 'No media is processed or stored yet.'}</Alert.Description
           ></Alert.Root
         >
         <div class="actions">
@@ -676,16 +988,54 @@
     width: 14px;
     color: var(--primary);
   }
-  .two-column,
-  .placement-fields {
+  .two-column {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 14px;
   }
-  .placement-fields {
-    margin-top: 4px;
+  .placement-panel {
+    display: grid;
+    gap: 14px;
+    margin-top: 18px;
     border-top: 1px solid var(--border);
-    padding-top: 14px;
+    padding-top: 18px;
+  }
+  .placement-heading,
+  .placement-lock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .placement-heading > span,
+  .placement-lock > span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .placement-heading strong,
+  .placement-lock strong {
+    font-size: 12px;
+  }
+  .placement-heading small,
+  .placement-lock small,
+  .placement-note {
+    color: var(--muted-foreground);
+    font-size: 11px;
+  }
+  .placement-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .placement-controls > :global([data-slot='field']:last-child) {
+    grid-column: 1 / -1;
+  }
+  .placement-note {
+    margin: 0;
+  }
+  .placement-status :global([data-slot='alert']) {
+    margin: 0;
   }
   :global(.advanced-trigger) {
     display: flex;
@@ -829,7 +1179,7 @@
     }
     .two-column,
     .media-grid,
-    .placement-fields {
+    .placement-controls {
       grid-template-columns: 1fr;
     }
     .summary {

@@ -130,6 +130,37 @@ npm run benchmark -- --scenario cache-ratio --url https://relay.example/play/DIS
 npm run benchmark -- --scenario resource-snapshot
 ```
 
+Exploratory runs still print the versioned JSON report to standard output. For
+release evidence, retain it directly and make request failures authoritative:
+
+```sh
+npm run benchmark -- --scenario playlist \
+  --url https://relay.example/play/DISPOSABLE_GRANT/index.m3u8 \
+  --fail-on-errors \
+  --output tmp/benchmarks/playlist-baseline.json
+```
+
+To enforce a target-specific baseline, repeat the same scenario, request count,
+concurrency, timeout, and cache-ratio configuration, then opt into the regression
+gate:
+
+```sh
+npm run benchmark -- --scenario playlist \
+  --url https://relay.example/play/DISPOSABLE_GRANT/index.m3u8 \
+  --fail-on-errors \
+  --fail-on-regression \
+  --baseline tmp/benchmarks/playlist-baseline.json \
+  --max-regression-percent 10 \
+  --output tmp/benchmarks/playlist-candidate.json
+```
+
+The regression gate checks both requests per second and p95 latency, records the
+baseline report's SHA-256 digest in the candidate report, and exits with status 2
+when an enforced check fails. Invalid arguments, unreadable/incompatible
+baselines, and benchmark setup errors exit with status 1. Output reports are
+written through a same-directory temporary file with private file permissions;
+use a unique filename for every retained run.
+
 Use real retained benchmark evidence only from disposable grants and test media
 created for the target environment. Do not paste private relay URLs, playback
 tokens, provider URLs, or customer media names into issues, logs, screenshots,

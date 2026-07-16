@@ -256,7 +256,7 @@ export type CreateSessionRequest = (SessionCommon & {
 
 export type ControlSessionRequest = {
     pinned?: boolean;
-    state?: 'idle' | 'stopped';
+    state?: 'idle' | 'live' | 'stopped';
 };
 
 export type RelaySession = {
