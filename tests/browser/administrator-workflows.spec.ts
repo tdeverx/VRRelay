@@ -80,6 +80,10 @@ test('creates and revokes a scoped token, then signs out', async ({ page, isMobi
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Network' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Runtime and maintenance' })).toBeVisible();
+  await expect(page.getByText('Read-only deployment configuration')).toBeVisible();
+  await expect(page.getByLabel('Dashboard/API listener')).toBeDisabled();
 
   await page.getByLabel('Token name').fill(tokenName);
   await page.getByRole('button', { name: 'Create token' }).click();

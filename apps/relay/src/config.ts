@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { resolve } from 'node:path';
 import { isIP } from 'node:net';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { RuntimeConfigurationSchema, type RuntimeConfiguration } from '@vrrelay/contracts';
 import { APPLICATION_VERSION, SEMANTIC_VERSION_PATTERN } from './version.js';
 
-const duration = z.string().transform((value, context) => {
-  const match = value.match(/^(\d+)(ms|s|m|h)$/);
-  if (!match) {
-    context.addIssue({ code: 'custom', message: 'Expected duration like 30m, 10s, or 1h' });
-    return z.NEVER;
-  }
-  const amount = Number(match[1]);
-  return amount * { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }[match[2] as 'ms' | 's' | 'm' | 'h'];
-});
+const duration = z.union([
+  z.number().int().nonnegative(),
+  z.string().transform((value, context) => {
+    const match = value.match(/^(\d+)(ms|s|m|h)$/);
+    if (!match) {
+      context.addIssue({ code: 'custom', message: 'Expected duration like 30m, 10s, or 1h' });
+      return z.NEVER;
+    }
+    const amount = Number(match[1]);
+    return (
+      amount * { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }[match[2] as 'ms' | 's' | 'm' | 'h']
+    );
+  })
+]);
 
 const environmentBoolean = z.preprocess((value) => {
   if (typeof value !== 'string') return value;
@@ -96,6 +103,8 @@ const ConfigSchema = z
   .object({
     environment: z.enum(['development', 'production']).default('development'),
     applicationVersion: z.string().regex(SEMANTIC_VERSION_PATTERN).default(APPLICATION_VERSION),
+    runtimeConfigPath: z.string().min(1).optional(),
+    restartMode: z.enum(['none', 'exit']).default('none'),
     listenAddr: z.string().default('127.0.0.1:8099'),
     publicUrl: serviceUrl.default('http://127.0.0.1:8099'),
     adminUrl: serviceUrl.default('http://127.0.0.1:8099'),
@@ -273,6 +282,47 @@ const ConfigSchema = z
 
 export type RelayConfig = z.infer<typeof ConfigSchema>;
 
+export function validateRuntimeConfiguration(
+  current: RelayConfig,
+  input: RuntimeConfiguration
+): RuntimeConfiguration {
+  const runtime = RuntimeConfigurationSchema.parse(input);
+  const listener = parseListenAddress(runtime.listenAddr);
+  if (
+    !isLoopbackRuntimeHost(listener.host) &&
+    listener.host !== '0.0.0.0' &&
+    listener.host !== '::'
+  )
+    throw new Error(
+      'Dashboard/API listener must use loopback or a wildcard address so local recovery remains available'
+    );
+  parseListenAddress(runtime.agentListenAddr);
+  ConfigSchema.parse({ ...current, ...runtime });
+  return runtime;
+}
+
+function isLoopbackRuntimeHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    (isIP(normalized) === 4 && normalized.startsWith('127.'))
+  );
+}
+
+function readRuntimeConfiguration(path: string | undefined): RuntimeConfiguration | undefined {
+  if (!path) return undefined;
+  try {
+    return RuntimeConfigurationSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new Error(
+      `VRRELAY_RUNTIME_CONFIG could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+}
+
 export function loadConfig(environment = process.env): RelayConfig {
   if (
     environment.VRRELAY_TRUST_PROXY !== undefined &&
@@ -282,23 +332,31 @@ export function loadConfig(environment = process.env): RelayConfig {
       'VRRELAY_TRUST_PROXY no longer enables proxy trust; remove it and configure explicit VRRELAY_TRUSTED_PROXY_CIDRS instead'
     );
   const root = process.cwd();
-  const publicUrl = environment.VRRELAY_PUBLIC_URL;
+  const runtimeConfigPath = optionalEnvironmentValue(environment.VRRELAY_RUNTIME_CONFIG);
+  const runtime = readRuntimeConfiguration(runtimeConfigPath);
+  const publicUrl = environment.VRRELAY_PUBLIC_URL ?? runtime?.publicUrl;
   return ConfigSchema.parse({
     environment: environment.VRRELAY_ENVIRONMENT,
     applicationVersion: environment.VRRELAY_VERSION,
-    listenAddr: environment.VRRELAY_LISTEN_ADDR,
+    runtimeConfigPath,
+    restartMode: environment.VRRELAY_RESTART_MODE,
+    listenAddr: environment.VRRELAY_LISTEN_ADDR ?? runtime?.listenAddr,
     publicUrl,
-    adminUrl: optionalEnvironmentValue(environment.VRRELAY_ADMIN_URL) ?? publicUrl,
-    playbackUrl: optionalEnvironmentValue(environment.VRRELAY_PLAYBACK_URL) ?? publicUrl,
+    adminUrl:
+      optionalEnvironmentValue(environment.VRRELAY_ADMIN_URL) ?? runtime?.adminUrl ?? publicUrl,
+    playbackUrl:
+      optionalEnvironmentValue(environment.VRRELAY_PLAYBACK_URL) ??
+      runtime?.playbackUrl ??
+      publicUrl,
     setupToken: optionalEnvironmentValue(environment.VRRELAY_SETUP_TOKEN),
     dataDir: environment.VRRELAY_DATA_DIR ? resolve(root, environment.VRRELAY_DATA_DIR) : undefined,
     cacheDir: environment.VRRELAY_CACHE_DIR
       ? resolve(root, environment.VRRELAY_CACHE_DIR)
       : undefined,
     ffmpegPath: environment.VRRELAY_FFMPEG,
-    maxWorkers: environment.VRRELAY_MAX_WORKERS,
-    cacheTtlMs: environment.VRRELAY_CACHE_TTL,
-    cacheLimitBytes: environment.VRRELAY_CACHE_LIMIT_BYTES,
+    maxWorkers: environment.VRRELAY_MAX_WORKERS ?? runtime?.maxWorkers,
+    cacheTtlMs: environment.VRRELAY_CACHE_TTL ?? runtime?.cacheTtlMs,
+    cacheLimitBytes: environment.VRRELAY_CACHE_LIMIT_BYTES ?? runtime?.cacheLimitBytes,
     masterKey: optionalEnvironmentValue(environment.VRRELAY_MASTER_KEY),
     secretBackend: environment.VRRELAY_SECRET_BACKEND,
     mediaMtxHlsUrl: environment.VRRELAY_MEDIAMTX_HLS_URL,
@@ -315,17 +373,18 @@ export function loadConfig(environment = process.env): RelayConfig {
     backupSrtUrl: optionalEnvironmentValue(environment.VRRELAY_BACKUP_SRT_URL),
     mediaMtxAllowInternalRead: environment.VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ,
     mediaMtxReadToken: optionalEnvironmentValue(environment.VRRELAY_MEDIAMTX_READ_TOKEN),
-    trustedProxyCidrs: environment.VRRELAY_TRUSTED_PROXY_CIDRS?.split(',')
-      .map((value) => value.trim())
-      .filter(Boolean),
+    trustedProxyCidrs:
+      environment.VRRELAY_TRUSTED_PROXY_CIDRS?.split(',')
+        .map((value) => value.trim())
+        .filter(Boolean) ?? runtime?.trustedProxyCidrs,
     nodeId: environment.VRRELAY_NODE_ID,
-    nodeName: environment.VRRELAY_NODE_NAME,
-    nodeRegion: environment.VRRELAY_NODE_REGION,
+    nodeName: environment.VRRELAY_NODE_NAME ?? runtime?.nodeName,
+    nodeRegion: environment.VRRELAY_NODE_REGION ?? runtime?.nodeRegion,
     nodeRoles: environment.VRRELAY_NODE_ROLES?.split(',')
       .map((role) => role.trim())
       .filter(Boolean),
     metricsToken: optionalEnvironmentValue(environment.VRRELAY_METRICS_TOKEN),
-    agentListenAddr: environment.VRRELAY_AGENT_LISTEN_ADDR,
+    agentListenAddr: environment.VRRELAY_AGENT_LISTEN_ADDR ?? runtime?.agentListenAddr,
     agentTlsNames: environment.VRRELAY_AGENT_TLS_NAMES?.split(',')
       .map((value) => value.trim())
       .filter(Boolean),

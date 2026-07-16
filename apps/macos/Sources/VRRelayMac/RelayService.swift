@@ -33,11 +33,7 @@ final class RelayService {
     var isRunning = false
     var isChangingState = false
     var statusMessage = "Checking service…"
-    var logText = ""
-    var dashboardURL: URL {
-        let configured = UserDefaults.standard.string(forKey: "dashboardURL")
-        return configured.flatMap(URL.init(string:)) ?? URL(string: "http://127.0.0.1:8099")!
-    }
+    let dashboardURL = URL(string: "http://127.0.0.1:8099")!
 
     private init() {
         monitor = .scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
@@ -62,7 +58,6 @@ final class RelayService {
             isRunning = false
             statusMessage = "Background service unavailable"
         }
-        loadRecentLog()
     }
 
     private func perform(_ action: ServiceControlAction, pendingMessage: String) {
@@ -102,13 +97,5 @@ final class RelayService {
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown launchctl error"
         return (process.terminationStatus, output)
-    }
-
-    private func loadRecentLog() {
-        let url = URL(fileURLWithPath: "/Library/Logs/VRRelay/service.log")
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data.suffix(120_000), encoding: .utf8)
-        else { return }
-        logText = text
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from 'electron';
+import { app, Menu, Tray, nativeImage, shell } from 'electron';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -7,7 +7,6 @@ const exec = promisify(execFile);
 const serviceName = 'VRRelay';
 const dashboard = process.env.VRRELAY_PUBLIC_URL ?? 'http://127.0.0.1:8099';
 let tray: Tray | undefined;
-let window: BrowserWindow | undefined;
 
 async function service(command: 'start' | 'stop'): Promise<void> {
   await exec('sc.exe', [command, serviceName], { windowsHide: true });
@@ -22,22 +21,6 @@ async function serviceState(): Promise<string> {
   }
 }
 
-function showDashboard(): void {
-  if (!window) {
-    window = new BrowserWindow({
-      width: 1180,
-      height: 780,
-      title: 'VRRelay',
-      webPreferences: { sandbox: true }
-    });
-    window.on('closed', () => {
-      window = undefined;
-    });
-  }
-  void window.loadURL(dashboard);
-  window.show();
-}
-
 async function refreshMenu(): Promise<void> {
   if (!tray) return;
   const status = await serviceState();
@@ -45,32 +28,32 @@ async function refreshMenu(): Promise<void> {
     Menu.buildFromTemplate([
       { label: status, enabled: false },
       { type: 'separator' },
-      { label: 'Show VRRelay', click: showDashboard },
-      { label: 'Open in browser', click: () => void shell.openExternal(dashboard) },
+      { label: 'Open Dashboard', click: () => void shell.openExternal(dashboard) },
       { type: 'separator' },
-      { label: 'Start service', click: () => void service('start').then(refreshMenu) },
+      { label: 'Start Relay', click: () => void service('start').then(refreshMenu) },
+      { label: 'Stop Relay', click: () => void service('stop').then(refreshMenu) },
       {
-        label: 'Restart service',
+        label: 'Restart Relay',
         click: () =>
           void service('stop')
             .catch(() => undefined)
             .then(() => service('start'))
             .then(refreshMenu)
       },
-      { label: 'Stop service', click: () => void service('stop').then(refreshMenu) },
       { type: 'separator' },
-      { label: 'Quit tray (service stays running)', click: () => app.quit() }
+      { label: 'Quit VRRelay', click: () => app.quit() }
     ])
   );
 }
 
-void app.whenReady().then(() => {
-  const icon = nativeImage.createEmpty();
+void app.whenReady().then(async () => {
+  const icon = await nativeImage.createThumbnailFromPath(process.execPath, {
+    width: 16,
+    height: 16
+  });
   tray = new Tray(icon);
   tray.setToolTip('VRRelay');
-  tray.on('double-click', showDashboard);
+  tray.on('double-click', () => void shell.openExternal(dashboard));
   void refreshMenu();
   setInterval(() => void refreshMenu(), 10_000).unref();
 });
-
-app.on('window-all-closed', () => undefined);
