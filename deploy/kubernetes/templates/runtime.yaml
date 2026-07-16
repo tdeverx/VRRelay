@@ -26,7 +26,9 @@ spec:
   template:
     metadata:
       labels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: {{ $roleName }} }
-      annotations: { checksum/runtime-settings: {{ toJson $root.Values.secrets | sha256sum | quote }} }
+      annotations:
+        checksum/runtime-settings: {{ toJson $root.Values.secrets | sha256sum | quote }}
+        checksum/runtime-secrets: {{ default "unset" $root.Values.rollout.runtimeSecretChecksum | quote }}
     spec:
       serviceAccountName: vrrelay-{{ $roleName }}
       securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
@@ -248,6 +250,7 @@ spec:
     - { name: srt, port: 8890, protocol: UDP }
 ---
 {{- end }}
+{{- if .Values.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: { name: vrrelay-default-deny }
@@ -263,7 +266,31 @@ spec:
     - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay } } }, { namespaceSelector: {} }]
       ports: [{ port: 8099 }]
   egress:
-    - {}
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay } } }]
+      ports:
+        - { port: 8099, protocol: TCP }
+        - { port: 8100, protocol: TCP }
+    {{- if .Values.mediaMtx.enabled }}
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay-mediamtx-origin } } }]
+      ports:
+        - { port: 1935, protocol: TCP }
+        - { port: 8554, protocol: TCP }
+        - { port: 8888, protocol: TCP }
+        - { port: 8889, protocol: TCP }
+        - { port: 8189, protocol: UDP }
+        - { port: 8890, protocol: UDP }
+        - { port: 9997, protocol: TCP }
+    {{- end }}
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    {{- range .Values.networkPolicy.externalEgress }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+            {{- with .except }}
+            except:
+{{ toYaml . | nindent 14 }}
+            {{- end }}
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -301,7 +328,17 @@ spec:
     - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: vrrelay, vrrelay.io/role: ingest-origin } } }]
       ports: [{ port: 8099, protocol: TCP }]
     - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    {{- range .Values.networkPolicy.webrtcUdpEgress }}
     - ports: [{ port: 1024, endPort: 65535, protocol: UDP }]
+      to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+            {{- with .except }}
+            except:
+{{ toYaml . | nindent 14 }}
+            {{- end }}
+    {{- end }}
+{{- end }}
 {{- end }}
 {{- if and .Values.controller.enabled .Values.ingress.enabled }}
 ---

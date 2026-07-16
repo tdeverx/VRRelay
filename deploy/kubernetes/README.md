@@ -53,6 +53,10 @@ After every agent has persisted its certificate on its own PVC, remove `VRRELAY_
 
 The default PodDisruptionBudgets prevent voluntary eviction of the single v1 node in each role. Before planned node maintenance, drain the corresponding VRRelay node in the dashboard, temporarily set `disruptionBudget.enabled=false`, perform the Kubernetes eviction, and restore the budget after the replacement is online.
 
+The chart cannot hash externally managed Secret contents by itself. When changing any role Secret, set `rollout.runtimeSecretChecksum` to a checksum from your secret-management pipeline so the role pods restart and reload the new runtime values. The migration hook has a bounded active deadline; investigate a failed hook rather than deleting the Job and retrying blindly.
+
+NetworkPolicies are enabled by default. `networkPolicy.externalEgress` allows the relay roles to reach PostgreSQL, Valkey, object storage, and external APIs by CIDR while excluding link-local metadata ranges by default. Tighten those CIDRs to your VPC, private network, or egress gateway before release. `networkPolicy.webrtcUdpEgress` separately scopes the MediaMTX origin's high UDP range used for WebRTC ICE.
+
 ## Public endpoints
 
 - The normal `ingress` values expose the controller API/dashboard and clean playback director URL.

@@ -36,20 +36,47 @@ for (const [text, message] of [
 
 for (const [source, text, message] of [
   [values, "digest: ''", 'Helm values must expose an optional relay image digest'],
+  [
+    values,
+    'runtimeSecretChecksum',
+    'Helm values must expose an operator-supplied runtime Secret checksum'
+  ],
+  [values, 'externalEgress', 'Helm values must expose explicit external egress CIDR blocks'],
+  [
+    values,
+    'activeDeadlineSeconds',
+    'Helm values must configure an upgrade-safe migration deadline'
+  ],
   [schema, 'sha256:[0-9a-fA-F]{64}', 'Helm values schema must validate digest-shaped image pins'],
+  [schema, '"networkPolicy"', 'Helm values schema must validate network policy controls'],
   [
     runtime,
     '$relayImage = printf "%s@%s"',
     'runtime template must render relay images by digest when configured'
   ],
   [
+    runtime,
+    'checksum/runtime-secrets',
+    'runtime template must roll pods on operator-supplied Secret checksum changes'
+  ],
+  [runtime, 'ipBlock:', 'runtime template must render explicit network-policy egress ipBlocks'],
+  [
+    runtime,
+    'port: 1024, endPort: 65535, protocol: UDP',
+    'runtime template must scope WebRTC UDP egress'
+  ],
+  [
     migrate,
     '$relayImage = printf "%s@%s"',
     'migration template must render relay images by digest when configured'
-  ]
+  ],
+  [migrate, 'activeDeadlineSeconds', 'migration hook must have an active deadline']
 ]) {
   requireText(source, text, message);
 }
+
+if (runtime.includes('egress:\n    - {}'))
+  failures.push('Kubernetes runtime network policy must not allow unrestricted egress');
 
 requireText(
   runtime,

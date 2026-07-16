@@ -63,6 +63,11 @@ release-candidate deployment evidence.
 - `script/check-tls-fronts.mjs`, `script/check-compose-semantics.mjs`, and
   `script/check-kubernetes-templates.mjs` guard those TLS and image-pinning
   assumptions locally.
+- Kubernetes runtime policies now replace the previous unrestricted relay
+  egress rule with explicit pod, DNS, external-CIDR, and WebRTC UDP egress
+  blocks. The chart also exposes `rollout.runtimeSecretChecksum` for externally
+  managed Secret-change rollouts and gives the migration hook an active
+  deadline.
 
 ## Lean guardrails run
 
@@ -97,8 +102,9 @@ confirmed separate relay/ingest front doors, internal/control path blocking, and
 no HTTP proxy publication of the raw agent mTLS port. Compose semantic checks
 confirmed multi-host digest-pinned relay/MediaMTX images, and Kubernetes
 template checks confirmed digest-aware relay image rendering. The local full CI
-gate passed 373 tests with 23 intentional skips and reported zero npm
-vulnerabilities.
+gate also confirmed explicit Kubernetes egress ipBlocks, runtime Secret checksum
+rollout annotations, and the migration active deadline. It passed 373 tests with
+23 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 10 and final high-pass verification
 
