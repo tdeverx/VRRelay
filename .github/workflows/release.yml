@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
+      - run: npm install --global npm@12.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.2.3 }
       - name: Install the pinned FFmpeg runtime
@@ -112,7 +113,7 @@ jobs:
       {
         matrix:
           {
-            include: [{ os: macos-15, artifact: macos }, { os: windows-latest, artifact: windows }]
+            include: [{ os: macos-26, artifact: macos }, { os: windows-latest, artifact: windows }]
           }
       }
     runs-on: ${{ matrix.os }}
@@ -120,10 +121,11 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
+      - run: npm install --global npm@12.0.1
       - run: npm ci
       - if: runner.os == 'macOS'
-        name: Select the Swift 6.2 toolchain
-        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+        name: Select the Swift 6.3 toolchain
+        run: sudo xcode-select --switch /Applications/Xcode_26.6.app
       - shell: bash
         run: |
           echo "VRRELAY_VERSION=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_ENV"
@@ -212,6 +214,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
+      - run: npm install --global npm@12.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.2.3 }
       - run: npm ci
@@ -227,8 +230,8 @@ jobs:
         run: |
           helm package deploy/kubernetes --version "${{ steps.version.outputs.version }}" --app-version "${{ steps.version.outputs.version }}" --destination dist/release-metadata
           cp LICENSE THIRD_PARTY_NOTICES.md deploy/runtime-manifest.json docs/releasing.md dist/release-metadata/
-          curl -fL https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz -o dist/release-metadata/ffmpeg-7.1.5.tar.xz
-          node script/verify-runtime.mjs dist/release-metadata/ffmpeg-7.1.5.tar.xz
+          curl -fL https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz -o dist/release-metadata/ffmpeg-8.1.2.tar.xz
+          node script/verify-runtime.mjs dist/release-metadata/ffmpeg-8.1.2.tar.xz
           test -n "$FFMPEG_SOURCE_BUNDLE_URL" && test -n "$FFMPEG_SOURCE_BUNDLE_SHA256"
           curl -fL "$FFMPEG_SOURCE_BUNDLE_URL" -o dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz
           echo "$FFMPEG_SOURCE_BUNDLE_SHA256  dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz" | sha256sum --check --strict

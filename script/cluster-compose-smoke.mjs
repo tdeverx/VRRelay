@@ -11,7 +11,17 @@ const stateDirectory = resolve(root, '.data/cluster-compose-smoke');
 const envFile = resolve(stateDirectory, 'smoke.env');
 const project = `vrrelay-cluster-smoke-${process.pid}`;
 const image = `${project}-relay:latest`;
-const controllerUrl = 'http://127.0.0.1:8099';
+const smokePortBase = 20_000 + (process.pid % 1_000) * 10;
+const ports = {
+  controller: smokePortBase,
+  edge: smokePortBase + 1,
+  agent: smokePortBase + 2,
+  rtmp: smokePortBase + 3,
+  whip: smokePortBase + 4,
+  webrtcUdp: smokePortBase + 5,
+  srt: smokePortBase + 6
+};
+const controllerUrl = `http://127.0.0.1:${ports.controller}`;
 const adminPassword = `admin-${randomBytes(24).toString('base64url')}`;
 const environment = {
   VRRELAY_ENVIRONMENT: 'development',
@@ -33,10 +43,17 @@ const environment = {
   VRRELAY_MEDIAMTX_READ_TOKEN: randomBytes(24).toString('base64url'),
   VRRELAY_SETUP_TOKEN: randomBytes(24).toString('base64url'),
   VRRELAY_PUBLIC_URL: controllerUrl,
-  VRRELAY_EDGE_PUBLIC_URL: 'http://127.0.0.1:8100',
-  VRRELAY_RTMP_URL: 'rtmp://127.0.0.1:1935/live',
-  VRRELAY_SRT_URL: 'srt://127.0.0.1:8890',
-  VRRELAY_WHIP_URL: 'http://127.0.0.1:8889',
+  VRRELAY_EDGE_PUBLIC_URL: `http://127.0.0.1:${ports.edge}`,
+  VRRELAY_RTMP_URL: `rtmp://127.0.0.1:${ports.rtmp}/live`,
+  VRRELAY_SRT_URL: `srt://127.0.0.1:${ports.srt}`,
+  VRRELAY_WHIP_URL: `http://127.0.0.1:${ports.whip}`,
+  VRRELAY_CONTROLLER_HTTP_PORT: String(ports.controller),
+  VRRELAY_EDGE_HTTP_PORT: String(ports.edge),
+  VRRELAY_CONTROLLER_AGENT_PORT: String(ports.agent),
+  VRRELAY_RTMP_PORT: String(ports.rtmp),
+  VRRELAY_WHIP_PORT: String(ports.whip),
+  VRRELAY_WEBRTC_UDP_PORT: String(ports.webrtcUdp),
+  VRRELAY_SRT_PORT: String(ports.srt),
   VRRELAY_IMAGE: image,
   VRRELAY_SOURCE_JOIN_TOKEN: 'not-enrolled',
   VRRELAY_INGEST_JOIN_TOKEN: 'not-enrolled',
@@ -153,7 +170,7 @@ async function createJoinToken(name, roles) {
 function ensurePortsAvailable() {
   const result = spawnSync('docker', ['ps', '--format', '{{.Ports}}'], { encoding: 'utf8' });
   if (result.status !== 0) throw new Error('Unable to inspect Docker ports');
-  for (const port of [1935, 8099, 8100, 8101, 8189, 8889, 8890]) {
+  for (const port of Object.values(ports)) {
     if (new RegExp(`(?:0\\.0\\.0\\.0|\\[::\\]):${port}->`).test(result.stdout))
       throw new Error(`Docker port ${port} is already in use`);
   }
@@ -220,7 +237,7 @@ async function run() {
     assert(node?.roles.includes(role), `Missing connected ${role} node ${name}`);
   }
 
-  const edgeHealth = await fetch('http://127.0.0.1:8100/api/v1/health');
+  const edgeHealth = await fetch(`http://127.0.0.1:${ports.edge}/api/v1/health`);
   assert(edgeHealth.ok, `Edge health returned ${edgeHealth.status}`);
   const mediaMtx = compose(
     [

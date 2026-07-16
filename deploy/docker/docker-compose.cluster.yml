@@ -25,18 +25,18 @@ x-relay-common: &relay-common
 
 services:
   postgres:
-    image: ${VRRELAY_POSTGRES_IMAGE:-postgres:17-alpine}
+    image: ${VRRELAY_POSTGRES_IMAGE:-postgres:18-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_USER: vrrelay
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: vrrelay
-    volumes: [postgres-data:/var/lib/postgresql/data]
+    volumes: [postgres-data:/var/lib/postgresql]
     healthcheck:
       { test: [CMD-SHELL, pg_isready -U vrrelay], interval: 5s, timeout: 3s, retries: 20 }
 
   valkey:
-    image: ${VRRELAY_VALKEY_IMAGE:-valkey/valkey:8-alpine}
+    image: ${VRRELAY_VALKEY_IMAGE:-valkey/valkey:9.1-alpine}
     restart: unless-stopped
     command: [valkey-server, --appendonly, yes]
     volumes: [valkey-data:/data]
@@ -105,7 +105,9 @@ services:
       VRRELAY_MEDIAMTX_SRT_URL: ${VRRELAY_SRT_URL:?Set VRRELAY_SRT_URL}
       VRRELAY_MEDIAMTX_WHIP_URL: ${VRRELAY_WHIP_URL:?Set VRRELAY_WHIP_URL}
     volumes: [controller-data:/data, controller-cache:/cache]
-    ports: [8099:8099, 8101:8100]
+    ports:
+      - '${VRRELAY_CONTROLLER_HTTP_PORT:-8099}:8099'
+      - '${VRRELAY_CONTROLLER_AGENT_PORT:-8101}:8100'
 
   source-worker:
     <<: *relay-common
@@ -142,7 +144,7 @@ services:
     volumes: [ingest-data:/data, ingest-cache:/cache]
 
   mediamtx-origin:
-    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.18.2}
+    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.19.2}
     restart: unless-stopped
     depends_on: { ingest-origin: { condition: service_started } }
     environment:
@@ -154,7 +156,11 @@ services:
       MTX_PATHDEFAULTS_SRTREADPASSPHRASE: ${VRRELAY_LIVE_SRT_PASSPHRASE:-}
       MTX_WEBRTCLOCALUDPADDRESS: :8189
       MTX_WEBRTCADDITIONALHOSTS: ${VRRELAY_WEBRTC_ADDITIONAL_HOSTS:-}
-    ports: [1935:1935, 8889:8889, '8189:8189/udp', '8890:8890/udp']
+    ports:
+      - '${VRRELAY_RTMP_PORT:-1935}:1935'
+      - '${VRRELAY_WHIP_PORT:-8889}:8889'
+      - '${VRRELAY_WEBRTC_UDP_PORT:-8189}:8189/udp'
+      - '${VRRELAY_SRT_PORT:-8890}:8890/udp'
 
   edge:
     <<: *relay-common
@@ -176,10 +182,10 @@ services:
       VRRELAY_LIVE_ORIGIN_URL: srt://mediamtx-origin:8890
       VRRELAY_LIVE_SRT_PASSPHRASE: ${VRRELAY_LIVE_SRT_PASSPHRASE:-}
     volumes: [edge-data:/data, edge-cache:/cache]
-    ports: [8100:8099]
+    ports: ['${VRRELAY_EDGE_HTTP_PORT:-8100}:8099']
 
   mediamtx-edge:
-    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.18.2}
+    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.19.2}
     restart: unless-stopped
     volumes: [./mediamtx-edge.yml:/mediamtx.yml:ro]
     environment:

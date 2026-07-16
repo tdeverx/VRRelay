@@ -12,6 +12,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
+      - run: npm install --global npm@12.0.1
       - if: runner.os == 'Linux'
         name: Install the pinned FFmpeg runtime
         run: |
@@ -26,13 +27,14 @@ jobs:
       - run: npm ci
       - run: npm run ci
   macos-host:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
-      - name: Select the Swift 6.2 toolchain
-        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+      - run: npm install --global npm@12.0.1
+      - name: Select the Swift 6.3 toolchain
+        run: sudo xcode-select --switch /Applications/Xcode_26.6.app
       - run: swift test --package-path apps/macos
       - run: swift build --package-path apps/macos -c release --arch arm64
       - name: Install pinned-FFmpeg build tools
@@ -46,7 +48,7 @@ jobs:
           "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg" -hide_banner -encoders | grep -q libx264
           "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg" -hide_banner -filters | grep -q subtitles
           test -s "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg-build-metadata.json"
-          test -s "$RUNNER_TEMP/vrrelay-ffmpeg/vrrelay-ffmpeg-7.1.5-darwin-arm64-source.tar.xz"
+          test -s "$RUNNER_TEMP/vrrelay-ffmpeg/vrrelay-ffmpeg-8.1.2-darwin-arm64-source.tar.xz"
           node script/runtime-provenance.mjs --output "$RUNNER_TEMP/vrrelay-ffmpeg/provenance.json" "ffmpeg=$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg"
           printf '%s\n' "$RUNNER_TEMP/vrrelay-ffmpeg" >> "$GITHUB_PATH"
       - run: npm ci
@@ -57,6 +59,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
+      - run: npm install --global npm@12.0.1
       - name: Install the pinned FFmpeg runtime
         run: |
           runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"

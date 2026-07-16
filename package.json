@@ -20,7 +20,7 @@
     "mediamtx",
     "sveltekit"
   ],
-  "packageManager": "npm@11.17.0",
+  "packageManager": "npm@12.0.1",
   "engines": {
     "node": ">=26.5"
   },
@@ -32,8 +32,9 @@
   ],
   "overrides": {
     "@sveltejs/kit": {
-      "cookie": "0.7.2"
-    }
+      "cookie": "2.0.1"
+    },
+    "uuid": "$uuid"
   },
   "scripts": {
     "benchmark": "node script/benchmark.mjs",
@@ -58,7 +59,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prelint": "npm run sync --workspace @vrrelay/web",
-    "lint": "eslint .",
+    "lint": "node --import ./script/typescript-compat-loader.mjs ./node_modules/eslint/bin/eslint.js .",
     "test": "vitest run",
     "pretest:browser": "npm run build",
     "test:browser": "playwright test",
@@ -83,16 +84,17 @@
     "@hey-api/openapi-ts": "^0.99.0",
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
-    "cookie": "0.7.2",
+    "cookie": "2.0.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.7.0",
-    "prettier": "^3.6.2",
+    "prettier": "^3.9.5",
     "prettier-plugin-svelte": "^4.1.1",
-    "tsx": "^4.20.6",
-    "typescript": "^6.0.3",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "typescript-compat": "npm:typescript@6.0.3",
     "typescript-eslint": "^8.64.0",
-    "uuid": "11.1.1",
+    "uuid": "14.0.1",
     "vitest": "^4.1.10",
     "zod": "^4.4.3"
   },

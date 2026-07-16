@@ -231,7 +231,7 @@ for (const required of [
   'docker/setup-qemu-action@',
   'platforms: linux/amd64,linux/arm64',
   'script/install-pinned-ffmpeg-windows.ps1',
-  '/Applications/Xcode_26.3.app',
+  '/Applications/Xcode_26.6.app',
   'script/check-workflows.sh',
   'script/check-compose.sh',
   'script/container-smoke.sh 0.0.0-ci',
@@ -317,7 +317,7 @@ const runtimeManifest = JSON.parse(
 const runtimeComponents = new Map(
   runtimeManifest.components.map((component) => [component.name, component])
 );
-if (!dockerfile.includes(`node:${runtimeComponents.get('node')?.version}-bookworm-slim`))
+if (!dockerfile.includes(`node:${runtimeComponents.get('node')?.version}-trixie-slim`))
   failures.push('OCI image Node base differs from the pinned runtime manifest');
 for (const component of runtimeComponents.values()) {
   if (!component.version || !component.license || !component.source)

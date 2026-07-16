@@ -68,8 +68,8 @@ require_equal "$("$RUNTIME/bin/node" --version)" v26.5.0 'Node version'
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -version > "$EXPANDED/ffmpeg-version.txt"
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -encoders > "$EXPANDED/ffmpeg-encoders.txt" 2>/dev/null
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -filters > "$EXPANDED/ffmpeg-filters.txt" 2>/dev/null
-grep -Fq 'v1.18.2' "$EXPANDED/mediamtx-version.txt"
-grep -Fq 'ffmpeg version 7.1.5' "$EXPANDED/ffmpeg-version.txt"
+grep -Fq 'v1.19.2' "$EXPANDED/mediamtx-version.txt"
+grep -Fq 'ffmpeg version 8.1.2' "$EXPANDED/ffmpeg-version.txt"
 grep -Fq libx264 "$EXPANDED/ffmpeg-encoders.txt"
 grep -Fq h264_videotoolbox "$EXPANDED/ffmpeg-encoders.txt"
 grep -Fq subtitles "$EXPANDED/ffmpeg-filters.txt"
