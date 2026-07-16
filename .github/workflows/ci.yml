@@ -3,7 +3,6 @@ on:
   push: { branches: [main] }
   pull_request:
 permissions: { contents: read }
-env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
 jobs:
   test:
     strategy: { matrix: { os: [ubuntu-latest, windows-latest], node: [26.5.0] } }
@@ -25,6 +24,10 @@ jobs:
           $runtimeBin = & script/install-pinned-ffmpeg-windows.ps1 "$env:RUNNER_TEMP\vrrelay-ffmpeg"
           $runtimeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: npm ci
+      - if: runner.os == 'Windows'
+        name: Build the native Windows tray controller
+        shell: pwsh
+        run: deploy/windows/build-tray.ps1 "$env:RUNNER_TEMP\VRRelayTray.exe"
       - run: npm run ci
   macos-host:
     runs-on: macos-26

@@ -11,8 +11,7 @@ const execFileAsync = promisify(execFile);
 const versionArguments = new Map([
   ['node', ['--version']],
   ['ffmpeg', ['-hide_banner', '-version']],
-  ['mediamtx', ['--version']],
-  ['electron', ['--version']]
+  ['mediamtx', ['--version']]
 ]);
 
 export function runtimeVersionMatches(output, expectedVersion) {

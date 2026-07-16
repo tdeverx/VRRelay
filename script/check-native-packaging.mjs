@@ -9,7 +9,9 @@ const macPackage = readFileSync(resolve(root, 'deploy/macos/package.sh'), 'utf8'
 const macFfmpegBuild = readFileSync(resolve(root, 'deploy/macos/build-ffmpeg.sh'), 'utf8');
 const macVerifier = readFileSync(resolve(root, 'script/verify-macos-package.sh'), 'utf8');
 const windowsPackage = readFileSync(resolve(root, 'deploy/windows/package.ps1'), 'utf8');
-const windowsHost = readFileSync(resolve(root, 'apps/windows/src/main.ts'), 'utf8');
+const windowsHost = readFileSync(resolve(root, 'apps/windows/VRRelayTray.cpp'), 'utf8');
+const windowsBuild = readFileSync(resolve(root, 'deploy/windows/build-tray.ps1'), 'utf8');
+const windowsInstaller = readFileSync(resolve(root, 'deploy/windows/installer.iss'), 'utf8');
 const windowsSource = readFileSync(
   resolve(root, 'deploy/windows/build-corresponding-source.sh'),
   'utf8'
@@ -44,10 +46,27 @@ requireText(
 );
 requireText(
   windowsHost,
-  'shell.openExternal(dashboard)',
+  'Shell_NotifyIconW',
+  'Windows controller must remain a native tray utility'
+);
+requireText(
+  windowsHost,
+  'ShellExecuteW(window, L"open"',
   'Windows tray controller must open the dashboard in the system browser'
 );
-rejectText(windowsHost, 'BrowserWindow', 'Windows tray controller must not embed an app window');
+requireText(
+  windowsHost,
+  'execution.lpVerb = L"runas"',
+  'Windows service mutations must request elevation only when invoked'
+);
+for (const action of ['L"start"', 'L"stop"', 'L"restart"'])
+  requireText(windowsHost, action, `Windows tray controller must expose ${action}`);
+requireText(
+  windowsHost,
+  'CreateMutexW',
+  'Windows tray controller must prevent duplicate instances'
+);
+rejectText(windowsHost, 'electron', 'Windows tray controller must not depend on Electron');
 
 function requireComponent(name) {
   const component = manifest.components.find((candidate) => candidate.name === name);
@@ -70,7 +89,7 @@ function requireArtifact(component, platform) {
 
 if (manifest.schemaVersion !== 1) failures.push('runtime manifest schemaVersion must be 1');
 
-for (const name of ['node', 'ffmpeg', 'mediamtx', 'electron', 'winsw']) {
+for (const name of ['node', 'ffmpeg', 'mediamtx', 'winsw']) {
   const component = requireComponent(name);
   if (!component) continue;
   for (const field of ['version', 'license', 'source']) {
@@ -81,8 +100,9 @@ for (const name of ['node', 'ffmpeg', 'mediamtx', 'electron', 'winsw']) {
 const node = requireComponent('node');
 const ffmpeg = requireComponent('ffmpeg');
 const mediaMtx = requireComponent('mediamtx');
-const electron = requireComponent('electron');
 const winsw = requireComponent('winsw');
+if (manifest.components.some((component) => component.name === 'electron'))
+  failures.push('runtime manifest must not bundle Electron');
 
 for (const platform of ['darwin-arm64', 'win32-x64', 'linux-x64', 'linux-arm64']) {
   requireArtifact(node, platform);
@@ -92,7 +112,6 @@ for (const platform of ['darwin-arm64', 'windows-x64', 'linux-x64', 'linux-arm64
 for (const platform of ['source', 'linux-x64', 'linux-arm64', 'windows-x64']) {
   requireArtifact(ffmpeg, platform);
 }
-requireArtifact(electron, 'win32-x64');
 requireArtifact(winsw, 'win32-x64');
 
 for (const platform of ['linux-x64', 'linux-arm64', 'windows-x64']) {
@@ -324,6 +343,38 @@ for (const [source, text, message] of [
   [windowsPackage, 'FFmpeg-GPLv3.txt', 'Windows packaging must include FFmpeg license material'],
   [windowsPackage, 'signtool sign', 'Windows packaging must sign release binaries and installer'],
   [
+    windowsPackage,
+    'build-tray.ps1',
+    'Windows packaging must build the native tray controller from checked-in source'
+  ],
+  [
+    windowsPackage,
+    'VRRelayTray.exe',
+    'Windows packaging must bundle and sign the native tray controller'
+  ],
+  [windowsBuild, 'cl.exe', 'Windows tray controller must build with the MSVC toolchain'],
+  [windowsBuild, "'/MT'", 'Windows tray controller must statically link the MSVC runtime'],
+  [
+    windowsBuild,
+    "'/SUBSYSTEM:WINDOWS'",
+    'Windows tray controller must build as a native GUI executable'
+  ],
+  [
+    windowsInstaller,
+    '{userstartup}\\VRRelay Tray',
+    'Windows installer must register the tray controller for user sign-in'
+  ],
+  [
+    windowsInstaller,
+    'Parameters: "--quit"',
+    'Windows uninstaller must stop the tray controller cleanly'
+  ],
+  [
+    ciWorkflow,
+    'deploy/windows/build-tray.ps1',
+    'Windows CI must compile the native tray controller'
+  ],
+  [
     windowsSource,
     'windows-source-bundle.mjs" --verify',
     'Windows corresponding-source build must verify the generated bundle'
@@ -379,6 +430,8 @@ for (const [source, text, message] of [
 
 if (releaseWorkflow.includes('brew install ffmpeg@7'))
   failures.push('release workflow must not source the macOS FFmpeg runtime from Homebrew');
+if (/electron/i.test(windowsPackage))
+  failures.push('Windows packaging must not download or bundle Electron');
 
 if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join('\n'));

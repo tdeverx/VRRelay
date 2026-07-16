@@ -15,9 +15,9 @@ if ($ReleasePackaging) {
 }
 $Stage = "$Root\dist\windows"
 Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$Stage\runtime\apps\relay", "$Stage\runtime\apps\web", "$Stage\runtime\apps\windows", "$Stage\runtime\packages", "$Stage\runtime\bin", "$Stage\runtime\licenses", "$Stage\host\app", "$Stage\downloads" | Out-Null
+New-Item -ItemType Directory -Force "$Stage\runtime\apps\relay", "$Stage\runtime\apps\web", "$Stage\runtime\packages", "$Stage\runtime\bin", "$Stage\runtime\licenses", "$Stage\downloads" | Out-Null
 npm --prefix $Root run build
-npm --prefix "$Root\apps\windows" run build
+& "$Root\deploy\windows\build-tray.ps1" "$Stage\VRRelayTray.exe"
 
 function Get-VerifiedRuntime([string]$Url, [string]$Destination) {
   Invoke-WebRequest $Url -OutFile $Destination
@@ -26,19 +26,15 @@ function Get-VerifiedRuntime([string]$Url, [string]$Destination) {
 
 $NodeZip = "$Stage\downloads\node-v26.5.0-win-x64.zip"
 $MediaMtxZip = "$Stage\downloads\mediamtx_v1.19.2_windows_amd64.zip"
-$ElectronZip = "$Stage\downloads\electron-v43.1.1-win32-x64.zip"
 $WinSW = "$Stage\downloads\WinSW-x64.exe"
 $FfmpegZip = "$Stage\downloads\ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip"
 Get-VerifiedRuntime 'https://nodejs.org/download/release/v26.5.0/node-v26.5.0-win-x64.zip' $NodeZip
 Get-VerifiedRuntime 'https://github.com/bluenviron/mediamtx/releases/download/v1.19.2/mediamtx_v1.19.2_windows_amd64.zip' $MediaMtxZip
-Get-VerifiedRuntime 'https://github.com/electron/electron/releases/download/v43.1.1/electron-v43.1.1-win32-x64.zip' $ElectronZip
 Get-VerifiedRuntime 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' $WinSW
 Get-VerifiedRuntime 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-15-14-01/ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip' $FfmpegZip
 Expand-Archive $NodeZip "$Stage\downloads\node" -Force
 Expand-Archive $MediaMtxZip "$Stage\downloads\mediamtx" -Force
-Expand-Archive $ElectronZip "$Stage\host" -Force
 Expand-Archive $FfmpegZip "$Stage\downloads\ffmpeg" -Force
-New-Item -ItemType Directory -Force "$Stage\host\resources\app" | Out-Null
 Copy-Item "$Stage\downloads\node\node-v26.5.0-win-x64\node.exe" "$Stage\runtime\node.exe"
 Copy-Item "$Stage\downloads\mediamtx\mediamtx.exe" "$Stage\runtime\mediamtx.exe"
 $FfmpegExe = Get-ChildItem "$Stage\downloads\ffmpeg" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
@@ -52,25 +48,20 @@ Copy-Item "$Root\apps\relay\dist" "$Stage\runtime\apps\relay\dist" -Recurse -For
 Copy-Item "$Root\apps\relay\public" "$Stage\runtime\apps\relay\public" -Recurse -Force
 Copy-Item "$Root\apps\relay\package.json" "$Stage\runtime\apps\relay\package.json" -Force
 Copy-Item "$Root\apps\web\package.json" "$Stage\runtime\apps\web\package.json" -Force
-Copy-Item "$Root\apps\windows\package.json" "$Stage\runtime\apps\windows\package.json" -Force
 Copy-Item "$Root\packages\*" "$Stage\runtime\packages" -Recurse -Force
 Copy-Item "$Root\package.json", "$Root\package-lock.json" "$Stage\runtime" -Force
 Copy-Item "$Root\LICENSE", "$Root\THIRD_PARTY_NOTICES.md", "$Root\deploy\runtime-manifest.json" "$Stage\runtime" -Force
 Copy-Item "$Root\deploy\native\mediamtx.yml" "$Stage\runtime\mediamtx.yml" -Force
 Push-Location "$Stage\runtime"; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" install --global npm@12.0.1; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" ci --omit=dev; Pop-Location
-Copy-Item "$Root\apps\windows\dist\main.js" "$Stage\host\app\main.js" -Force
-$HostPackage = @{ name = 'vrrelay-windows-host'; version = $Version; main = 'main.js'; type = 'module' } | ConvertTo-Json -Compress
-Set-Content "$Stage\host\resources\app\package.json" $HostPackage
-Copy-Item "$Stage\host\app\main.js" "$Stage\host\resources\app\main.js" -Force
 Copy-Item $WinSW "$Stage\VRRelay.exe" -Force
 $ServiceConfig = (Get-Content "$Root\deploy\windows\VRRelay.xml" -Raw).Replace('__VRRELAY_VERSION__', $Version)
 Set-Content "$Stage\VRRelay.xml" $ServiceConfig
 if ($env:WINDOWS_CERTIFICATE) {
   $certificate = "$Stage\signing.pfx"
   [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-  signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificate /p $env:WINDOWS_CERTIFICATE_PASSWORD "$Stage\VRRelay.exe" "$Stage\host\electron.exe" "$Stage\runtime\node.exe" "$Stage\runtime\ffmpeg.exe" "$Stage\runtime\mediamtx.exe"
+  signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificate /p $env:WINDOWS_CERTIFICATE_PASSWORD "$Stage\VRRelay.exe" "$Stage\VRRelayTray.exe" "$Stage\runtime\node.exe" "$Stage\runtime\ffmpeg.exe" "$Stage\runtime\mediamtx.exe"
 }
-node "$Root\script\runtime-provenance.mjs" --output "$Stage\runtime\runtime-provenance.json" "node=$Stage\runtime\node.exe" "ffmpeg=$Stage\runtime\ffmpeg.exe" "mediamtx=$Stage\runtime\mediamtx.exe" "electron=$Stage\host\electron.exe" "winsw=$Stage\VRRelay.exe"
+node "$Root\script\runtime-provenance.mjs" --output "$Stage\runtime\runtime-provenance.json" "node=$Stage\runtime\node.exe" "ffmpeg=$Stage\runtime\ffmpeg.exe" "mediamtx=$Stage\runtime\mediamtx.exe" "winsw=$Stage\VRRelay.exe"
 $ISCC = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
 if (-not $ISCC) { throw 'Inno Setup 6 (ISCC.exe) is required to build the installer' }
 & $ISCC "/DAppVersion=$Version" "$PSScriptRoot\installer.iss"
