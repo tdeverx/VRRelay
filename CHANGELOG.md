@@ -223,6 +223,11 @@ retained evidence belong in the
   the complete pinned-runtime CI gate: 235 passed, 23 intentional skips, zero
   failures, all builds/checks green, and zero npm vulnerabilities.
 
+### Fixed
+
+- Keep Safari and other WebKit clients from upgrading local plaintext dashboard
+  assets to HTTPS, which previously left the packaged macOS dashboard blank.
+
 ### Security
 
 - Generate node private keys locally, enroll through CSRs and single-use join
