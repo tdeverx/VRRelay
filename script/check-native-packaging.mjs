@@ -9,6 +9,7 @@ const macPackage = readFileSync(resolve(root, 'deploy/macos/package.sh'), 'utf8'
 const macFfmpegBuild = readFileSync(resolve(root, 'deploy/macos/build-ffmpeg.sh'), 'utf8');
 const macVerifier = readFileSync(resolve(root, 'script/verify-macos-package.sh'), 'utf8');
 const windowsPackage = readFileSync(resolve(root, 'deploy/windows/package.ps1'), 'utf8');
+const windowsHost = readFileSync(resolve(root, 'apps/windows/src/main.ts'), 'utf8');
 const windowsSource = readFileSync(
   resolve(root, 'deploy/windows/build-corresponding-source.sh'),
   'utf8'
@@ -16,11 +17,37 @@ const windowsSource = readFileSync(
 const ciWorkflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8');
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+const macApp = readFileSync(
+  resolve(root, 'apps/macos/Sources/VRRelayMac/VRRelayMacApp.swift'),
+  'utf8'
+);
+const macViews = readFileSync(resolve(root, 'apps/macos/Sources/VRRelayMac/Views.swift'), 'utf8');
+const macInfo = readFileSync(resolve(root, 'deploy/macos/Info.plist'), 'utf8');
 const failures = [];
 
 function requireText(source, text, message) {
   if (!source.includes(text)) failures.push(message);
 }
+
+function rejectText(source, text, message) {
+  if (source.includes(text)) failures.push(message);
+}
+
+requireText(macApp, 'MenuBarExtra(', 'macOS controller must remain a menu-bar utility');
+rejectText(macApp, 'WindowGroup(', 'macOS controller must not embed an application window');
+rejectText(macApp, 'Settings {', 'macOS controller must not embed a settings window');
+rejectText(macViews, 'WebKit', 'macOS controller must open the dashboard in the system browser');
+requireText(
+  macInfo,
+  '<key>LSUIElement</key><true/>',
+  'macOS menu-bar controller must not show a Dock icon'
+);
+requireText(
+  windowsHost,
+  'shell.openExternal(dashboard)',
+  'Windows tray controller must open the dashboard in the system browser'
+);
+rejectText(windowsHost, 'BrowserWindow', 'Windows tray controller must not embed an app window');
 
 function requireComponent(name) {
   const component = manifest.components.find((candidate) => candidate.name === name);

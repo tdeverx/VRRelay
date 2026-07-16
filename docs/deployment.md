@@ -8,7 +8,13 @@ npm run build
 VRRELAY_LISTEN_ADDR=127.0.0.1:8099 node apps/relay/dist/main.js
 ```
 
-The SwiftPM menu-bar host builds with `swift build --package-path apps/macos`. The `.pkg` installs the `org.vrrelay.service` system LaunchDaemon, which supervises both the TypeScript relay and bundled MediaMTX process, so closing the menu application or logging out does not stop active streams. Start, stop, and restart actions request administrator approval and target that installed service; the separate “Open menu controller at login” setting uses the native macOS login-item service. Upgrades retain service data; the uninstall script removes binaries and retains data unless `--purge-data` is explicit.
+The SwiftPM menu-bar controller builds with `swift build --package-path apps/macos`. It is a
+menu-bar-only utility with no Dock icon, application window, embedded browser, or settings window.
+Its menu opens the dashboard in the system browser and starts, stops, or restarts the installed
+`org.vrrelay.service` system LaunchDaemon after administrator approval. The LaunchDaemon supervises
+both the TypeScript relay and bundled MediaMTX process, so quitting the menu utility or logging out
+does not stop active streams. Upgrades retain service data; the uninstall script removes binaries
+and retains data unless `--purge-data` is explicit.
 
 The default macOS packager builds FFmpeg 7.1.5 from the structured,
 checksum-pinned Apple Silicon recipe in `deploy/runtime-manifest.json`; it no
@@ -75,7 +81,12 @@ For generic VMs, `deploy/opentofu` creates no cloud resources. It renders one se
 
 ## Windows
 
-The Windows package registers the TypeScript relay with WinSW as an automatic service. That relay supervises the bundled MediaMTX process, and WinSW restarts the complete stack if either process fails. The Electron tray uses Windows Service Control Manager and may be closed independently. Release packaging supplies validated Node, FFmpeg (AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
+The Windows package registers the TypeScript relay with WinSW as an automatic service. That relay
+supervises the bundled MediaMTX process, and WinSW restarts the complete stack if either process
+fails. The Electron host is tray-only: it opens the dashboard in the system browser and exposes
+start, stop, and restart through Windows Service Control Manager. It may be closed independently
+without stopping the service. Release packaging supplies validated Node, FFmpeg
+(AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
 
 The Windows packager downloads the immutable FFmpeg 7.1.5 BtbN GPL archive and Electron 43.1.1 directly from the URLs represented in the runtime manifest, verifies both archive hashes before extraction, signs all bundled executables when credentials are available, and records their finalized hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
 

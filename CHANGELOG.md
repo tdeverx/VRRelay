@@ -6,6 +6,9 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Simplified the macOS and Windows controllers to menu-bar/tray-only utilities with start, stop,
+  restart, and system-browser dashboard actions; removed their embedded dashboard windows and
+  native settings surface.
 - Fixed relay placement in standalone mode: selecting **This node** no longer locks the dashboard,
   and the local source worker is now eligible for automatic placement without an agent connection
   to itself.
