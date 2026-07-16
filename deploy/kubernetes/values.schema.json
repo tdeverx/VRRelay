@@ -2,6 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": {
+          "type": "string",
+          "pattern": "^(|sha256:[0-9a-fA-F]{64})$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
     "secrets": {
       "type": "object",
       "required": ["controller", "sourceWorker", "ingestOrigin", "edge"],
@@ -35,7 +50,10 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "replicas": { "type": "integer", "minimum": 1, "maximum": 1 },
-        "image": { "type": "string", "minLength": 1 },
+        "image": {
+          "type": "string",
+          "pattern": "^[^\\s]+(@sha256:[0-9a-fA-F]{64}|:[^\\s]+)$"
+        },
         "publicUrls": {
           "type": "object",
           "required": ["rtmp", "srt", "whip"],

@@ -289,9 +289,13 @@ pending.
   inputs, and post-enrollment join-token cleanup. PostgreSQL and SQLite
   backup/restore scripts now create private atomic artifacts, validate schema
   metadata, write checksum/metadata sidecars, support optional encryption, and
-  enforce rollback backups before restore, but true multi-host boot evidence,
-  rendered Helm/TLS behavior, live backup/restore rehearsal, real cloud-VM boot
-  evidence, native installers, signing/notarization,
+  enforce rollback backups before restore. TLS Compose now blocks public access
+  to relay/MediaMTX internal control paths, multi-host Compose requires
+  digest-pinned VRRelay/MediaMTX images for release-style rendering, and Helm
+  relay workloads can render `repository@sha256:...`, but true multi-host boot
+  evidence, rendered Helm/TLS behavior, final release digest selection, live
+  backup/restore rehearsal, real cloud-VM boot evidence, native installers,
+  signing/notarization,
   supply-chain evidence, upgrade/rollback, and clean-target installation have
   not passed their release gates.
 

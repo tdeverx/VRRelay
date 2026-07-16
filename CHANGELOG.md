@@ -36,6 +36,9 @@ retained evidence belong in the
 - Hardened PostgreSQL and SQLite backup/restore scripts with private atomic
   artifacts, schema validation, checksum/metadata sidecars, optional encryption,
   and rollback-backup enforcement before destructive restores.
+- TLS front-door and image-pinning hardening for deployment artifacts, including
+  internal/control path blocking, digest-required multi-host operational images,
+  and digest-aware Helm relay image rendering.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.

@@ -25,7 +25,7 @@ x-relay-common: &relay-common
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: ${VRRELAY_POSTGRES_IMAGE:-postgres:17-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_USER: vrrelay
@@ -36,14 +36,14 @@ services:
       { test: [CMD-SHELL, pg_isready -U vrrelay], interval: 5s, timeout: 3s, retries: 20 }
 
   valkey:
-    image: valkey/valkey:8-alpine
+    image: ${VRRELAY_VALKEY_IMAGE:-valkey/valkey:8-alpine}
     restart: unless-stopped
     command: [valkey-server, --appendonly, yes]
     volumes: [valkey-data:/data]
     healthcheck: { test: [CMD, valkey-cli, ping], interval: 5s, timeout: 3s, retries: 20 }
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: ${VRRELAY_MINIO_IMAGE:-minio/minio:RELEASE.2025-09-07T16-13-09Z}
     restart: unless-stopped
     command: server /data --console-address :9001
     environment:
@@ -53,7 +53,7 @@ services:
     healthcheck: { test: [CMD, mc, ready, local], interval: 5s, timeout: 3s, retries: 20 }
 
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: ${VRRELAY_MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-08-13T08-35-41Z}
     depends_on: { minio: { condition: service_healthy } }
     entrypoint:
       - /bin/sh
@@ -142,7 +142,7 @@ services:
     volumes: [ingest-data:/data, ingest-cache:/cache]
 
   mediamtx-origin:
-    image: bluenviron/mediamtx:1.18.2
+    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.18.2}
     restart: unless-stopped
     depends_on: { ingest-origin: { condition: service_started } }
     environment:
@@ -179,7 +179,7 @@ services:
     ports: [8100:8099]
 
   mediamtx-edge:
-    image: bluenviron/mediamtx:1.18.2
+    image: ${VRRELAY_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.18.2}
     restart: unless-stopped
     volumes: [./mediamtx-edge.yml:/mediamtx.yml:ro]
     environment:

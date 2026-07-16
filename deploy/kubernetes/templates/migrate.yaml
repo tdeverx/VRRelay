@@ -1,4 +1,9 @@
 {{- if .Values.controller.enabled }}
+{{- $imageTag := default .Chart.AppVersion .Values.image.tag -}}
+{{- $relayImage := printf "%s:%s" .Values.image.repository $imageTag -}}
+{{- if .Values.image.digest -}}
+{{- $relayImage = printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- end -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -15,7 +20,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migrate
-          image: '{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}'
+          image: {{ $relayImage | quote }}
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           args: ['node', 'apps/relay/dist/main.js', 'migrate']
           env:

@@ -51,6 +51,18 @@ release-candidate deployment evidence.
   take a rollback backup unless explicitly bypassed.
 - `script/check-backup-restore.mjs` runs shell syntax checks and guards the
   backup/restore hardening contract in local CI.
+- The TLS Compose overlay now requires a digest-pinned Caddy image and blocks
+  relay `/internal/*`, metrics/debug paths, and MediaMTX `/v3/*` control paths
+  at the public HTTP front doors. It still does not proxy the raw controller
+  agent mTLS port.
+- Compose deployment artifacts now accept digest-pinned operational images, and
+  the multi-host profile requires digest-pinned VRRelay and MediaMTX images for
+  release-style rendering. The Helm chart now supports
+  `image.repository@image.digest` for relay workloads instead of only
+  `repository:tag`.
+- `script/check-tls-fronts.mjs`, `script/check-compose-semantics.mjs`, and
+  `script/check-kubernetes-templates.mjs` guard those TLS and image-pinning
+  assumptions locally.
 
 ## Lean guardrails run
 
@@ -61,6 +73,7 @@ npm run check:compose
 npm run check:kubernetes
 npm run check:cloud-init
 npm run check:backup
+npm run check:tls
 SQLite temp backup/restore rehearsal
 SQLite encrypted temp backup/restore rehearsal
 npm run ci
@@ -79,7 +92,11 @@ post-enrollment join-token cleanup. The backup/restore checker confirmed shell
 syntax, PostgreSQL/SQLite coverage, artifact validation, checksum/metadata
 sidecars, optional encryption, and rollback-backup enforcement. Local temporary
 SQLite rehearsals restored schema versions from both plain and encrypted
-artifacts and created rollback backup sidecars before restore. The local full CI
+artifacts and created rollback backup sidecars before restore. The TLS checker
+confirmed separate relay/ingest front doors, internal/control path blocking, and
+no HTTP proxy publication of the raw agent mTLS port. Compose semantic checks
+confirmed multi-host digest-pinned relay/MediaMTX images, and Kubernetes
+template checks confirmed digest-aware relay image rendering. The local full CI
 gate passed 373 tests with 23 intentional skips and reported zero npm
 vulnerabilities.
 
@@ -89,5 +106,5 @@ vulnerabilities.
   network namespaces.
 - Rendered Helm, Kubernetes TLS, network-policy, upgrade, and recovery evidence.
 - Live PostgreSQL/object-store/cluster backup-restore rehearsal, true cloud-VM
-  boot evidence, release OCI digest selection, GPU-path deployment evidence, and
-  rollback evidence.
+  boot evidence, final release OCI digest selection, GPU-path deployment
+  evidence, and rollback evidence.

@@ -1,5 +1,9 @@
 {{- $root := . -}}
 {{- $imageTag := default .Chart.AppVersion .Values.image.tag -}}
+{{- $relayImage := printf "%s:%s" .Values.image.repository $imageTag -}}
+{{- if .Values.image.digest -}}
+{{- $relayImage = printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- end -}}
 {{- range $role := list "controller" "sourceWorker" "ingestOrigin" "edge" -}}
 {{- $settings := index $root.Values $role -}}
 {{- $roleName := kebabcase $role -}}
@@ -29,7 +33,7 @@ spec:
       terminationGracePeriodSeconds: 45
       containers:
         - name: relay
-          image: "{{ $root.Values.image.repository }}:{{ $imageTag }}"
+          image: {{ $relayImage | quote }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           ports:

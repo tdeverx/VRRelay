@@ -4,9 +4,13 @@
 
 {$VRRELAY_DOMAIN} {
   encode zstd gzip
+  @internal path /internal/* /metrics* /debug*
+  respond @internal 404
   reverse_proxy relay:8099
 }
 
 {$VRRELAY_INGEST_DOMAIN} {
+  @internal path /internal/* /v3/* /metrics* /debug*
+  respond @internal 404
   reverse_proxy {$VRRELAY_INGEST_UPSTREAM}
 }

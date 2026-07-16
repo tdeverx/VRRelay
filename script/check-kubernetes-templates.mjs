@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const migrate = readFileSync(resolve(root, 'deploy/kubernetes/templates/migrate.yaml'), 'utf8');
 const runtime = readFileSync(resolve(root, 'deploy/kubernetes/templates/runtime.yaml'), 'utf8');
+const values = readFileSync(resolve(root, 'deploy/kubernetes/values.yaml'), 'utf8');
+const schema = readFileSync(resolve(root, 'deploy/kubernetes/values.schema.json'), 'utf8');
 const failures = [];
 
 function requireText(source, text, message) {
@@ -30,6 +32,23 @@ for (const [text, message] of [
   ['{ name: tmp, emptyDir: {} }', 'migration job does not define tmp emptyDir']
 ]) {
   requireText(migrate, text, message);
+}
+
+for (const [source, text, message] of [
+  [values, "digest: ''", 'Helm values must expose an optional relay image digest'],
+  [schema, 'sha256:[0-9a-fA-F]{64}', 'Helm values schema must validate digest-shaped image pins'],
+  [
+    runtime,
+    '$relayImage = printf "%s@%s"',
+    'runtime template must render relay images by digest when configured'
+  ],
+  [
+    migrate,
+    '$relayImage = printf "%s@%s"',
+    'migration template must render relay images by digest when configured'
+  ]
+]) {
+  requireText(source, text, message);
 }
 
 requireText(

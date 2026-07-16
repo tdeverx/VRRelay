@@ -14,13 +14,13 @@ Release packaging requires the Homebrew `ffmpeg@7` executable through `VRRELAY_F
 
 ## Docker Compose
 
-Set random values for `VRRELAY_MASTER_KEY` and `VRRELAY_MEDIAMTX_READ_TOKEN`, set public HTTP/RTMP/SRT/WHIP URLs, then run:
+Set random values for `VRRELAY_MASTER_KEY` and `VRRELAY_MEDIAMTX_READ_TOKEN`, set public HTTP/RTMP/SRT/WHIP URLs, and optionally set `VRRELAY_MEDIAMTX_IMAGE` to a digest-pinned MediaMTX image for release deployments, then run:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.yml up --build
 ```
 
-Use `compose.gpu.yml` as a host-specific example for `/dev/dri` or NVIDIA access. Hardware presets stay disabled unless FFmpeg discovers the relevant encoder.
+Use `compose.gpu.yml` as a host-specific example for `/dev/dri` or NVIDIA access. Hardware presets stay disabled unless FFmpeg discovers the relevant encoder. When using the TLS overlay, set `VRRELAY_CADDY_IMAGE` to a digest-pinned Caddy image and keep the controller agent port on raw TCP/TLS passthrough rather than behind the HTTP proxy.
 
 The OCI image does not install the host distribution's moving FFmpeg package. Its x64 and arm64 builds download the architecture-specific FFmpeg 7.1.5 GPL artifact recorded in `deploy/runtime-manifest.json`, verify SHA-256 before extraction, and self-test version, `libx264`, and subtitle-filter availability during the image build.
 
@@ -39,7 +39,7 @@ or production secrets are unsafe. Then run:
 docker compose -f deploy/docker/docker-compose.cluster.yml up --build
 ```
 
-This topology bundles PostgreSQL, Valkey, MinIO, and separate controller, source-worker, ingest-origin, and edge services. For different machines, use `compose.multi-host.yml` with exactly one role profile per host and external database, coordination, and object-store endpoints. The multi-host file defines each role explicitly rather than inheriting the controller service, so source workers publish no ports, ingest origins publish only MediaMTX ingest ports, and edges publish only the relay playback port. Enroll every non-controller node with a single-use token, then remove that token from its environment. Set `VRRELAY_LIVE_ORIGIN_URL` on every edge to the ingest origin's reachable SRT URL (preferred across regions) or RTSP URL. When SRT crosses an untrusted network, set the same 10–79 character `VRRELAY_LIVE_SRT_PASSPHRASE` on the origin and its edges; keep it in the platform secret environment instead of embedding it in the origin URL. WHIP additionally requires trusted HTTPS signaling, the advertised public/LAN host in `VRRELAY_WEBRTC_ADDITIONAL_HOSTS`, and UDP 8189 forwarded to the MediaMTX origin; the TLS Compose overlay includes a dedicated WHIP reverse proxy domain. The edge relay creates the MediaMTX path through its private Control API on first playback; MediaMTX then pulls that path on demand and fans it out locally, producing one origin-to-edge stream rather than one upstream per viewer. Do not expose the edge Control API or its internal HLS port publicly.
+This topology bundles PostgreSQL, Valkey, MinIO, and separate controller, source-worker, ingest-origin, and edge services. For different machines, use `compose.multi-host.yml` with exactly one role profile per host and external database, coordination, and object-store endpoints. The multi-host file defines each role explicitly rather than inheriting the controller service, so source workers publish no ports, ingest origins publish only MediaMTX ingest ports, and edges publish only the relay playback port. Set digest-pinned `VRRELAY_IMAGE` and `VRRELAY_MEDIAMTX_IMAGE` values for multi-host release deployments. Enroll every non-controller node with a single-use token, then remove that token from its environment. Set `VRRELAY_LIVE_ORIGIN_URL` on every edge to the ingest origin's reachable SRT URL (preferred across regions) or RTSP URL. When SRT crosses an untrusted network, set the same 10–79 character `VRRELAY_LIVE_SRT_PASSPHRASE` on the origin and its edges; keep it in the platform secret environment instead of embedding it in the origin URL. WHIP additionally requires trusted HTTPS signaling, the advertised public/LAN host in `VRRELAY_WEBRTC_ADDITIONAL_HOSTS`, and UDP 8189 forwarded to the MediaMTX origin; the TLS Compose overlay includes a dedicated WHIP reverse proxy domain and blocks MediaMTX control/API paths at the public front door. The edge relay creates the MediaMTX path through its private Control API on first playback; MediaMTX then pulls that path on demand and fans it out locally, producing one origin-to-edge stream rather than one upstream per viewer. Do not expose the edge Control API or its internal HLS port publicly.
 
 ## Kubernetes and generic VMs
 

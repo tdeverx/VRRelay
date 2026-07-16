@@ -77,7 +77,7 @@ services:
 
   mediamtx-origin:
     profiles: [ingest-origin]
-    image: bluenviron/mediamtx:1.18.2
+    image: ${VRRELAY_MEDIAMTX_IMAGE:?Set digest-pinned VRRELAY_MEDIAMTX_IMAGE}
     restart: unless-stopped
     depends_on: { ingest-origin: { condition: service_started } }
     environment:
@@ -115,7 +115,7 @@ services:
 
   mediamtx-edge:
     profiles: [edge]
-    image: bluenviron/mediamtx:1.18.2
+    image: ${VRRELAY_MEDIAMTX_IMAGE:?Set digest-pinned VRRELAY_MEDIAMTX_IMAGE}
     restart: unless-stopped
     depends_on: { edge: { condition: service_started } }
     volumes: [./mediamtx-edge.yml:/mediamtx.yml:ro]

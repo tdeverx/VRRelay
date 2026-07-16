@@ -1,6 +1,6 @@
 services:
   caddy:
-    image: caddy:2.10-alpine
+    image: ${VRRELAY_CADDY_IMAGE:?Set digest-pinned VRRELAY_CADDY_IMAGE}
     restart: unless-stopped
     environment:
       VRRELAY_DOMAIN: ${VRRELAY_DOMAIN:?Set the public relay domain}

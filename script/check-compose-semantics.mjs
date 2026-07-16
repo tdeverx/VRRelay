@@ -65,6 +65,12 @@ function expectServices(profile, expected) {
       `${profile}/${serviceName} must not inherit the controller agent listener`
     );
   }
+  for (const serviceName of expected.digestImages ?? []) {
+    assert(
+      String(services[serviceName]?.image ?? '').includes('@sha256:'),
+      `${profile}/${serviceName} must render a digest-pinned image`
+    );
+  }
 }
 
 const rawMultiHost = readFileSync(multiHostFile, 'utf8');
@@ -73,25 +79,29 @@ assert(!/\bextends\s*:/.test(rawMultiHost), 'multi-host Compose must not use ser
 expectServices('controller', {
   services: ['controller'],
   roles: { controller: 'controller' },
-  ports: { controller: [8099, 8100] }
+  ports: { controller: [8099, 8100] },
+  digestImages: ['controller']
 });
 expectServices('source-worker', {
   services: ['source-worker'],
   roles: { 'source-worker': 'source-worker' },
   ports: { 'source-worker': [] },
-  noAgentListener: ['source-worker']
+  noAgentListener: ['source-worker'],
+  digestImages: ['source-worker']
 });
 expectServices('ingest-origin', {
   services: ['ingest-origin', 'mediamtx-origin'],
   roles: { 'ingest-origin': 'ingest-origin' },
   ports: { 'ingest-origin': [], 'mediamtx-origin': [1935, 8189, 8889, 8890] },
-  noAgentListener: ['ingest-origin']
+  noAgentListener: ['ingest-origin'],
+  digestImages: ['ingest-origin', 'mediamtx-origin']
 });
 expectServices('edge', {
   services: ['edge', 'mediamtx-edge'],
   roles: { edge: 'edge' },
   ports: { edge: [8099], 'mediamtx-edge': [] },
-  noAgentListener: ['edge']
+  noAgentListener: ['edge'],
+  digestImages: ['edge', 'mediamtx-edge']
 });
 
 if (process.exitCode) process.exit(process.exitCode);
