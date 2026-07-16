@@ -1031,6 +1031,10 @@ components:
         durationSeconds: { type: number, minimum: 0 }
         imageUrl: { type: string }
         parentId: { type: string }
+        seriesName: { type: string }
+        seasonName: { type: string }
+        indexNumber: { type: integer, minimum: 0 }
+        parentIndexNumber: { type: integer, minimum: 0 }
         videoCodec: { type: string }
         audioCodec: { type: string }
         width: { type: integer }

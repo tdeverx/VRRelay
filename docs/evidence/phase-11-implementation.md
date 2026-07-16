@@ -6,6 +6,12 @@ This is a build-first packaging checkpoint. It is not final macOS or Windows
 installation evidence, signing evidence, notarization evidence, clean-machine
 upgrade/repair/uninstall evidence, or artifact vulnerability-scan evidence.
 
+> **Superseded packaging record:** the commands, versions, hashes, and PKG output below document
+> the original Phase 11 checkpoint. The current implementation builds FFmpeg 8.1.2 and publishes a
+> drag-to-Applications DMG containing the signed app and sealed service runtime. Current validation
+> uses `script/verify-macos-dmg.sh`; fresh signed/notarized and clean-machine lifecycle evidence is
+> still required by the public release checklist.
+
 ## Scope completed
 
 - `deploy/macos/build-ffmpeg.sh` builds a minimal headless FFmpeg 7.1.5 binary

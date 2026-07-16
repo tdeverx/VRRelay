@@ -112,6 +112,8 @@ npm run check:compose
 npm run test:container
 helm lint deploy/kubernetes
 swift build --package-path apps/macos -c release --arch arm64
+deploy/macos/package.sh release dmg
+script/verify-macos-dmg.sh dist/VRRelay-<version>-macOS-arm64.dmg <version> <build-number>
 ```
 
 The real Jellyfin contract test is opt-in:

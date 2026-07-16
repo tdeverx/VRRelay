@@ -7,7 +7,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(readFileSync(resolve(root, 'deploy/runtime-manifest.json'), 'utf8'));
 const macPackage = readFileSync(resolve(root, 'deploy/macos/package.sh'), 'utf8');
 const macFfmpegBuild = readFileSync(resolve(root, 'deploy/macos/build-ffmpeg.sh'), 'utf8');
-const macVerifier = readFileSync(resolve(root, 'script/verify-macos-package.sh'), 'utf8');
+const macVerifier = readFileSync(resolve(root, 'script/verify-macos-dmg.sh'), 'utf8');
+const macInstaller = readFileSync(resolve(root, 'deploy/macos/install-service.sh'), 'utf8');
 const windowsPackage = readFileSync(resolve(root, 'deploy/windows/package.ps1'), 'utf8');
 const windowsHost = readFileSync(resolve(root, 'apps/windows/VRRelayTray.cpp'), 'utf8');
 const windowsBuild = readFileSync(resolve(root, 'deploy/windows/build-tray.ps1'), 'utf8');
@@ -224,18 +225,13 @@ for (const [source, text, message] of [
   ],
   [
     macPackage,
-    'APPLE_INSTALLER_ID is required for release packaging',
-    'macOS release packaging must require a Developer ID installer identity'
-  ],
-  [
-    macPackage,
     'APPLE_NOTARY_PROFILE is required for release packaging',
     'macOS release packaging must require notarization credentials'
   ],
   [
     macPackage,
-    'VRRELAY_REQUIRE_PACKAGE_SIGNATURE=1',
-    'macOS release verification must require a signed installer package'
+    'VRRELAY_REQUIRE_DEVELOPER_ID=1',
+    'macOS release verification must require a Developer ID signed application'
   ],
   [
     macPackage,
@@ -265,11 +261,23 @@ for (const [source, text, message] of [
   [macPackage, 'script/runtime-provenance.mjs', 'macOS packaging must emit runtime provenance'],
   [macPackage, 'THIRD_PARTY_NOTICES.md', 'macOS packaging must include third-party notices'],
   [macPackage, 'FFmpeg-GPLv3.txt', 'macOS packaging must include FFmpeg license material'],
+  [macPackage, 'hdiutil create', 'macOS packaging must create a compressed disk image'],
+  [macPackage, 'ln -s /Applications', 'macOS disk image must provide an Applications shortcut'],
+  [macPackage, 'notarytool submit', 'macOS release disk image must be submitted for notarization'],
+  [macPackage, 'stapler staple', 'macOS release disk image must staple its notarization ticket'],
   [
-    macVerifier,
-    'runtime-provenance.json',
-    'macOS package verifier must validate runtime provenance'
+    macInstaller,
+    'runtime.next',
+    'macOS app service installation must stage runtime upgrades before activation'
   ],
+  [
+    macInstaller,
+    'launchctl bootstrap system',
+    'macOS app service installation must bootstrap the system LaunchDaemon'
+  ],
+  [macVerifier, 'runtime-provenance.json', 'macOS DMG verifier must validate runtime provenance'],
+  [macVerifier, 'hdiutil attach', 'macOS DMG verifier must mount the final disk image'],
+  [macVerifier, 'spctl --assess', 'macOS DMG verifier must support Gatekeeper assessment'],
   [
     macVerifier,
     '*.dylib(N)',
@@ -430,6 +438,12 @@ for (const [source, text, message] of [
 
 if (releaseWorkflow.includes('brew install ffmpeg@7'))
   failures.push('release workflow must not source the macOS FFmpeg runtime from Homebrew');
+for (const forbidden of ['pkgbuild', 'productsign', 'APPLE_INSTALLER_ID']) {
+  if (`${macPackage}\n${releaseWorkflow}`.includes(forbidden))
+    failures.push(`macOS DMG packaging must not retain PKG-only dependency ${forbidden}`);
+}
+if (!ciWorkflow.includes('vrrelay-macos-dmg'))
+  failures.push('normal CI must publish a verified development DMG artifact');
 if (/electron/i.test(windowsPackage))
   failures.push('Windows packaging must not download or bundle Electron');
 

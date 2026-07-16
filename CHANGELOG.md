@@ -6,6 +6,15 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Replaced the macOS installer package with a drag-to-Applications DMG. The signed app now carries
+  the sealed runtime and installs or upgrades its system LaunchDaemon from the native menu after
+  administrator approval; CI publishes a development DMG for every macOS run.
+- Added explicit Jellyfin movie/show filtering and a series → season → episode picker before
+  playable track selection, including hierarchical provider-contract and desktop/mobile browser
+  coverage. Single HTTP `kinds` query values are normalized correctly at the API boundary.
+- Rechecked all direct workspace packages and pinned Node, npm, FFmpeg, MediaMTX, Helm, Swift, and
+  deployment versions against their authoritative releases; no additional stale dependency was
+  found. The intentional TypeScript compatibility and SvelteKit Cookie pins remain documented.
 - Refreshed the full runtime and deployment stack to FFmpeg 8.1.2, MediaMTX 1.19.2,
   npm 12.0.1, TypeScript 7.0.2, PostgreSQL 18, Valkey 9.1, the latest
   published MinIO community image, Debian 13, Swift 6.3, and the latest x264 revision.

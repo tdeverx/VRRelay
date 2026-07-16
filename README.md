@@ -18,12 +18,11 @@ processing, and MediaMTX handles RTMP, SRT, and WHIP live ingest.
 
 The major private-production v1 implementation and repository reconciliation
 pass is complete. A fresh pinned-runtime checkout passes formatting, generated
-contract checks, type checks, lint, 395 automated tests with 23 intentional
-skips, production builds, the dependency audit, and the desktop/mobile browser
-smoke suite.
+contract checks, type checks, lint, the automated test suite, production
+builds, the dependency audit, and the desktop/mobile browser smoke suite.
 
 That engineering checkpoint is not a release claim. Remaining product work
-includes the full catalog, live/binding/failover, dependency-management,
+includes broader live/binding/failover, dependency-management,
 certificate, metrics, realtime, and exhaustive accessibility workflows.
 Release qualification also requires real multi-host and hosted-service failure
 testing, signed native artifacts, clean-machine lifecycle tests, supply-chain
@@ -35,15 +34,16 @@ records.
 ## Included today
 
 - Node 26 TypeScript relay API with an embedded SvelteKit operator dashboard.
-- Jellyfin authentication, catalog/source mapping, and playback activity.
+- Jellyfin authentication, movie/show filtering, series/season/episode browsing,
+  source mapping, and playback activity.
 - Finite, seekable, just-in-time HLS VOD with structured FFmpeg profiles.
 - MediaMTX-backed OBS live ingest and live HLS fan-out.
 - Standalone and role-separated controller, source-worker, ingest-origin, and
   edge runtimes with outbound mTLS agents.
 - SQLite/PostgreSQL persistence, memory/Valkey coordination, and local,
   S3-compatible, Azure Blob, and Google Cloud Storage adapters.
-- Docker Compose, Helm, provider-neutral OpenTofu, backup/restore, macOS, and
-  Windows packaging pipelines with release guardrails.
+- Docker Compose, Helm, provider-neutral OpenTofu, backup/restore, a native
+  macOS DMG, and a Windows installer pipeline with release guardrails.
 
 H.264 8-bit `yuv420p`, AAC-LC stereo, MPEG-TS HLS, and HTTPS remain the intended
 production defaults. Experimental formats are not compatibility claims.
@@ -69,7 +69,9 @@ npm run dev
 ```
 
 Open `http://127.0.0.1:5173`, complete first-run administrator setup, and add a
-Jellyfin provider through the dashboard. The relay API listens on
+Jellyfin provider through the dashboard. When creating a relay, choose Movies
+or Shows; show selection continues through a season and episode before track
+selection. The relay API listens on
 `http://127.0.0.1:8099`; the development server proxies `/api` and `/play` to
 that process. Keep credentials in the dashboard or an external secret backend,
 never in the repository.

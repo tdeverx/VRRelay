@@ -128,6 +128,10 @@ export type MediaItem = {
     durationSeconds?: number;
     imageUrl?: string;
     parentId?: string;
+    seriesName?: string;
+    seasonName?: string;
+    indexNumber?: number;
+    parentIndexNumber?: number;
     videoCodec?: string;
     audioCodec?: string;
     width?: number;
