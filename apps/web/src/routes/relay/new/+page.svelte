@@ -11,7 +11,8 @@
     LoaderCircle,
     Search,
     Settings2,
-    Sparkles
+    Sparkles,
+    Tv
   } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import type {
@@ -32,7 +33,10 @@
   import * as Alert from '$lib/components/ui/alert';
   import * as Collapsible from '$lib/components/ui/collapsible';
   import { Progress } from '$lib/components/ui/progress';
+  import { ToggleGroup, ToggleGroupItem } from '$lib/components/ui/toggle-group';
   import { formatBitrate, formatDuration } from '$lib/utils';
+
+  type MediaMode = 'movies' | 'shows';
 
   let providers = $state<PublicProviderConnection[]>([]);
   let profiles = $state<ProfileRevision[]>([]);
@@ -41,6 +45,11 @@
   );
   let results = $state<MediaItem[]>([]);
   let selected = $state<MediaItem | null>(null);
+  let selectedSeries = $state<MediaItem | null>(null);
+  let selectedSeason = $state<MediaItem | null>(null);
+  let seasons = $state<MediaItem[]>([]);
+  let episodes = $state<MediaItem[]>([]);
+  let mediaMode = $state<MediaMode>('movies');
   let providerId = $state('');
   let profileKey = $state('');
   let platformMode = $state<PlatformMode>('universal');
@@ -49,6 +58,7 @@
   let query = $state('');
   let loading = $state(true);
   let searching = $state(false);
+  let hierarchyLoading = $state(false);
   let creating = $state(false);
   let pinned = $state(false);
   let reportActivity = $state(true);
@@ -145,9 +155,17 @@
 
   async function searchCatalog() {
     if (!providerId) return;
+    clearMediaSelection();
+    clearShowHierarchy();
     searching = true;
     try {
-      results = (await api.catalog(providerId, { search: query || undefined, limit: 24 })).items;
+      results = (
+        await api.catalog(providerId, {
+          search: query || undefined,
+          kinds: [mediaMode === 'movies' ? 'Movie' : 'Series'],
+          limit: 24
+        })
+      ).items;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not search the catalog.');
     } finally {
@@ -157,12 +175,30 @@
 
   async function setProvider(value: string) {
     providerId = value;
-    selected = null;
-    audioTrackId = '';
-    subtitleTrackId = 'none';
+    clearMediaSelection();
+    clearShowHierarchy();
     preferredNodeId = '';
     placementLocked = false;
     await searchCatalog();
+  }
+
+  async function setMediaMode(value: string) {
+    if (value !== 'movies' && value !== 'shows') return;
+    mediaMode = value;
+    await searchCatalog();
+  }
+
+  function clearMediaSelection() {
+    selected = null;
+    audioTrackId = '';
+    subtitleTrackId = 'none';
+  }
+
+  function clearShowHierarchy() {
+    selectedSeries = null;
+    selectedSeason = null;
+    seasons = [];
+    episodes = [];
   }
 
   async function choose(item: MediaItem) {
@@ -176,6 +212,53 @@
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not load media details.');
     }
+  }
+
+  async function chooseSeries(item: MediaItem) {
+    clearMediaSelection();
+    selectedSeries = item;
+    selectedSeason = null;
+    seasons = [];
+    episodes = [];
+    hierarchyLoading = true;
+    try {
+      seasons = (
+        await api.catalog(item.providerId, { parentId: item.id, kinds: ['Season'], limit: 200 })
+      ).items;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load seasons.');
+    } finally {
+      hierarchyLoading = false;
+    }
+  }
+
+  async function chooseSeason(value: string) {
+    const season = seasons.find((item) => item.id === value);
+    if (!season) return;
+    clearMediaSelection();
+    selectedSeason = season;
+    episodes = [];
+    hierarchyLoading = true;
+    try {
+      episodes = (
+        await api.catalog(season.providerId, {
+          parentId: season.id,
+          kinds: ['Episode'],
+          limit: 200
+        })
+      ).items;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not load episodes.');
+    } finally {
+      hierarchyLoading = false;
+    }
+  }
+
+  function episodeLabel(item: MediaItem): string {
+    const number = item.indexNumber === undefined ? '' : `E${item.indexNumber}`;
+    const season = item.parentIndexNumber === undefined ? '' : `S${item.parentIndexNumber}`;
+    const prefix = `${season}${number}`;
+    return prefix ? `${prefix} · ${item.name}` : item.name;
   }
 
   function setProfile(value: string) {
@@ -375,6 +458,19 @@
                 >
               </Select.Root>
             </Field.Field>
+            <div class="media-mode">
+              <span>Browse</span>
+              <ToggleGroup
+                type="single"
+                value={mediaMode}
+                variant="outline"
+                onValueChange={(value) => void setMediaMode(value ?? '')}
+                aria-label="Media type"
+              >
+                <ToggleGroupItem value="movies" aria-label="Movies"><Film />Movies</ToggleGroupItem>
+                <ToggleGroupItem value="shows" aria-label="Shows"><Tv />Shows</ToggleGroupItem>
+              </ToggleGroup>
+            </div>
             <form
               class="search"
               onsubmit={(event) => {
@@ -384,7 +480,7 @@
             >
               <Search /><Input
                 bind:value={query}
-                placeholder="Search films, episodes, or videos…"
+                placeholder={mediaMode === 'movies' ? 'Search movies…' : 'Search shows…'}
                 aria-label="Search media"
               />
               <Button type="submit" variant="secondary" disabled={searching}
@@ -393,7 +489,11 @@
             </form>
             <div class="media-grid" aria-label="Media results">
               {#each results as item (item.id)}
-                <button class:selected={selected?.id === item.id} onclick={() => void choose(item)}>
+                <button
+                  class:selected={(mediaMode === 'movies' ? selected?.id : selectedSeries?.id) ===
+                    item.id}
+                  onclick={() => void (mediaMode === 'movies' ? choose(item) : chooseSeries(item))}
+                >
                   <span class="poster"
                     >{#if item.imageUrl}<img src={item.imageUrl} alt="" />{:else}<Film />{/if}</span
                   >
@@ -404,10 +504,78 @@
                         .join(' · ') || item.kind}</small
                     ></span
                   >
-                  {#if selected?.id === item.id}<Check class="selected-check" />{/if}
+                  {#if (mediaMode === 'movies' ? selected?.id : selectedSeries?.id) === item.id}<Check
+                      class="selected-check"
+                    />{/if}
                 </button>
               {/each}
             </div>
+            {#if !searching && results.length === 0}
+              <p class="empty-results">No {mediaMode === 'movies' ? 'movies' : 'shows'} found.</p>
+            {/if}
+            {#if mediaMode === 'shows' && selectedSeries}
+              <div class="show-picker" aria-busy={hierarchyLoading}>
+                <Field.Field>
+                  <Field.FieldLabel>Season</Field.FieldLabel>
+                  <Select.Root
+                    type="single"
+                    value={selectedSeason?.id}
+                    disabled={hierarchyLoading || seasons.length === 0}
+                    onValueChange={(value) => void chooseSeason(value ?? '')}
+                  >
+                    <Select.Trigger class="w-full" aria-label="Season"
+                      >{selectedSeason?.name ??
+                        (hierarchyLoading ? 'Loading seasons…' : 'Select a season')}</Select.Trigger
+                    >
+                    <Select.Content
+                      ><Select.Group
+                        >{#each seasons as season}<Select.Item value={season.id} label={season.name}
+                            >{season.name}</Select.Item
+                          >{/each}</Select.Group
+                      ></Select.Content
+                    >
+                  </Select.Root>
+                  {#if !hierarchyLoading && seasons.length === 0}
+                    <Field.FieldDescription
+                      >No seasons are available for this show.</Field.FieldDescription
+                    >
+                  {/if}
+                </Field.Field>
+                <Field.Field>
+                  <Field.FieldLabel>Episode</Field.FieldLabel>
+                  <Select.Root
+                    type="single"
+                    value={selected?.id}
+                    disabled={hierarchyLoading || !selectedSeason || episodes.length === 0}
+                    onValueChange={(value) => {
+                      const episode = episodes.find((item) => item.id === value);
+                      if (episode) void choose(episode);
+                    }}
+                  >
+                    <Select.Trigger class="w-full" aria-label="Episode"
+                      >{selected
+                        ? episodeLabel(selected)
+                        : hierarchyLoading && selectedSeason
+                          ? 'Loading episodes…'
+                          : 'Select an episode'}</Select.Trigger
+                    >
+                    <Select.Content
+                      ><Select.Group
+                        >{#each episodes as episode}<Select.Item
+                            value={episode.id}
+                            label={episodeLabel(episode)}>{episodeLabel(episode)}</Select.Item
+                          >{/each}</Select.Group
+                      ></Select.Content
+                    >
+                  </Select.Root>
+                  {#if selectedSeason && !hierarchyLoading && episodes.length === 0}
+                    <Field.FieldDescription
+                      >No episodes are available for this season.</Field.FieldDescription
+                    >
+                  {/if}
+                </Field.Field>
+              </div>
+            {/if}
           {/if}
         </section>
 
@@ -913,6 +1081,21 @@
     gap: 8px;
     margin: 14px 0;
   }
+  .media-mode {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .media-mode > span {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .media-mode :global(svg) {
+    width: 15px;
+  }
   .search > :global(svg) {
     position: absolute;
     width: 16px;
@@ -976,6 +1159,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .empty-results {
+    border: 1px dashed var(--border);
+    border-radius: 7px;
+    padding: 24px;
+    text-align: center;
+  }
+  .show-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
   }
   .media-grid strong {
     font-size: 12px;
@@ -1182,6 +1379,7 @@
     }
     .two-column,
     .media-grid,
+    .show-picker,
     .placement-controls {
       grid-template-columns: 1fr;
     }

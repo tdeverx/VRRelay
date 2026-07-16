@@ -52,7 +52,7 @@ Copy-Item "$Root\packages\*" "$Stage\runtime\packages" -Recurse -Force
 Copy-Item "$Root\package.json", "$Root\package-lock.json" "$Stage\runtime" -Force
 Copy-Item "$Root\LICENSE", "$Root\THIRD_PARTY_NOTICES.md", "$Root\deploy\runtime-manifest.json" "$Stage\runtime" -Force
 Copy-Item "$Root\deploy\native\mediamtx.yml" "$Stage\runtime\mediamtx.yml" -Force
-Push-Location "$Stage\runtime"; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" install --global npm@12.0.1; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" ci --omit=dev; Pop-Location
+Push-Location "$Stage\runtime"; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" install --global npm@12.0.1; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" ci --omit=dev --legacy-peer-deps; Pop-Location
 Copy-Item $WinSW "$Stage\VRRelay.exe" -Force
 $ServiceConfig = (Get-Content "$Root\deploy\windows\VRRelay.xml" -Raw).Replace('__VRRELAY_VERSION__', $Version)
 Set-Content "$Stage\VRRelay.xml" $ServiceConfig

@@ -56,6 +56,16 @@ jobs:
           printf '%s\n' "$RUNNER_TEMP/vrrelay-ffmpeg" >> "$GITHUB_PATH"
       - run: npm ci
       - run: npm run ci
+      - name: Build and verify the development DMG
+        env:
+          VRRELAY_BUILD_NUMBER: ${{ github.run_number }}
+          VRRELAY_FFMPEG_BINARY: ${{ runner.temp }}/vrrelay-ffmpeg/ffmpeg
+        run: deploy/macos/package.sh release dmg
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vrrelay-macos-dmg
+          path: dist/VRRelay-*-macOS-arm64.dmg
+          if-no-files-found: error
   browser:
     runs-on: ubuntu-latest
     steps:

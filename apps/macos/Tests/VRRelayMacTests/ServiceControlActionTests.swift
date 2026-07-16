@@ -3,23 +3,15 @@ import XCTest
 @testable import VRRelayMac
 
 final class ServiceControlActionTests: XCTestCase {
-    func testEveryActionTargetsThePackagedSystemService() {
+    func testEveryActionUsesThePackagedInstallerWithAClosedActionSet() {
         for action in ServiceControlAction.allCases {
-            XCTAssertTrue(action.privilegedCommand.contains("system/org.vrrelay.service"))
-            XCTAssertFalse(action.privilegedCommand.contains("gui/"))
-            XCTAssertFalse(action.privilegedCommand.contains("Library/LaunchAgents"))
+            let command = action.privilegedCommand(helperPath: "/Applications/VRRelay.app/Contents/Resources/install-service.sh")
+            XCTAssertEqual(command, "/bin/zsh '/Applications/VRRelay.app/Contents/Resources/install-service.sh' \(action.rawValue)")
         }
     }
 
-    func testStartBootstrapsTheInstalledLaunchDaemonWhenNeeded() {
-        let command = ServiceControlAction.start.privilegedCommand
-        XCTAssertTrue(command.contains("launchctl bootstrap system '/Library/LaunchDaemons/org.vrrelay.service.plist'"))
-        XCTAssertTrue(command.contains("launchctl kickstart -k system/org.vrrelay.service"))
-    }
-
-    func testStopDoesNotDeleteTheInstalledService() {
-        let command = ServiceControlAction.stop.privilegedCommand
-        XCTAssertEqual(command, "/bin/launchctl bootout system/org.vrrelay.service")
-        XCTAssertFalse(command.contains("rm "))
+    func testInstallerPathIsShellQuoted() {
+        let command = ServiceControlAction.restart.privilegedCommand(helperPath: "/Users/O'Brien/VRRelay.app/install-service.sh")
+        XCTAssertEqual(command, "/bin/zsh '/Users/O'\\''Brien/VRRelay.app/install-service.sh' restart")
     }
 }

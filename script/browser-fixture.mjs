@@ -2,6 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +14,124 @@ const cacheDirectory = resolve(stateRoot, 'cache');
 await rm(stateRoot, { recursive: true, force: true });
 await mkdir(dataDirectory, { recursive: true });
 await mkdir(cacheDirectory, { recursive: true });
+
+const jellyfinItems = [
+  { Id: 'movie-1', Name: 'Browser Movie', Type: 'Movie', ProductionYear: 2026 },
+  { Id: 'series-1', Name: 'Browser Series', Type: 'Series', ProductionYear: 2026 },
+  {
+    Id: 'season-1',
+    Name: 'Season 1',
+    Type: 'Season',
+    ParentId: 'series-1',
+    SeriesName: 'Browser Series',
+    IndexNumber: 1
+  },
+  {
+    Id: 'episode-1',
+    Name: 'The Browser Episode',
+    Type: 'Episode',
+    ParentId: 'season-1',
+    SeriesName: 'Browser Series',
+    SeasonName: 'Season 1',
+    IndexNumber: 2,
+    ParentIndexNumber: 1,
+    RunTimeTicks: 1_800_000_000,
+    MediaStreams: [
+      { Index: 0, Type: 'Video', Codec: 'h264', Width: 1920, Height: 1080 },
+      {
+        Index: 1,
+        Type: 'Audio',
+        Codec: 'aac',
+        Language: 'eng',
+        DisplayTitle: 'English stereo',
+        Channels: 2,
+        IsDefault: true
+      }
+    ],
+    MediaSources: [
+      {
+        Id: 'episode-source',
+        Name: 'Original',
+        Container: 'mkv',
+        Bitrate: 4_000_000,
+        ETag: 'browser-episode-etag',
+        MediaStreams: [
+          { Index: 0, Type: 'Video', Codec: 'h264', Width: 1920, Height: 1080 },
+          {
+            Index: 1,
+            Type: 'Audio',
+            Codec: 'aac',
+            Language: 'eng',
+            DisplayTitle: 'English stereo',
+            Channels: 2,
+            IsDefault: true
+          }
+        ]
+      }
+    ]
+  }
+];
+
+const jellyfin = createServer(async (request, response) => {
+  const url = new URL(request.url ?? '/', 'http://127.0.0.1:18202');
+  const send = (status, body) => {
+    response.writeHead(status, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(body));
+  };
+
+  if (request.method === 'GET' && url.pathname === '/System/Info/Public') {
+    send(200, { ServerName: 'Browser Jellyfin', Version: '10.11.0' });
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/Users/AuthenticateByName') {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (body.Username !== 'browser-user' || body.Pw !== 'browser-password') {
+      send(401, { message: 'Unauthorized' });
+      return;
+    }
+    send(200, {
+      AccessToken: 'browser-jellyfin-token',
+      User: { Id: 'browser-user', Name: 'Browser User' }
+    });
+    return;
+  }
+  if (request.headers['x-emby-token'] !== 'browser-jellyfin-token') {
+    send(401, { message: 'Unauthorized' });
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/System/Info') {
+    send(200, { ServerName: 'Browser Jellyfin', Version: '10.11.0' });
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/Users/browser-user/Items') {
+    const parentId = url.searchParams.get('ParentId');
+    const search = url.searchParams.get('SearchTerm')?.toLocaleLowerCase();
+    const kinds = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
+    const start = Number(url.searchParams.get('StartIndex') ?? 0);
+    const limit = Number(url.searchParams.get('Limit') ?? 50);
+    let items = jellyfinItems.filter((item) =>
+      parentId ? item.ParentId === parentId : item.ParentId === undefined
+    );
+    if (search) items = items.filter((item) => item.Name.toLocaleLowerCase().includes(search));
+    if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.Type));
+    send(200, { Items: items.slice(start, start + limit), TotalRecordCount: items.length });
+    return;
+  }
+  const itemMatch = /^\/Users\/browser-user\/Items\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'GET' && itemMatch) {
+    const item = jellyfinItems.find((candidate) => candidate.Id === itemMatch[1]);
+    send(item ? 200 : 404, item ?? { message: 'Not found' });
+    return;
+  }
+  send(404, { message: 'Not found' });
+});
+
+await new Promise((resolvePromise, reject) => {
+  jellyfin.once('error', reject);
+  jellyfin.listen(18202, '127.0.0.1', resolvePromise);
+});
 
 const relay = spawn(process.execPath, ['apps/relay/dist/main.js'], {
   cwd: root,
@@ -38,6 +157,7 @@ let stopping = false;
 function stop() {
   if (stopping) return;
   stopping = true;
+  jellyfin.close();
   relay.kill('SIGTERM');
 }
 

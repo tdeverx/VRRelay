@@ -170,9 +170,8 @@ jobs:
         env:
           VRRELAY_RELEASE_PACKAGING: '1'
           APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
-          APPLE_INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
           APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
-        run: deploy/macos/package.sh release pkg
+        run: deploy/macos/package.sh release dmg
       - if: always() && runner.os == 'macOS'
         name: Remove temporary Apple credentials
         run: |

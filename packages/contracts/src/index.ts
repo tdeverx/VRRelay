@@ -53,7 +53,10 @@ export type CreateProviderRequest = z.infer<typeof CreateProviderRequestSchema>;
 export const CatalogQuerySchema = z.object({
   parentId: z.string().optional(),
   search: z.string().max(200).optional(),
-  kinds: z.array(z.string()).default([]),
+  kinds: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((value) => (value === undefined ? [] : Array.isArray(value) ? value : [value])),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().nonnegative().default(0)
 });

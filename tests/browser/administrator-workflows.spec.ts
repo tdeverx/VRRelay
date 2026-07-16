@@ -99,3 +99,40 @@ test('creates and revokes a scoped token, then signs out', async ({ page, isMobi
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
+
+test('filters Jellyfin shows and selects a season and episode', async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error));
+
+  await authenticate(page);
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  const fixtureProvider = page.locator('.provider').filter({ hasText: 'Browser fixture' });
+  const providersResponse = await page.request.get('/api/v1/providers');
+  expect(providersResponse.ok()).toBe(true);
+  const providers = (await providersResponse.json()) as { items: Array<{ name: string }> };
+  if (!providers.items.some((provider) => provider.name === 'Browser fixture')) {
+    await page.getByLabel('Connection name').fill('Browser fixture');
+    await page.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
+    await page.getByLabel('Username').fill('browser-user');
+    await page.getByLabel('Password').fill('browser-password');
+    await page.getByRole('button', { name: 'Connect and validate' }).click();
+  }
+  await expect(fixtureProvider).toBeVisible();
+
+  await page.goto('/relay/new');
+  await expect(page.getByRole('heading', { name: 'New relay' })).toBeVisible();
+  await page.getByRole('radio', { name: 'Shows' }).click();
+  await page.getByRole('button', { name: /Browser Series/ }).click();
+
+  await page.getByLabel('Season').click();
+  await page.getByRole('option', { name: 'Season 1' }).click();
+  await page.getByLabel('Episode').click();
+  await page.getByRole('option', { name: 'S1E2 · The Browser Episode' }).click();
+
+  await expect(page.getByLabel('Episode')).toContainText('S1E2 · The Browser Episode');
+  await expect(
+    page.locator('.summary dd').filter({ hasText: 'The Browser Episode' })
+  ).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});

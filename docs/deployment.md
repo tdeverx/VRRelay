@@ -10,11 +10,17 @@ VRRELAY_LISTEN_ADDR=127.0.0.1:8099 node apps/relay/dist/main.js
 
 The SwiftPM menu-bar controller builds with `swift build --package-path apps/macos`. It is a
 menu-bar-only utility with no Dock icon, application window, embedded browser, or settings window.
-Its menu opens the dashboard in the system browser and starts, stops, or restarts the installed
-`org.vrrelay.service` system LaunchDaemon after administrator approval. The LaunchDaemon supervises
-both the TypeScript relay and bundled MediaMTX process, so quitting the menu utility or logging out
-does not stop active streams. Upgrades retain service data; the uninstall script removes binaries
-and retains data unless `--purge-data` is explicit.
+The macOS artifact is a drag-to-Applications DMG containing the app and an Applications shortcut.
+After copying `VRRelay.app` to Applications, open it and choose **Start relay**. macOS asks for
+administrator approval while the app copies its sealed runtime to `/Library/Application
+Support/VRRelay`, installs `org.vrrelay.service` as a system LaunchDaemon, and starts it. **Restart
+relay** applies the runtime bundled with the current app before restarting; **Stop relay** leaves
+the runtime and retained data installed. The menu opens the dashboard in the system browser.
+
+The LaunchDaemon supervises both the TypeScript relay and bundled MediaMTX process, so quitting the
+menu utility or logging out does not stop active streams. Upgrades retain service data. Run
+`deploy/macos/uninstall.sh` from a trusted checkout to remove installed binaries while retaining
+data; pass `--purge-data` only when the retained data should also be deleted.
 
 Native installs also set `VRRELAY_RUNTIME_CONFIG` to a private file in the retained data directory
 and enable supervised exit/restart. The authenticated **Settings → Network** and **Runtime and
@@ -45,10 +51,11 @@ mode rejects it and always uses the source recipe.
 
 The packager signs nested runtime binaries with the hardened runtime and a
 trusted timestamp when a Developer ID identity is present, signs the finalized
-app and installer, and writes `runtime-provenance.json` with the exact bundled
+app, creates the DMG, and writes `runtime-provenance.json` with the exact bundled
 hashes. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires
-Developer ID application signing, Developer ID installer signing, and
-notarization credentials before the package can be produced. The attached
+Developer ID application signing and notarization credentials before the DMG
+can be produced. The DMG is submitted, stapled, and assessed as the distributable
+artifact. The attached
 source archive and FriBidi license/source obligations must remain with the
 distributed macOS FFmpeg binary.
 

@@ -328,8 +328,9 @@ Phase 9 has an automated-verification checkpoint, not a completed exit gate.
 - The OpenAPI client is current, protected by a non-mutating freshness gate,
   and now supplies the dashboard's operation-specific requests. The thin
   handwritten layer retains only auth/CSRF/error and domain-facing convenience
-  behavior. Hierarchical catalog navigation, complete live and binding/failover
-  flows, job/node dependency actions, metrics configuration, certificates,
+  behavior. The VOD relay form now filters movies from shows and follows a
+  series through season and episode selection using provider-neutral hierarchy
+  queries. Complete live and binding/failover flows, job/node dependency actions, metrics configuration, certificates,
   realtime replacement of polling, and exhaustive keyboard/accessibility
   coverage remain unfinished.
 - Fake/Jellyfin provider contracts, route-level HTTP security tests, and a

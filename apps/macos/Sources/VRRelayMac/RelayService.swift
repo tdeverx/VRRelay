@@ -9,18 +9,12 @@ enum ServiceControlAction: String, CaseIterable {
     case restart
     case stop
 
-    private static let label = "system/org.vrrelay.service"
-    private static let plist = "'/Library/LaunchDaemons/org.vrrelay.service.plist'"
+    func privilegedCommand(helperPath: String) -> String {
+        "/bin/zsh \(Self.shellQuote(helperPath)) \(rawValue)"
+    }
 
-    var privilegedCommand: String {
-        switch self {
-        case .start:
-            return "/bin/launchctl print \(Self.label) >/dev/null 2>&1 || /bin/launchctl bootstrap system \(Self.plist); /bin/launchctl enable \(Self.label); /bin/launchctl kickstart -k \(Self.label)"
-        case .restart:
-            return "/bin/launchctl kickstart -k \(Self.label)"
-        case .stop:
-            return "/bin/launchctl bootout \(Self.label)"
-        }
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
 
@@ -62,11 +56,16 @@ final class RelayService {
 
     private func perform(_ action: ServiceControlAction, pendingMessage: String) {
         guard !isChangingState else { return }
+        guard let helper = Bundle.main.url(forResource: "install-service", withExtension: "sh") else {
+            statusMessage = "VRRelay.app is missing its service installer"
+            return
+        }
         isChangingState = true
         statusMessage = pendingMessage
+        let command = action.privilegedCommand(helperPath: helper.path)
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                Self.runPrivileged(action.privilegedCommand)
+                Self.runPrivileged(command)
             }.value
             isChangingState = false
             if result.status == 0 {
@@ -85,7 +84,10 @@ final class RelayService {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", "do shell script \"\(command.replacingOccurrences(of: "\\\"", with: "\\\\\\\""))\" with administrator privileges"]
+        let appleScriptCommand = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        process.arguments = ["-e", "do shell script \"\(appleScriptCommand)\" with administrator privileges"]
         process.standardOutput = pipe
         process.standardError = pipe
         do {

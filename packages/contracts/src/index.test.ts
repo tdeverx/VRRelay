@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
-import { EnrollNodeRequestSchema, RotateNodeCertificateRequestSchema } from './index.js';
+import {
+  CatalogQuerySchema,
+  EnrollNodeRequestSchema,
+  RotateNodeCertificateRequestSchema
+} from './index.js';
 
 const capabilities = {
   encoders: [],
@@ -13,6 +17,17 @@ const capabilities = {
   egressMbps: 0,
   providerIds: []
 };
+
+describe('catalog query contract', () => {
+  it('normalizes one or many HTTP query values into a kind list', () => {
+    expect(CatalogQuerySchema.parse({ kinds: 'Series' }).kinds).toEqual(['Series']);
+    expect(CatalogQuerySchema.parse({ kinds: ['Season', 'Episode'] }).kinds).toEqual([
+      'Season',
+      'Episode'
+    ]);
+    expect(CatalogQuerySchema.parse({}).kinds).toEqual([]);
+  });
+});
 
 describe('node enrollment contract', () => {
   it('accepts only HTTP(S) routing URLs', () => {

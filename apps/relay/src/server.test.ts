@@ -34,6 +34,7 @@ import {
   redactRequestUrl,
   rotateNodeCertificateWithDelivery,
   setNodeDrainWithDelivery,
+  shouldRateLimitRequest,
   type ControlPlaneHttpSurface,
   type ServerServices
 } from './server.js';
@@ -253,6 +254,14 @@ describe('control-plane HTTP surface matrix', () => {
     expect(isInternalPeer('10.0.0.4')).toBe(true);
     expect(isInternalPeer('fd00::10')).toBe(true);
     expect(isInternalPeer('203.0.113.10')).toBe(false);
+  });
+
+  it('rate limits APIs and media paths without charging dashboard assets', () => {
+    expect(shouldRateLimitRequest('/api/v1/sessions?limit=20')).toBe(true);
+    expect(shouldRateLimitRequest('/internal/agent')).toBe(true);
+    expect(shouldRateLimitRequest('/play/session/index.m3u8')).toBe(true);
+    expect(shouldRateLimitRequest('/')).toBe(false);
+    expect(shouldRateLimitRequest('/_app/immutable/chunks/app.js')).toBe(false);
   });
 
   it('reports redacted dependency-aware readiness separately from liveness', async () => {

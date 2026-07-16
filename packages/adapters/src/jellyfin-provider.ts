@@ -68,6 +68,10 @@ interface JellyfinItem {
   ProductionYear?: number;
   RunTimeTicks?: number;
   ParentId?: string;
+  SeriesName?: string;
+  SeasonName?: string;
+  IndexNumber?: number;
+  ParentIndexNumber?: number;
   CollectionType?: string;
   ImageTags?: Record<string, string>;
   MediaSources?: JellyfinMediaSource[];
@@ -360,6 +364,12 @@ export class JellyfinProvider implements MediaProvider {
       ...(item.ProductionYear ? { productionYear: item.ProductionYear } : {}),
       ...(item.RunTimeTicks ? { durationSeconds: item.RunTimeTicks / 10_000_000 } : {}),
       ...(item.ParentId ? { parentId: item.ParentId } : {}),
+      ...(item.SeriesName ? { seriesName: item.SeriesName } : {}),
+      ...(item.SeasonName ? { seasonName: item.SeasonName } : {}),
+      ...(item.IndexNumber !== undefined ? { indexNumber: item.IndexNumber } : {}),
+      ...(item.ParentIndexNumber !== undefined
+        ? { parentIndexNumber: item.ParentIndexNumber }
+        : {}),
       ...(item.CollectionType ? { collectionType: item.CollectionType } : {}),
       ...(video?.Codec ? { videoCodec: video.Codec } : {}),
       ...(firstAudio?.Codec ? { audioCodec: firstAudio.Codec } : {}),

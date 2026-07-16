@@ -135,18 +135,31 @@ function contractItems(providerId: string): MediaItem[] {
   return [
     movie,
     {
-      id: 'folder-1',
+      id: 'series-1',
       providerId,
       name: 'Contract Series',
-      kind: 'Folder',
+      kind: 'Series',
       collectionType: 'tvshows'
+    },
+    {
+      id: 'season-1',
+      providerId,
+      name: 'Season 1',
+      kind: 'Season',
+      parentId: 'series-1',
+      seriesName: 'Contract Series',
+      indexNumber: 1
     },
     {
       ...movie,
       id: 'episode-1',
       name: 'Contract Episode',
       kind: 'Episode',
-      parentId: 'folder-1'
+      parentId: 'season-1',
+      seriesName: 'Contract Series',
+      seasonName: 'Season 1',
+      indexNumber: 1,
+      parentIndexNumber: 1
     }
   ];
 }
@@ -403,6 +416,10 @@ function jellyfinItem(itemId: string): Record<string, unknown> | undefined {
     ProductionYear: item.productionYear,
     RunTimeTicks: (item.durationSeconds ?? 0) * 10_000_000,
     ParentId: item.parentId,
+    SeriesName: item.seriesName,
+    SeasonName: item.seasonName,
+    IndexNumber: item.indexNumber,
+    ParentIndexNumber: item.parentIndexNumber,
     CollectionType: item.collectionType,
     MediaStreams: mediaStreams,
     MediaSources: [
@@ -639,19 +656,37 @@ function mediaProviderContract(harness: MediaProviderContractHarness): void {
       });
       expect(MediaItemSchema.safeParse(search.items[0]).success).toBe(true);
 
-      const children = await fixture.provider.browse(fixture.connection, fixture.secret, {
-        parentId: 'folder-1',
+      const seasons = await fixture.provider.browse(fixture.connection, fixture.secret, {
+        parentId: 'series-1',
+        kinds: ['Season'],
+        limit: 25,
+        offset: 0
+      });
+      expect(seasons.total).toBe(1);
+      expect(seasons.items[0]).toMatchObject({
+        id: 'season-1',
+        providerId: fixture.connection.id,
+        parentId: 'series-1',
+        kind: 'Season',
+        indexNumber: 1
+      });
+
+      const episodes = await fixture.provider.browse(fixture.connection, fixture.secret, {
+        parentId: 'season-1',
         kinds: ['Episode'],
         limit: 25,
         offset: 0
       });
-      expect(children.total).toBe(1);
-      expect(children.items).toHaveLength(1);
-      expect(children.items[0]).toMatchObject({
+      expect(episodes.total).toBe(1);
+      expect(episodes.items[0]).toMatchObject({
         id: 'episode-1',
         providerId: fixture.connection.id,
-        parentId: 'folder-1',
-        kind: 'Episode'
+        parentId: 'season-1',
+        kind: 'Episode',
+        seriesName: 'Contract Series',
+        seasonName: 'Season 1',
+        indexNumber: 1,
+        parentIndexNumber: 1
       });
     });
 

@@ -4,7 +4,7 @@ set -euo pipefail
 export COPYFILE_DISABLE=1
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONFIGURATION="${1:-release}"
-FORMAT="${2:-pkg}"
+FORMAT="${2:-dmg}"
 PACKAGE_VERSION="${VRRELAY_VERSION:-$(node -p "require('$ROOT/package.json').version")}"
 VERSION="$(node "$ROOT/script/release-version.mjs" "$PACKAGE_VERSION")"
 BUILD_NUMBER="${VRRELAY_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}"
@@ -12,25 +12,23 @@ BUILD_NUMBER="${VRRELAY_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}"
 RELEASE_PACKAGING="${VRRELAY_RELEASE_PACKAGING:-0}"
 if [[ "$RELEASE_PACKAGING" == "1" ]]; then
   [[ -n "${APPLE_DEVELOPER_ID:-}" ]] || { echo "APPLE_DEVELOPER_ID is required for release packaging" >&2; exit 1; }
-  [[ -n "${APPLE_INSTALLER_ID:-}" ]] || { echo "APPLE_INSTALLER_ID is required for release packaging" >&2; exit 1; }
   [[ -n "${APPLE_NOTARY_PROFILE:-}" ]] || { echo "APPLE_NOTARY_PROFILE is required for release packaging" >&2; exit 1; }
   [[ -z "${VRRELAY_FFMPEG_BINARY:-}" ]] || { echo "VRRELAY_FFMPEG_BINARY is not accepted for release packaging; FFmpeg must be built from the pinned source recipe" >&2; exit 1; }
 fi
-STAGE="$ROOT/dist/macos/root"
-COMPONENT="$ROOT/dist/macos/VRRelay-component.pkg"
-OUTPUT="$ROOT/dist/VRRelay-$VERSION-macOS-arm64.pkg"
+BUILD_ROOT="$ROOT/dist/macos"
+APP="$BUILD_ROOT/VRRelay.app"
+IMAGE_ROOT="$BUILD_ROOT/image"
+OUTPUT="$ROOT/dist/VRRelay-$VERSION-macOS-arm64.dmg"
 FFMPEG_SOURCE_OUTPUT="$ROOT/dist/VRRelay-$VERSION-macOS-FFmpeg-source.tar.xz"
-rm -rf "$ROOT/dist/macos" "$OUTPUT" "$FFMPEG_SOURCE_OUTPUT"
-mkdir -p "$STAGE/Applications" "$STAGE/Library/Application Support/VRRelay/runtime" "$STAGE/Library/LaunchDaemons"
+rm -rf "$BUILD_ROOT" "$OUTPUT" "$FFMPEG_SOURCE_OUTPUT"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 npm --prefix "$ROOT" run build
 swift build --package-path "$ROOT/apps/macos" -c "$CONFIGURATION" --arch arm64
-APP="$STAGE/Applications/VRRelay.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/apps/macos/.build/$CONFIGURATION/VRRelayMac" "$APP/Contents/MacOS/VRRelayMac"
 cp "$ROOT/deploy/macos/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
-RUNTIME="$STAGE/Library/Application Support/VRRelay/runtime"
+RUNTIME="$APP/Contents/Resources/runtime"
 mkdir -p "$RUNTIME/apps/relay" "$RUNTIME/apps/web" "$RUNTIME/packages" "$RUNTIME/bin" "$RUNTIME/licenses"
 cp -R "$ROOT/apps/relay/dist" "$ROOT/apps/relay/public" "$RUNTIME/apps/relay/"
 cp "$ROOT/apps/relay/package.json" "$RUNTIME/apps/relay/"
@@ -66,15 +64,16 @@ else
   cp "$FFMPEG_BUILD/vrrelay-ffmpeg-8.1.2-darwin-arm64-source.tar.xz" "$FFMPEG_SOURCE_OUTPUT"
 fi
 "$ROOT/deploy/macos/bundle-dylibs.sh" "$RUNTIME/bin/ffmpeg" "$RUNTIME/lib"
-(cd "$RUNTIME" && PATH="$DOWNLOADS/node-v26.5.0-darwin-arm64/bin:$PATH" npm install --global npm@12.0.1 && npm ci --omit=dev)
+(cd "$RUNTIME" && export PATH="$DOWNLOADS/node-v26.5.0-darwin-arm64/bin:$PATH" && npm install --global npm@12.0.1 && npm ci --omit=dev --legacy-peer-deps)
 rm -rf "$DOWNLOADS/node-v26.5.0-darwin-arm64" "$DOWNLOADS/mediamtx" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE" "$FFMPEG_SOURCE"
-cp "$ROOT/deploy/macos/org.vrrelay.service.plist" "$STAGE/Library/LaunchDaemons/"
-/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:VRRELAY_VERSION string $VERSION" "$STAGE/Library/LaunchDaemons/org.vrrelay.service.plist"
-chmod 0644 "$STAGE/Library/LaunchDaemons/org.vrrelay.service.plist"
-chmod +x "$ROOT/deploy/macos/scripts/"*
+cp "$ROOT/deploy/macos/org.vrrelay.service.plist" "$APP/Contents/Resources/"
+cp "$ROOT/deploy/macos/install-service.sh" "$APP/Contents/Resources/"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:VRRELAY_VERSION string $VERSION" "$APP/Contents/Resources/org.vrrelay.service.plist"
+chmod 0644 "$APP/Contents/Resources/org.vrrelay.service.plist"
+chmod 0755 "$APP/Contents/Resources/install-service.sh"
 chmod 0755 "$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx"
-find "$STAGE" -name '._*' -delete
-xattr -cr "$STAGE"
+find "$APP" -name '._*' -delete
+xattr -cr "$APP"
 for binary in "$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx" "$RUNTIME/lib"/*(.N); do
   if [[ -n "${APPLE_DEVELOPER_ID:-}" ]]; then
     codesign --force --options runtime --timestamp --sign "$APPLE_DEVELOPER_ID" "$binary"
@@ -90,13 +89,21 @@ else
   codesign --force --deep --sign - "$APP"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP"
-plutil -lint "$APP/Contents/Info.plist" "$STAGE/Library/LaunchDaemons/org.vrrelay.service.plist"
-[[ "$FORMAT" == "app" ]] && { ditto "$APP" "$ROOT/dist/VRRelay.app"; rm -rf "$ROOT/dist/macos"; exit 0; }
-pkgbuild --root "$STAGE" --scripts "$ROOT/deploy/macos/scripts" --identifier org.vrrelay.pkg --version "$VERSION" "$COMPONENT"
-if [[ -n "${APPLE_INSTALLER_ID:-}" ]]; then productsign --sign "$APPLE_INSTALLER_ID" "$COMPONENT" "$OUTPUT"; else cp "$COMPONENT" "$OUTPUT"; fi
-pkgutil --check-signature "$OUTPUT" || [[ -z "${APPLE_INSTALLER_ID:-}" ]]
-if [[ "$RELEASE_PACKAGING" == "1" ]]; then export VRRELAY_REQUIRE_PACKAGE_SIGNATURE=1; fi
-"$ROOT/script/verify-macos-package.sh" "$OUTPUT" "$VERSION" "$BUILD_NUMBER"
-if [[ -n "${APPLE_NOTARY_PROFILE:-}" ]]; then xcrun notarytool submit "$OUTPUT" --keychain-profile "$APPLE_NOTARY_PROFILE" --wait; xcrun stapler staple "$OUTPUT"; xcrun stapler validate "$OUTPUT"; fi
-rm -rf "$ROOT/dist/macos"
+plutil -lint "$APP/Contents/Info.plist" "$APP/Contents/Resources/org.vrrelay.service.plist"
+[[ "$FORMAT" == "app" ]] && { ditto "$APP" "$ROOT/dist/VRRelay.app"; rm -rf "$BUILD_ROOT"; exit 0; }
+[[ "$FORMAT" == "dmg" ]] || { echo "Unsupported macOS package format: $FORMAT" >&2; exit 2; }
+mkdir -p "$IMAGE_ROOT"
+ditto "$APP" "$IMAGE_ROOT/VRRelay.app"
+ln -s /Applications "$IMAGE_ROOT/Applications"
+hdiutil create -volname VRRelay -srcfolder "$IMAGE_ROOT" -ov -format UDZO "$OUTPUT"
+if [[ "$RELEASE_PACKAGING" == "1" ]]; then export VRRELAY_REQUIRE_DEVELOPER_ID=1; fi
+"$ROOT/script/verify-macos-dmg.sh" "$OUTPUT" "$VERSION" "$BUILD_NUMBER"
+if [[ -n "${APPLE_NOTARY_PROFILE:-}" ]]; then
+  xcrun notarytool submit "$OUTPUT" --keychain-profile "$APPLE_NOTARY_PROFILE" --wait
+  xcrun stapler staple "$OUTPUT"
+  xcrun stapler validate "$OUTPUT"
+  export VRRELAY_REQUIRE_NOTARIZATION=1
+  "$ROOT/script/verify-macos-dmg.sh" "$OUTPUT" "$VERSION" "$BUILD_NUMBER"
+fi
+rm -rf "$BUILD_ROOT"
 echo "$OUTPUT"

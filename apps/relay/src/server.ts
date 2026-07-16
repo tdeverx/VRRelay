@@ -121,6 +121,13 @@ export function isLoopbackPeer(address: string | undefined): boolean {
   );
 }
 
+export function shouldRateLimitRequest(url: string): boolean {
+  const path = url.split('?', 1)[0] ?? url;
+  return ['/api', '/internal', '/play'].some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`)
+  );
+}
+
 export function isInternalPeer(address: string | undefined): boolean {
   return Boolean(address && (isLoopbackPeer(address) || isPrivateAddress(address)));
 }
@@ -533,7 +540,11 @@ export async function createServer(
       }
     }
   });
-  await app.register(rateLimit, { max: 240, timeWindow: '1 minute' });
+  await app.register(rateLimit, {
+    max: 240,
+    timeWindow: '1 minute',
+    allowList: (request) => !shouldRateLimitRequest(request.url)
+  });
   await app.register(websocket);
 
   app.setErrorHandler((error, request, reply) => {

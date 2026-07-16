@@ -1,4 +1,0 @@
-#!/bin/zsh
-set -eu
-/bin/launchctl bootout system/org.vrrelay.service 2>/dev/null || true
-exit 0

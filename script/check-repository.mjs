@@ -287,8 +287,8 @@ if (/^\s+linux\/arm64:\s*$/m.test(ciWorkflow))
     'CI treats linux/arm64 as an invalid build-action input instead of a platform value'
   );
 const macosPackageScript = await readFile(resolve(root, 'deploy/macos/package.sh'), 'utf8');
-if (!macosPackageScript.includes('script/verify-macos-package.sh'))
-  failures.push('macOS packaging does not verify the completed installer payload');
+if (!macosPackageScript.includes('script/verify-macos-dmg.sh'))
+  failures.push('macOS packaging does not verify the completed disk image payload');
 for (const required of [
   'script/release-version.mjs',
   'build-args: VRRELAY_VERSION=',
@@ -444,10 +444,11 @@ const macService = await readFile(
   'utf8'
 );
 const macViews = await readFile(resolve(root, 'apps/macos/Sources/VRRelayMac/Views.swift'), 'utf8');
-if (!macService.includes('system/org.vrrelay.service'))
-  failures.push('macOS host does not control the packaged system LaunchDaemon');
+const macInstaller = await readFile(resolve(root, 'deploy/macos/install-service.sh'), 'utf8');
+if (!macService.includes('install-service') || !macInstaller.includes('system/org.vrrelay.service'))
+  failures.push('macOS host does not install and control the packaged system LaunchDaemon');
 for (const forbidden of ['Library/LaunchAgents', 'gui/', '/Users/admin/Documents/VRR']) {
-  if (`${macService}\n${macViews}`.includes(forbidden))
+  if (`${macService}\n${macViews}\n${macInstaller}`.includes(forbidden))
     failures.push(`macOS host contains development-only service path ${forbidden}`);
 }
 if (macViews.includes('repositoryPath'))

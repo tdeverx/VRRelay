@@ -1,6 +1,6 @@
 # Releasing VRRelay
 
-VRRelay releases are created from signed semantic-version tags such as `v1.0.0`. The release workflow validates the tag once and passes the normalized version to the service, dashboard, OCI image, Helm chart, macOS package, and Windows installer. Do not build public artifacts by editing version strings manually.
+VRRelay releases are created from signed semantic-version tags such as `v1.0.0`. The release workflow validates the tag once and passes the normalized version to the service, dashboard, OCI image, Helm chart, macOS DMG, and Windows installer. Do not build public artifacts by editing version strings manually.
 
 ## Before tagging
 
@@ -12,8 +12,7 @@ VRRelay releases are created from signed semantic-version tags such as `v1.0.0`.
 
 The macOS release job expects these repository secrets:
 
-- `APPLE_DEVELOPER_ID` and `APPLE_INSTALLER_ID`: the Developer ID Application
-  and Developer ID Installer identity names.
+- `APPLE_DEVELOPER_ID`: the Developer ID Application identity name.
 - `APPLE_SIGNING_CERTIFICATE`: the base64-encoded PKCS#12 certificate and
   private-key bundle.
 - `APPLE_SIGNING_CERTIFICATE_PASSWORD` and `APPLE_KEYCHAIN_PASSWORD`: the
@@ -26,7 +25,7 @@ On a fresh runner the workflow writes the certificate and notary key with
 private permissions, creates and unlocks a temporary Keychain, imports the
 certificate, provisions the `notarytool` profile, and then runs release-mode
 packaging. Nested runtime executables are hardened-runtime signed and
-timestamped before the app and installer are signed; the installer is submitted,
+timestamped before the app is signed; the resulting DMG is submitted,
 stapled, and validated by the packager. An `always()` cleanup step deletes the
 temporary Keychain, certificate, and notary-key files. The workflow wiring is a
 guardrail, not evidence that a signed/notarized release has run successfully;
@@ -35,13 +34,13 @@ candidate tag.
 
 ## Corresponding source
 
-The macOS package builds FFmpeg 8.1.2 from the checksum-pinned arm64 recipe in
+The macOS DMG builds FFmpeg 8.1.2 from the checksum-pinned arm64 recipe in
 the runtime manifest. That builder collects every FFmpeg, x264, subtitle, font,
 text-shaping, line-breaking, and zimg source input; the exact recipe; build
 metadata; configuration; licenses; rebuild instructions; and a per-file
 `SHA256SUMS` into
 `VRRelay-<version>-macOS-FFmpeg-source.tar.xz`. The release workflow publishes
-that archive beside the macOS installer. Preserve its FriBidi source, license,
+that archive beside the macOS DMG. Preserve its FriBidi source, license,
 and relinking obligations.
 
 Windows and both OCI architectures use the checksum-pinned BtbN GPL builds
@@ -66,4 +65,4 @@ The generated release also contains the project license, third-party notices, ru
 
 ## Rehearsal and rollback
 
-Run the workflow first from a release-candidate tag. Install native packages on clean machines, deploy the produced OCI image and Helm chart, verify `/api/v1/health` reports the tag version, and exercise one VOD and one live session. Follow [operations.md](operations.md) for backup and rollback. Never overwrite a published tag or artifact; correct it with a new version.
+Run the workflow first from a release-candidate tag. Install the native artifacts on clean machines, deploy the produced OCI image and Helm chart, verify `/api/v1/health` reports the tag version, and exercise one VOD and one live session. Follow [operations.md](operations.md) for backup and rollback. Never overwrite a published tag or artifact; correct it with a new version.
