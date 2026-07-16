@@ -51,6 +51,28 @@ for (const required of [
   }
 }
 
+const gitignore = await readFile(resolve(root, '.gitignore'), 'utf8');
+for (const required of [
+  '.env.*',
+  '!.env.example',
+  '**/.terraform/',
+  '*.tfstate',
+  '*.tfvars',
+  '*.p12',
+  '*.pem',
+  '*.sqlite',
+  '*.mp4'
+]) {
+  if (!gitignore.split('\n').includes(required))
+    failures.push(`.gitignore is missing sensitive local pattern ${required}`);
+}
+
+const dockerignore = await readFile(resolve(root, '.dockerignore'), 'utf8');
+for (const required of ['.env.*', '.codex', 'tmp', '**/.terraform', '*.tfstate', '*.tfvars']) {
+  if (!dockerignore.split('\n').includes(required))
+    failures.push(`.dockerignore is missing sensitive build-context pattern ${required}`);
+}
+
 for (const markdown of repositoryFiles.filter((path) => path.endsWith('.md'))) {
   const content = await readFile(markdown, 'utf8');
   for (const match of content.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {

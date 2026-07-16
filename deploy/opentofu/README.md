@@ -20,7 +20,7 @@ evidence instead of logging user data.
 module "vrrelay_vm_user_data" {
   source = "./deploy/opentofu"
 
-  image_ref          = "ghcr.io/vrrelay/vrrelay@sha256:<release-digest>"
+  image_ref          = "ghcr.io/tdeverx/vrrelay@sha256:<release-digest>"
   mediamtx_image_ref = "docker.io/bluenviron/mediamtx@sha256:<release-digest>"
 
   postgres_url          = var.postgres_url

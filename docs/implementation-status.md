@@ -1,8 +1,11 @@
 # Private-production v1 implementation status
 
-VRRelay is a prerelease foundation under repository reconciliation. The audited
-checkout is not yet a feature-complete public release candidate and must not be
-presented as a released or supported VRCDN replacement.
+VRRelay is prerelease software. Its major private-production v1 implementation,
+repository reconciliation, and local automated closeout are complete, but the
+audited checkout is not yet a feature-complete public release candidate and
+must not be presented as a released or supported VRCDN replacement. The gaps
+below distinguish remaining product workflows from external release
+qualification.
 
 The authoritative progress record is the
 [v1 completion ledger](v1-completion-ledger.md). A capability becomes a release
@@ -10,7 +13,7 @@ claim only when its owning phase has passed and links retained evidence. Older
 local smoke results and the presence of CI, deployment, or packaging files are
 not release evidence by themselves.
 
-## Foundation present in the source tree
+## Implemented foundation
 
 - A Node 22 TypeScript monorepo with provider-neutral domain/application
   packages, infrastructure adapters, a Fastify relay, and a SvelteKit operator
@@ -297,10 +300,10 @@ Phase 9 has an automated-verification checkpoint, not a completed exit gate.
 
 ## Known gaps in the audited checkout
 
-- Phase 1 restored a clean local engineering baseline: format, lint, workspace
+- The clean pinned-runtime repository gate covers formatting, lint, workspace
   and test-source typechecks, generated-client freshness, unit tests, builds,
-  and the npm dependency audit pass under the pinned Node runtime. This is a
-  baseline gate, not evidence for the unreached feature and deployment phases.
+  browser smoke coverage, and the npm dependency audit. It does not substitute
+  for unfinished product workflows or target-environment release evidence.
 - A real PostgreSQL `pg_dump`/restore drill has not yet been retained; unit-tested
   backup invocation is not a substitute for the Phase 9–11 recovery and
   deployment evidence.

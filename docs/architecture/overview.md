@@ -37,7 +37,7 @@ Only controller and standalone startup may run migrations. Dedicated source-work
 
 ## Persistence and concurrency
 
-SQLite and PostgreSQL share the same provider-neutral repository contract. Migration definitions have fixed version, name, and SHA-256 metadata through v5. Existing v1/v2 databases are the only accepted metadata-free legacy history; their known metadata is backfilled inside the locked v3 migration transaction after the configured backup gate. Immutable v4 adds live-channel revisions, and v5 adds provider revisions plus a durable deletion-pending marker. Changed definitions, future versions, gaps, partial metadata, and name/checksum tampering are rejected at startup.
+SQLite and PostgreSQL share the same provider-neutral repository contract. Migration definitions have fixed version, name, and SHA-256 metadata through v7. Existing v1/v2 databases are the only accepted metadata-free legacy history; their known metadata is backfilled inside the locked v3 migration transaction after the configured backup gate. Immutable v4 adds live-channel revisions, v5 adds provider revisions plus a durable deletion-pending marker, v6 adds durable provider-binding deletion, and v7 adds bounded segment-job logs. Changed definitions, future versions, gaps, partial metadata, and name/checksum tampering are rejected at startup.
 
 History alone is not considered sufficient. Both adapters verify the complete expected schema shape, including every required table and column, primary keys, required unique constraints, and named index column order.
 

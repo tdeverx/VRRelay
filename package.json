@@ -4,6 +4,22 @@
   "private": true,
   "description": "A private, self-hosted Jellyfin VOD and OBS live relay for VRChat video players.",
   "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tdeverx/VRRelay.git"
+  },
+  "homepage": "https://github.com/tdeverx/VRRelay#readme",
+  "bugs": {
+    "url": "https://github.com/tdeverx/VRRelay/issues"
+  },
+  "keywords": [
+    "self-hosted",
+    "vrchat",
+    "jellyfin",
+    "ffmpeg",
+    "mediamtx",
+    "sveltekit"
+  ],
   "packageManager": "npm@10.9.2",
   "engines": {
     "node": ">=22.18"

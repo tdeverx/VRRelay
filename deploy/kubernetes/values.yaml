@@ -1,4 +1,4 @@
-image: { repository: ghcr.io/vrrelay/vrrelay, tag: '', digest: '', pullPolicy: IfNotPresent }
+image: { repository: ghcr.io/tdeverx/vrrelay, tag: '', digest: '', pullPolicy: IfNotPresent }
 disruptionBudget: { enabled: true }
 rollout: { runtimeSecretChecksum: '' }
 migration: { activeDeadlineSeconds: 1800 }

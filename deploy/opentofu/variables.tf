@@ -1,5 +1,5 @@
 variable "image_ref" {
-  description = "Immutable VRRelay OCI image reference, for example ghcr.io/vrrelay/vrrelay@sha256:<digest>."
+  description = "Immutable VRRelay OCI image reference, for example ghcr.io/tdeverx/vrrelay@sha256:<digest>."
   type        = string
 
   validation {

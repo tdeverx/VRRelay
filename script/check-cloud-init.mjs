@@ -43,7 +43,7 @@ for (const [text, message] of [
 }
 
 for (const forbidden of [
-  'ghcr.io/vrrelay/vrrelay:0.1.0',
+  'ghcr.io/tdeverx/vrrelay:0.1.0',
   'VRRELAY_NODE_JOIN_TOKEN=${single_use_join_token}',
   'ExecStart=/usr/bin/docker run'
 ]) {

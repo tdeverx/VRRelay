@@ -42,7 +42,7 @@ ARG VRRELAY_VERSION
 LABEL org.opencontainers.image.title="VRRelay" \
       org.opencontainers.image.version="$VRRELAY_VERSION" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.source="https://github.com/VRRelay/VRRelay"
+      org.opencontainers.image.source="https://github.com/tdeverx/VRRelay"
 WORKDIR /app
 ENV NODE_ENV=production \
     VRRELAY_VERSION=$VRRELAY_VERSION \

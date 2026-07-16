@@ -23,6 +23,9 @@ passed.
     protection, and tag/release restriction gates.
   - Dependabot must cover npm, GitHub Actions, and Docker manifests.
 - These assertions run through `npm run check` and therefore through `npm run ci`.
+- The repository guard also requires ignore rules for local environment files,
+  signing material, OpenTofu state/variables, runtime databases, real media, and
+  sensitive Docker build-context paths.
 
 ## Lean guardrails run
 

@@ -6,14 +6,60 @@
 .env
 .env.*
 !.env.example
+.envrc
+.direnv/
 .data/
 .cache/
 dist/
 coverage/
 tmp/
+test-results/
+playwright-report/
+blob-report/
+.nyc_output/
 *.log
 *.swp
 *.swo
+
+# Local credentials, identities, and signing material
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.crt
+*.cer
+*.csr
+*.der
+*.jks
+*.keystore
+*.mobileprovision
+
+# Runtime databases, backups, and real media
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.dump
+*.bak
+*.m3u8
+*.m4s
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+*.aac
+*.mp3
+*.wav
+*.flac
+
+# Native release artifacts
+*.pkg
+*.dmg
+*.exe
+*.msi
 
 node_modules/
 apps/*/node_modules/
@@ -27,3 +73,18 @@ apps/relay/public/*
 # Swift
 apps/macos/.build/
 apps/macos/.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Windows and OpenTofu local state
+.vs/
+Thumbs.db
+Desktop.ini
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example

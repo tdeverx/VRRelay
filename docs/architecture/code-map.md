@@ -64,7 +64,7 @@ During remote provider setup, the controller may transiently receive and forward
 ## Persistence and mutation path
 
 1. The controller or standalone root acquires the migration lock and performs any required pre-migration backup before mutation. Dedicated data-plane roles fail closed if the schema is not current.
-2. SQLite and PostgreSQL validate a contiguous migration history against fixed version, name, and SHA-256 metadata. The known legacy v1/v2 history is backfilled while the existing migration lock and transaction are held; immutable v4 adds live-channel revisions and v5 adds provider revisions plus the deletion marker.
+2. SQLite and PostgreSQL validate a contiguous migration history against fixed version, name, and SHA-256 metadata. The known legacy v1/v2 history is backfilled while the existing migration lock and transaction are held; immutable v4 adds live-channel revisions, v5 adds provider revisions plus the deletion marker, v6 adds durable provider-binding deletion, and v7 adds bounded segment-job logs.
 3. Schema startup checks the complete required physical shape: tables, columns, primary keys, required unique constraints, and named index column order. Matching only the latest migration number is insufficient.
 4. Mutable sessions, nodes, jobs, provider bindings, settings, live channels, and providers use insert/revision/CAS operations. Terminal or protected state changes reject stale revisions and invalid transitions rather than applying broad document overwrites.
 5. Session/grant creation atomically guards the referenced live channel or VOD provider. Channel deletion locks the channel and rejects online publishers/dependent sessions; provider deletion rejects dependent VOD sessions or bindings.

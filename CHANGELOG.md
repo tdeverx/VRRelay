@@ -116,6 +116,14 @@ retained evidence belong in the
   intended production defaults while experimental formats remain unclaimed.
 - Make the v1 completion ledger the authoritative source for phase status and
   retained verification evidence.
+- Prepare the private GitHub publication surface with canonical repository and
+  GHCR metadata, an expanded README/documentation index, current migration
+  documentation, and an explicit distinction between remaining product work
+  and external release qualification.
+- Harden Git and Docker build-context exclusions for local environments,
+  signing material, OpenTofu state, databases, media, test reports, IDE state,
+  and native artifacts; remove stale design screenshots containing
+  endpoint-, token-, or media-shaped sample data.
 - Route dashboard requests through operation-specific generated OpenAPI
   functions, leaving only auth, CSRF, normalized errors, and domain-facing
   conveniences in the handwritten facade; guard against reintroducing literal
@@ -237,10 +245,13 @@ retained evidence belong in the
 - The audited repository has not yet passed the feature-complete public release
   candidate gate.
 - A real PostgreSQL dump/restore drill remains Phase 9–11 evidence.
-- Node transport hardening, distributed orchestration, media matrices,
-  edge/live failure handling, dashboard workflows, observability, deployment
-  topologies, native installers, and supply-chain outputs require the remaining
-  reconciliation phases.
+- Full catalog navigation, live/binding/failover administration,
+  dependency-management actions, certificate and metrics configuration,
+  realtime dashboard updates, and exhaustive accessibility coverage remain
+  product implementation gaps.
+- Destructive distributed orchestration, media matrices, edge/live failure
+  handling, deployment topologies, native installers, and supply-chain outputs
+  remain release-qualification work.
 - Real VRChat PC compatibility, Quest compatibility, clean-machine native
   installation, hosted cloud adapters, and destructive Kubernetes/cluster
   recovery are not currently supported release claims.

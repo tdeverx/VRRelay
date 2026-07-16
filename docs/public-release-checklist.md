@@ -39,4 +39,4 @@ This checklist defines the difference between a buildable repository, a release 
 - Verify `/api/v1/health`, the dashboard, OCI labels, Helm app version, macOS package metadata, and Windows installer metadata all report the normalized release tag.
 - Publish known limitations prominently. Experimental codecs and delivery methods remain labelled experimental until recorded VRChat evidence promotes them.
 
-The first public repository may be opened while the project is still a release candidate, provided the README and implementation status make that state explicit. “Feature complete” should mean the documented v1 scope is implemented; “released” additionally requires every target-environment and real-client gate above.
+The public repository may be opened after the feature-complete release-candidate gate passes, before the supported-v1 target-environment gates are complete, provided the README and implementation status make that distinction explicit. A private development remote may exist earlier. “Feature complete” means the documented v1 scope is implemented; “released” additionally requires every target-environment and real-client gate above.

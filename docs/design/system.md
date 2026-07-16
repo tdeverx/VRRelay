@@ -1,6 +1,9 @@
 # Dashboard design system
 
-The accepted references are `sessions-dashboard.png` and `new-relay.png`.
+The implemented Svelte dashboard is the current visual reference. Historical
+mockups were removed before repository publication because they no longer
+matched the product and contained endpoint-, token-, or media-shaped sample
+data.
 
 - Background: near-black blue-gray, with open table and form bands.
 - Surfaces: one step lighter than the background; no glass or floating card grid.
@@ -14,5 +17,6 @@ The accepted references are `sessions-dashboard.png` and `new-relay.png`.
 - Icons: consistent outline icons around 18 px with approximately 1.75 px strokes.
 - Motion: 140–180 ms state transitions, disabled under reduced-motion preference.
 
-All visible text and controls remain code-native. The reference images are not
-used as application assets.
+All visible text and controls remain code-native. Any future publication
+screenshot must use synthetic neutral fixtures and must not expose credentials,
+playback or join tokens, private addresses, private paths, or real media.

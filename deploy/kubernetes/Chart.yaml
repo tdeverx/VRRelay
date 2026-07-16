@@ -4,3 +4,11 @@ description: Provider-neutral private VRRelay cluster
 type: application
 version: 0.1.0
 appVersion: 0.1.0
+home: https://github.com/tdeverx/VRRelay
+sources:
+  - https://github.com/tdeverx/VRRelay
+maintainers:
+  - name: tdeverx
+    url: https://github.com/tdeverx
+annotations:
+  artifacthub.io/license: GPL-3.0-or-later

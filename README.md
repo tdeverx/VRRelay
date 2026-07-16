@@ -1,66 +1,119 @@
 # VRRelay
 
+[![CI](https://github.com/tdeverx/VRRelay/actions/workflows/ci.yml/badge.svg)](https://github.com/tdeverx/VRRelay/actions/workflows/ci.yml)
+
 VRRelay is a GPLv3 self-hosted media relay that turns Jellyfin video-on-demand
 and OBS live ingest into clean playback URLs for VRChat video players.
 
-The project is intentionally split into provider-neutral application code and
-external adapters. Jellyfin is the first media provider; FFmpeg performs
-real-time transcoding; MediaMTX handles RTMP, SRT, and WHIP live ingest.
+The project keeps provider-neutral application code separate from external
+adapters. Jellyfin is the first media provider, FFmpeg performs real-time media
+processing, and MediaMTX handles RTMP, SRT, and WHIP live ingest.
 
-## Development status
+> [!IMPORTANT]
+> VRRelay is prerelease software for private, self-hosted evaluation. It is not
+> yet a supported VRCDN replacement or a feature-complete public release
+> candidate.
 
-This repository contains a substantial prerelease foundation for private-production v1:
+## Project status
 
-- Node 22 TypeScript relay API and embedded dashboard host
-- Jellyfin user-token and API-key authentication
-- finite, seekable, just-in-time HLS VOD happy paths
-- OBS live channel provisioning through MediaMTX
-- controller, source-worker, ingest-origin, and edge scaffolding
-- distributed segment caching with filesystem and cloud object-store adapters
-- SQLite/PostgreSQL persistence and memory/Valkey coordination adapters
-- SvelteKit operator dashboard
-- SwiftUI macOS and Electron Windows service controllers
-- standalone, Docker Compose, Helm, and native packaging foundations
+The major private-production v1 implementation and repository reconciliation
+pass is complete. A fresh pinned-runtime checkout passes formatting, generated
+contract checks, type checks, lint, 395 automated tests with 23 intentional
+skips, production builds, the dependency audit, and the desktop/mobile browser
+smoke suite.
 
-The audited checkout is not yet a feature-complete release candidate. Several
-runtime, distributed-state, deployment, dashboard, packaging, and verification
-paths remain incomplete or unproven. Treat deployment files and automated
-harnesses as development assets, not production evidence, until their phase
-gates are linked from the [completion ledger](docs/v1-completion-ledger.md).
-Current limitations and externally gated claims are listed in
-[implementation status](docs/implementation-status.md).
+That engineering checkpoint is not a release claim. Remaining product work
+includes the full catalog, live/binding/failover, dependency-management,
+certificate, metrics, realtime, and exhaustive accessibility workflows.
+Release qualification also requires real multi-host and hosted-service failure
+testing, signed native artifacts, clean-machine lifecycle tests, supply-chain
+evidence, and real VRChat PC/Quest compatibility runs. The
+[completion ledger](docs/v1-completion-ledger.md) and
+[implementation status](docs/implementation-status.md) are the authoritative
+records.
 
-No Jellyfin password or token belongs in the repository. Copy `.env.example`
-to `.env` for local-only configuration.
+## Included today
 
-## Quick start
+- Node 22 TypeScript relay API with an embedded SvelteKit operator dashboard.
+- Jellyfin authentication, catalog/source mapping, and playback activity.
+- Finite, seekable, just-in-time HLS VOD with structured FFmpeg profiles.
+- MediaMTX-backed OBS live ingest and live HLS fan-out.
+- Standalone and role-separated controller, source-worker, ingest-origin, and
+  edge runtimes with outbound mTLS agents.
+- SQLite/PostgreSQL persistence, memory/Valkey coordination, and local,
+  S3-compatible, Azure Blob, and Google Cloud Storage adapters.
+- Docker Compose, Helm, provider-neutral OpenTofu, backup/restore, macOS, and
+  Windows packaging pipelines with release guardrails.
 
-```bash
+H.264 8-bit `yuv420p`, AAC-LC stereo, MPEG-TS HLS, and HTTPS remain the intended
+production defaults. Experimental formats are not compatibility claims.
+
+## Requirements
+
+- Node.js `22.23.1` and npm `10.9.2` (`.nvmrc` pins the Node version).
+- FFmpeg 7.x with `libx264`, AAC, HLS, and MPEG-TS support.
+- Git.
+
+MediaMTX 1.18.2, Docker, Swift, Windows packaging tools, and Helm are needed
+only for the corresponding live, deployment, or native workflows. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the complete tool matrix.
+
+## Local quick start
+
+```sh
+nvm install
+nvm use
 npm ci
 cp .env.example .env
-make dev
+npm run dev
 ```
 
-The API defaults to `http://127.0.0.1:8099`; the web development server uses
-`http://127.0.0.1:5173` and proxies `/api` and `/play` to the relay service.
+Open `http://127.0.0.1:5173`, complete first-run administrator setup, and add a
+Jellyfin provider through the dashboard. The relay API listens on
+`http://127.0.0.1:8099`; the development server proxies `/api` and `/play` to
+that process. Keep credentials in the dashboard or an external secret backend,
+never in the repository.
 
-The repository includes opt-in distributed harnesses for development. They are
-not a substitute for the unreached destructive, target-platform, security, and
-real-client release gates. See [the testing guide](docs/testing.md) for their
-requirements and current scope.
+The distributed and real-service harnesses are opt-in. They are useful
+engineering checks, but do not replace the retained release evidence described
+in the [testing guide](docs/testing.md).
 
-See [the architecture overview](docs/architecture/overview.md),
-[implementation status](docs/implementation-status.md), and
-[security model](docs/architecture/security.md) before exposing a relay outside
-a trusted network.
+## Deployment paths
 
-Contributor setup, repository boundaries, and validation commands are in
-[CONTRIBUTING.md](CONTRIBUTING.md). The [code map](docs/architecture/code-map.md)
-is the quickest route into the implementation. Maintainers should use the
-[public release checklist](docs/public-release-checklist.md) before publishing a
-versioned release.
+- Use the quick start above for local standalone development.
+- Read [deployment](docs/deployment.md) and [operations](docs/operations.md)
+  before evaluating standalone, Compose, Kubernetes, or multi-host modes.
+- Treat native packages and OCI images as unreleased build outputs until the
+  [public release checklist](docs/public-release-checklist.md) is complete.
+
+## Documentation
+
+| Guide                                                  | Purpose                                                               |
+| ------------------------------------------------------ | --------------------------------------------------------------------- |
+| [Architecture overview](docs/architecture/overview.md) | Runtime roles, persistence, media paths, and provider boundaries      |
+| [Security model](docs/architecture/security.md)        | Trust boundaries, credentials, grants, transport, and threat controls |
+| [Code map](docs/architecture/code-map.md)              | Fast route from a feature or boundary to its implementation           |
+| [API workflow](docs/api.md)                            | OpenAPI and generated-dashboard-client ownership                      |
+| [Compatibility](docs/compatibility.md)                 | Supported defaults versus experimental media behavior                 |
+| [Testing](docs/testing.md)                             | Local, browser, integration, and real-service test scopes             |
+| [Deployment](docs/deployment.md)                       | Standalone, Compose, Kubernetes, cloud-init, and native paths         |
+| [Operations](docs/operations.md)                       | Health, readiness, metrics, logs, backup, and recovery                |
+| [Releasing](docs/releasing.md)                         | Versioning, signing, notarization, provenance, and publication        |
+
+## Security and support
+
+Never publish Jellyfin credentials, playback or join tokens, certificates,
+private endpoints, media, or unredacted logs. Report vulnerabilities using the
+private process in [SECURITY.md](SECURITY.md); use [SUPPORT.md](SUPPORT.md) for
+non-sensitive help.
+
+## Contributing
+
+Repository boundaries, development setup, validation commands, and pull-request
+expectations are in [CONTRIBUTING.md](CONTRIBUTING.md). Participation is governed
+by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-VRRelay is licensed under the GNU General Public License, version 3 or later.
-See `LICENSE`.
+VRRelay is licensed under the
+[GNU General Public License, version 3 or later](LICENSE).
