@@ -64,7 +64,42 @@ export type LoginRequest = {
     password: string;
 };
 
-export type AuthenticationMode = 'user_token' | 'api_key';
+export type PortalLoginRequest = {
+    username: string;
+};
+
+export type PortalUser = {
+    id: string;
+    username: string;
+    providerId: string;
+};
+
+export type PortalAuthSession = AuthSession & {
+    user: PortalUser;
+};
+
+export type PortalStatus = {
+    configured: boolean;
+    providerName?: string;
+};
+
+export type PortalConfiguration = {
+    providerId: string;
+    defaultProfileId: string;
+    allowedProfileIds: Array<string>;
+};
+
+export type PortalConfigurationState = {
+    configuration: PortalConfiguration | null;
+};
+
+export type PortalCreateSessionRequest = {
+    source: MediaSourceRef;
+    name?: string;
+    profileId?: string;
+};
+
+export type AuthenticationMode = 'user_token' | 'api_key' | 'delegated';
 
 export type PlatformMode = 'universal' | 'pc' | 'quest' | 'dual';
 
@@ -221,6 +256,11 @@ export type ProfileList = {
     items: Array<ProfileRevision>;
 };
 
+export type PortalProfileList = {
+    defaultProfileId: string;
+    items: Array<ProfileRevision>;
+};
+
 export type MediaCapabilities = {
     ffmpegVersion: string;
     encoders: Array<{
@@ -281,6 +321,7 @@ export type RelaySession = {
     assignedNodeId?: string;
     placementLocked: boolean;
     preferredRegion?: string;
+    ownerId?: string;
     outputUrls: {
         [key: string]: string;
     };
@@ -665,6 +706,11 @@ export type LogList = {
     items: Array<AgentLogEntry>;
 };
 
+export type PortalLoginRequestWritable = {
+    username: string;
+    password: string;
+};
+
 export type ProviderCredentialsWritable = {
     username?: string;
     password?: string;
@@ -760,6 +806,12 @@ export type JobId = string;
 export type FirstRun = FirstRunRequest;
 
 export type Login = LoginRequest;
+
+export type PortalLogin = PortalLoginRequestWritable;
+
+export type PortalConfiguration2 = PortalConfiguration;
+
+export type CreatePortalSession = PortalCreateSessionRequest;
 
 export type CreateProvider = CreateProviderRequestWritable;
 
@@ -1026,6 +1078,262 @@ export type LogoutResponses = {
 };
 
 export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
+
+export type GetPortalStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/portal/status';
+};
+
+export type GetPortalStatusResponses = {
+    /**
+     * Public user portal availability
+     */
+    200: PortalStatus;
+};
+
+export type GetPortalStatusResponse = GetPortalStatusResponses[keyof GetPortalStatusResponses];
+
+export type GetPortalConfigurationData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/portal/configuration';
+};
+
+export type GetPortalConfigurationResponses = {
+    /**
+     * Current user portal policy
+     */
+    200: PortalConfigurationState;
+};
+
+export type GetPortalConfigurationResponse = GetPortalConfigurationResponses[keyof GetPortalConfigurationResponses];
+
+export type UpdatePortalConfigurationData = {
+    body: PortalConfiguration2;
+    path?: never;
+    query?: never;
+    url: '/portal/configuration';
+};
+
+export type UpdatePortalConfigurationErrors = {
+    /**
+     * Request failed
+     */
+    409: ApiError;
+};
+
+export type UpdatePortalConfigurationError = UpdatePortalConfigurationErrors[keyof UpdatePortalConfigurationErrors];
+
+export type UpdatePortalConfigurationResponses = {
+    /**
+     * User portal provider and profile policy
+     */
+    200: PortalConfiguration;
+};
+
+export type UpdatePortalConfigurationResponse = UpdatePortalConfigurationResponses[keyof UpdatePortalConfigurationResponses];
+
+export type LoginPortalUserData = {
+    body: PortalLogin;
+    path?: never;
+    query?: never;
+    url: '/portal/auth/login';
+};
+
+export type LoginPortalUserErrors = {
+    /**
+     * Request failed
+     */
+    401: ApiError;
+};
+
+export type LoginPortalUserError = LoginPortalUserErrors[keyof LoginPortalUserErrors];
+
+export type LoginPortalUserResponses = {
+    /**
+     * Authenticated provider user browser session
+     */
+    200: PortalAuthSession;
+};
+
+export type LoginPortalUserResponse = LoginPortalUserResponses[keyof LoginPortalUserResponses];
+
+export type LogoutPortalUserData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/portal/auth/logout';
+};
+
+export type LogoutPortalUserResponses = {
+    /**
+     * Logged out
+     */
+    204: void;
+};
+
+export type LogoutPortalUserResponse = LogoutPortalUserResponses[keyof LogoutPortalUserResponses];
+
+export type GetPortalUserData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/portal/me';
+};
+
+export type GetPortalUserResponses = {
+    /**
+     * Authenticated provider user
+     */
+    200: PortalUser;
+};
+
+export type GetPortalUserResponse = GetPortalUserResponses[keyof GetPortalUserResponses];
+
+export type BrowsePortalCatalogData = {
+    body?: never;
+    path?: never;
+    query?: {
+        parentId?: string;
+        search?: string;
+        kinds?: Array<string>;
+        limit?: number;
+        offset?: number;
+    };
+    url: '/portal/catalog';
+};
+
+export type BrowsePortalCatalogResponses = {
+    /**
+     * Provider-neutral media page
+     */
+    200: CatalogPage;
+};
+
+export type BrowsePortalCatalogResponse = BrowsePortalCatalogResponses[keyof BrowsePortalCatalogResponses];
+
+export type GetPortalItemData = {
+    body?: never;
+    path: {
+        itemId: string;
+    };
+    query?: never;
+    url: '/portal/items/{itemId}';
+};
+
+export type GetPortalItemResponses = {
+    /**
+     * Provider-neutral media item
+     */
+    200: MediaItem;
+};
+
+export type GetPortalItemResponse = GetPortalItemResponses[keyof GetPortalItemResponses];
+
+export type GetPortalItemImageData = {
+    body?: never;
+    path: {
+        itemId: string;
+    };
+    query?: never;
+    url: '/portal/items/{itemId}/image';
+};
+
+export type GetPortalItemImageErrors = {
+    /**
+     * Request failed
+     */
+    404: ApiError;
+};
+
+export type GetPortalItemImageError = GetPortalItemImageErrors[keyof GetPortalItemImageErrors];
+
+export type GetPortalItemImageResponses = {
+    /**
+     * Provider artwork for a media item
+     */
+    200: Blob | File;
+};
+
+export type GetPortalItemImageResponse = GetPortalItemImageResponses[keyof GetPortalItemImageResponses];
+
+export type ListPortalProfilesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/portal/profiles';
+};
+
+export type ListPortalProfilesResponses = {
+    /**
+     * Profiles available to the authenticated provider user
+     */
+    200: PortalProfileList;
+};
+
+export type ListPortalProfilesResponse = ListPortalProfilesResponses[keyof ListPortalProfilesResponses];
+
+export type ListPortalSessionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/portal/sessions';
+};
+
+export type ListPortalSessionsResponses = {
+    /**
+     * Relay sessions
+     */
+    200: SessionList;
+};
+
+export type ListPortalSessionsResponse = ListPortalSessionsResponses[keyof ListPortalSessionsResponses];
+
+export type CreatePortalSessionData = {
+    body: CreatePortalSession;
+    path?: never;
+    query?: never;
+    url: '/portal/sessions';
+};
+
+export type CreatePortalSessionErrors = {
+    /**
+     * Request failed
+     */
+    409: ApiError;
+};
+
+export type CreatePortalSessionError = CreatePortalSessionErrors[keyof CreatePortalSessionErrors];
+
+export type CreatePortalSessionResponses = {
+    /**
+     * Relay session and opaque playback URLs
+     */
+    201: RelaySession;
+};
+
+export type CreatePortalSessionResponse = CreatePortalSessionResponses[keyof CreatePortalSessionResponses];
+
+export type DeletePortalSessionData = {
+    body?: never;
+    path: {
+        sessionId: string;
+    };
+    query?: never;
+    url: '/portal/sessions/{sessionId}';
+};
+
+export type DeletePortalSessionResponses = {
+    /**
+     * Session deleted
+     */
+    204: void;
+};
+
+export type DeletePortalSessionResponse = DeletePortalSessionResponses[keyof DeletePortalSessionResponses];
 
 export type ListProvidersData = {
     body?: never;

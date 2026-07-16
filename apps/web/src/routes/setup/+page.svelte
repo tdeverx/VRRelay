@@ -8,6 +8,7 @@
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import { Field, FieldDescription, FieldGroup, FieldLabel } from '$lib/components/ui/field';
+  import { switchUi } from '$lib/new-ui/state.svelte';
 
   let password = $state('');
   let confirmation = $state('');
@@ -99,6 +100,7 @@
         {pending ? 'Creating…' : 'Create administrator'}
       </Button>
     </form>
+    <Button variant="ghost" onclick={() => switchUi('/setup', 'new')}>Try the new interface</Button>
   </section>
 </main>
 

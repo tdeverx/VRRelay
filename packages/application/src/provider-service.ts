@@ -10,7 +10,9 @@ import { providerAllowsPublicHttp, publicProvider } from '@vrrelay/domain';
 import type { CatalogQuery, CreateProviderRequest } from '@vrrelay/contracts';
 import type {
   ClusterRepository,
+  MediaArtwork,
   PlaybackEvent,
+  ProviderIdentity,
   ProviderRegistry,
   RemoteProviderGateway,
   Repository,
@@ -64,16 +66,17 @@ export class ProviderService {
     input: CreateProviderRequest & { normalizedBaseUrl: string; securityNotice?: string }
   ): Promise<PublicProviderConnection> {
     const adapter = this.providers.get(input.type);
-    const identity = await adapter.authenticate(
-      input.normalizedBaseUrl,
-      {
-        ...(input.authMode === 'api_key'
-          ? { apiKey: input.apiKey! }
-          : { username: input.username!, password: input.password! })
-      },
-      undefined,
-      { allowPublicHttp: input.allowPublicHttp }
-    );
+    const identity =
+      input.authMode === 'delegated'
+        ? undefined
+        : await adapter.authenticate(
+            input.normalizedBaseUrl,
+            input.authMode === 'api_key'
+              ? { apiKey: input.apiKey! }
+              : { username: input.username!, password: input.password! },
+            undefined,
+            { allowPublicHttp: input.allowPublicHttp }
+          );
     const id = randomUUID();
     const now = new Date().toISOString();
     const connection: ProviderConnection = {
@@ -83,18 +86,18 @@ export class ProviderService {
       baseUrl: input.normalizedBaseUrl,
       authMode: input.authMode,
       secretRef: `provider:${id}`,
-      ...(identity.userId ? { userId: identity.userId } : {}),
-      ...(identity.username ? { username: identity.username } : {}),
-      serverName: identity.serverName,
-      serverVersion: identity.serverVersion,
+      ...(identity?.userId ? { userId: identity.userId } : {}),
+      ...(identity?.username ? { username: identity.username } : {}),
+      ...(identity?.serverName ? { serverName: identity.serverName } : {}),
+      ...(identity?.serverVersion ? { serverVersion: identity.serverVersion } : {}),
       capabilities: [...adapter.capabilities],
-      healthy: true,
+      healthy: Boolean(identity),
       allowPublicHttp: input.allowPublicHttp,
       ...(input.securityNotice ? { securityNotice: input.securityNotice } : {}),
       createdAt: now,
       updatedAt: now
     };
-    await this.secrets.put(connection.secretRef, identity.accessToken);
+    if (identity) await this.secrets.put(connection.secretRef, identity.accessToken);
     try {
       await this.repository.createProvider(connection);
     } catch (error) {
@@ -107,7 +110,7 @@ export class ProviderService {
         throw error;
       }
       if (current?.secretRef === connection.secretRef) return publicProvider(current);
-      await this.secrets.delete(connection.secretRef);
+      if (identity) await this.secrets.delete(connection.secretRef);
       throw error;
     }
     return publicProvider(connection);
@@ -276,6 +279,57 @@ export class ProviderService {
     return this.providers.get(connection.type).item(connection, secret, itemId);
   }
 
+  async authenticateUser(
+    providerId: string,
+    username: string,
+    password: string
+  ): Promise<ProviderIdentity> {
+    const connection = await this.#connection(providerId);
+    if (connection.authMode !== 'delegated')
+      throw new ConflictError('Provider connection is not configured for delegated user login');
+    const identity = await this.providers
+      .get(connection.type)
+      .authenticate(connection.baseUrl, { username, password }, undefined, {
+        allowPublicHttp: providerAllowsPublicHttp(connection)
+      });
+    await this.#markHealthy(providerId);
+    return identity;
+  }
+
+  async browseAs(
+    providerId: string,
+    accessToken: string,
+    userId: string,
+    query: CatalogQuery
+  ): Promise<{ items: MediaItem[]; total: number }> {
+    const connection = await this.#delegatedConnection(providerId);
+    return this.providers
+      .get(connection.type)
+      .browse({ ...connection, userId }, accessToken, query);
+  }
+
+  async itemAs(
+    providerId: string,
+    accessToken: string,
+    userId: string,
+    itemId: string
+  ): Promise<MediaItem> {
+    const connection = await this.#delegatedConnection(providerId);
+    return this.providers.get(connection.type).item({ ...connection, userId }, accessToken, itemId);
+  }
+
+  async artworkAs(
+    providerId: string,
+    accessToken: string,
+    userId: string,
+    itemId: string
+  ): Promise<MediaArtwork> {
+    const connection = await this.#delegatedConnection(providerId);
+    const provider = this.providers.get(connection.type);
+    if (!provider.artwork) throw new NotFoundError('Artwork is not available for this provider');
+    return provider.artwork({ ...connection, userId }, accessToken, itemId);
+  }
+
   async validate(providerId: string): Promise<void> {
     const connection = await this.#connection(providerId);
     const remote = await this.#remoteBinding(providerId);
@@ -305,6 +359,13 @@ export class ProviderService {
   async #connection(id: string): Promise<ProviderConnection> {
     const connection = await this.repository.getProvider(id);
     if (!connection) throw new NotFoundError('Provider connection was not found');
+    return connection;
+  }
+
+  async #delegatedConnection(id: string): Promise<ProviderConnection> {
+    const connection = await this.#connection(id);
+    if (connection.authMode !== 'delegated')
+      throw new ConflictError('Provider connection is not configured for delegated user login');
     return connection;
   }
 

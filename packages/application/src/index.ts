@@ -69,6 +69,11 @@ export interface PlaybackEvent {
   event: 'start' | 'progress' | 'stop';
 }
 
+export interface MediaArtwork {
+  data: Uint8Array;
+  contentType: string;
+}
+
 export interface MediaProvider {
   readonly type: ProviderType;
   readonly capabilities: readonly ProviderCapability[];
@@ -91,6 +96,12 @@ export interface MediaProvider {
     itemId: string,
     signal?: AbortSignal
   ): Promise<MediaItem>;
+  artwork?(
+    connection: ProviderConnection,
+    secret: string,
+    itemId: string,
+    signal?: AbortSignal
+  ): Promise<MediaArtwork>;
   resolveSource(
     connection: ProviderConnection,
     secret: string,

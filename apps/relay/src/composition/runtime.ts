@@ -27,6 +27,7 @@ import type { NodeCapability } from '@vrrelay/domain';
 import type { CatalogQuery, CreateProviderRequest } from '@vrrelay/contracts';
 import { AgentController, NodeAgent, type NodeAgentOptions } from '../agent-transport.js';
 import { AuthService } from '../auth.js';
+import { PortalAuthService } from '../portal-auth.js';
 import { BackendService, resolveConfiguredObjectStore } from '../backend-service.js';
 import type { RelayConfig } from '../config.js';
 import { parseListenAddress } from '../config.js';
@@ -347,12 +348,14 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
   await sessions.recover();
 
   const auth = new AuthService(repository);
+  const portal = new PortalAuthService(repository, secrets, providers);
   const audit = new AuditService(repository);
   const app = await createServer(
     config,
     {
       repository,
       auth,
+      portal,
       audit,
       providers,
       profiles,

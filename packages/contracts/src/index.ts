@@ -134,6 +134,35 @@ export const LoginRequestSchema = z.object({
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
+export const PortalConfigurationRequestSchema = z
+  .object({
+    providerId: z.string().min(1),
+    defaultProfileId: z.string().min(1),
+    allowedProfileIds: z.array(z.string().min(1)).min(1)
+  })
+  .superRefine((value, context) => {
+    if (!value.allowedProfileIds.includes(value.defaultProfileId))
+      context.addIssue({
+        code: 'custom',
+        path: ['defaultProfileId'],
+        message: 'The default profile must be included in the allowed profiles'
+      });
+  });
+export type PortalConfigurationRequest = z.infer<typeof PortalConfigurationRequestSchema>;
+
+export const PortalLoginRequestSchema = z.object({
+  username: z.string().min(1).max(256),
+  password: z.string().min(1).max(256)
+});
+export type PortalLoginRequest = z.infer<typeof PortalLoginRequestSchema>;
+
+export const PortalCreateSessionRequestSchema = z.object({
+  source: MediaSourceRefSchema,
+  name: z.string().min(1).max(160).optional(),
+  profileId: z.string().min(1).optional()
+});
+export type PortalCreateSessionRequest = z.infer<typeof PortalCreateSessionRequestSchema>;
+
 export const CreatePersonalTokenRequestSchema = z.object({
   name: z.string().min(1).max(100),
   scopes: z.array(ScopeSchema).min(1),
@@ -179,6 +208,12 @@ export const CreateProviderBindingRequestSchema = z
     allowPublicHttp: z.boolean().default(false)
   })
   .superRefine((value, context) => {
+    if (value.authMode === 'delegated')
+      context.addIssue({
+        code: 'custom',
+        path: ['authMode'],
+        message: 'Delegated user authentication is only available for the portal connection'
+      });
     if (value.authMode === 'user_token' && (!value.username || !value.password))
       context.addIssue({ code: 'custom', message: 'Username and password are required' });
     if (value.authMode === 'api_key' && !value.apiKey)

@@ -25,6 +25,8 @@ import type {
   CreateProviderBindingRequest,
   CreateProviderRequest,
   CreateSessionRequest,
+  PortalConfigurationRequest,
+  PortalCreateSessionRequest,
   RuntimeConfiguration,
   SessionControlRequest
 } from '@vrrelay/contracts';
@@ -32,6 +34,7 @@ import { client as generatedClient } from '$lib/generated/vrrelay-api/client.gen
 import {
   activateBackend,
   browseCatalog,
+  browsePortalCatalog,
   cancelSegmentJob,
   controlSession,
   createLiveChannel,
@@ -40,8 +43,10 @@ import {
   createProfileRevision,
   createProvider,
   createProviderBinding,
+  createPortalSession,
   createSession,
   deleteLiveChannel,
+  deletePortalSession,
   deleteProvider,
   deleteProviderBinding,
   deleteSession,
@@ -49,6 +54,10 @@ import {
   evictCache,
   getHealth,
   getMediaCapabilities,
+  getPortalConfiguration,
+  getPortalItem,
+  getPortalStatus,
+  getPortalUser,
   getProviderItem,
   getReadiness,
   getRuntimeConfiguration,
@@ -63,6 +72,8 @@ import {
   listLiveChannels,
   listNodeLogs,
   listPersonalTokens,
+  listPortalProfiles,
+  listPortalSessions,
   listProfiles,
   listProviderBindings,
   listProviders,
@@ -70,7 +81,9 @@ import {
   listSegmentJobs,
   listSessions,
   login as loginOperation,
+  loginPortalUser,
   logout as logoutOperation,
+  logoutPortalUser,
   previewPlacement,
   recordCompatibilityResult,
   removeNode,
@@ -83,6 +96,7 @@ import {
   validateBackend,
   validateProvider,
   validateRuntimeConfiguration,
+  updatePortalConfiguration,
   updateRuntimeConfiguration
 } from '$lib/generated/vrrelay-api/sdk.gen';
 
@@ -100,9 +114,25 @@ export class ApiClientError extends Error {
   }
 }
 
-let csrfToken =
-  typeof sessionStorage === 'undefined' ? '' : (sessionStorage.getItem('vrrelay.csrf') ?? '');
+function cookieValue(name: string): string {
+  if (typeof document === 'undefined') return '';
+  const prefix = `${encodeURIComponent(name)}=`;
+  const cookie = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : '';
+}
 
+function browserCsrfToken(storageKey: string, cookieName: string): string {
+  if (typeof sessionStorage === 'undefined') return '';
+  const token = sessionStorage.getItem(storageKey) ?? cookieValue(cookieName);
+  if (token) sessionStorage.setItem(storageKey, token);
+  return token;
+}
+
+let csrfToken = browserCsrfToken('vrrelay.csrf', 'vrrelay_csrf');
+let portalCsrfToken = browserCsrfToken('vrrelay.portal-csrf', 'vrrelay_portal_csrf');
 generatedClient.setConfig({
   credentials: 'same-origin',
   headers: { Accept: 'application/json' },
@@ -110,9 +140,20 @@ generatedClient.setConfig({
 });
 
 generatedClient.interceptors.request.use((request) => {
-  if (!csrfToken || request.method === 'GET' || request.method === 'HEAD') return request;
+  if (request.method === 'GET' || request.method === 'HEAD') return request;
+  const pathSegments = new URL(request.url).pathname.split('/');
+  const portalSegment = pathSegments.indexOf('portal');
+  const portalResource = portalSegment >= 0 ? pathSegments[portalSegment + 1] : undefined;
+  const isPortalUserRequest =
+    portalSegment >= 0 && portalResource !== 'configuration' && portalResource !== 'status';
+  if (isPortalUserRequest && !portalCsrfToken)
+    portalCsrfToken = browserCsrfToken('vrrelay.portal-csrf', 'vrrelay_portal_csrf');
+  if (!isPortalUserRequest && !csrfToken)
+    csrfToken = browserCsrfToken('vrrelay.csrf', 'vrrelay_csrf');
+  const token = isPortalUserRequest ? portalCsrfToken : csrfToken;
+  if (!token) return request;
   const headers = new Headers(request.headers);
-  headers.set('X-CSRF-Token', csrfToken);
+  headers.set('X-CSRF-Token', token);
   return new Request(request, { headers });
 });
 
@@ -198,6 +239,12 @@ export const api = {
     csrfToken = '';
     sessionStorage.removeItem('vrrelay.csrf');
   },
+  portalStatus: () =>
+    result<{ configured: boolean; providerName?: string }>(getPortalStatus(required)),
+  portalConfiguration: () =>
+    result<{ configuration: PortalConfigurationRequest | null }>(getPortalConfiguration(required)),
+  updatePortalConfiguration: (body: PortalConfigurationRequest) =>
+    result<PortalConfigurationRequest>(updatePortalConfiguration({ ...required, body })),
   providers: () => result<{ items: PublicProviderConnection[] }>(listProviders(required)),
   createProvider: (body: CreateProviderRequest) =>
     result<PublicProviderConnection>(createProvider({ ...required, body })),
@@ -411,6 +458,46 @@ export const api = {
     ),
   evictCache: (body: CacheEvictionRequest) =>
     result<{ removed: number }>(evictCache({ ...required, body }))
+};
+
+export const portalApi = {
+  status: () => result<{ configured: boolean; providerName?: string }>(getPortalStatus(required)),
+  async login(username: string, password: string) {
+    const login = await result<{
+      csrfToken: string;
+      expiresAt: string;
+      user: { id: string; username: string; providerId: string };
+    }>(loginPortalUser({ ...required, body: { username, password } }));
+    portalCsrfToken = login.csrfToken;
+    sessionStorage.setItem('vrrelay.portal-csrf', login.csrfToken);
+    return login;
+  },
+  async logout() {
+    await result<void>(logoutPortalUser(required));
+    portalCsrfToken = '';
+    sessionStorage.removeItem('vrrelay.portal-csrf');
+  },
+  me: () => result<{ id: string; username: string; providerId: string }>(getPortalUser(required)),
+  catalog: (
+    query: {
+      search?: string;
+      parentId?: string;
+      kinds?: string[];
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) =>
+    result<{ items: MediaItem[]; total: number }>(
+      browsePortalCatalog({ ...required, query: { ...query, limit: query.limit ?? 50 } })
+    ),
+  item: (itemId: string) => result<MediaItem>(getPortalItem({ ...required, path: { itemId } })),
+  profiles: () =>
+    result<{ defaultProfileId: string; items: ProfileRevision[] }>(listPortalProfiles(required)),
+  sessions: () => result<{ items: RelaySession[] }>(listPortalSessions(required)),
+  createSession: (body: PortalCreateSessionRequest) =>
+    result<RelaySession>(createPortalSession({ ...required, body })),
+  deleteSession: (sessionId: string) =>
+    result<void>(deletePortalSession({ ...required, path: { sessionId } }))
 };
 
 export function isAuthenticatedError(error: unknown): boolean {

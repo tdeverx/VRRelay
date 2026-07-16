@@ -9,6 +9,7 @@ security: [{ cookieSession: [] }, { personalToken: [] }]
 tags:
   - { name: System }
   - { name: Authentication }
+  - { name: Portal }
   - { name: Providers }
   - { name: Profiles }
   - { name: Sessions }
@@ -108,6 +109,121 @@ paths:
       responses:
         '204': { description: Logged out }
         '401': { $ref: '#/components/responses/Error' }
+
+  /portal/status:
+    get:
+      operationId: getPortalStatus
+      tags: [Portal]
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/PortalStatus' }
+  /portal/configuration:
+    get:
+      operationId: getPortalConfiguration
+      tags: [Portal]
+      responses:
+        '200': { $ref: '#/components/responses/PortalConfigurationState' }
+    put:
+      operationId: updatePortalConfiguration
+      tags: [Portal]
+      requestBody: { $ref: '#/components/requestBodies/PortalConfiguration' }
+      responses:
+        '200': { $ref: '#/components/responses/PortalConfiguration' }
+        '409': { $ref: '#/components/responses/Error' }
+  /portal/auth/login:
+    post:
+      operationId: loginPortalUser
+      tags: [Portal]
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/PortalLogin' }
+      responses:
+        '200': { $ref: '#/components/responses/PortalAuthSession' }
+        '401': { $ref: '#/components/responses/Error' }
+  /portal/auth/logout:
+    post:
+      operationId: logoutPortalUser
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      responses:
+        '204': { description: Logged out }
+  /portal/me:
+    get:
+      operationId: getPortalUser
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/PortalUser' }
+  /portal/catalog:
+    get:
+      operationId: browsePortalCatalog
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      parameters:
+        - { name: parentId, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: kinds, in: query, schema: { type: array, items: { type: string } } }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { $ref: '#/components/responses/Catalog' }
+  /portal/items/{itemId}:
+    get:
+      operationId: getPortalItem
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/ItemId' }]
+      responses:
+        '200': { $ref: '#/components/responses/MediaItem' }
+  /portal/items/{itemId}/image:
+    get:
+      operationId: getPortalItemImage
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/ItemId' }]
+      responses:
+        '200':
+          description: Provider artwork for a media item
+          headers:
+            Cache-Control: { schema: { type: string } }
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/Error' }
+  /portal/profiles:
+    get:
+      operationId: listPortalProfiles
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/PortalProfileList' }
+  /portal/sessions:
+    get:
+      operationId: listPortalSessions
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/SessionList' }
+    post:
+      operationId: createPortalSession
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      requestBody: { $ref: '#/components/requestBodies/CreatePortalSession' }
+      responses:
+        '201': { $ref: '#/components/responses/Session' }
+        '409': { $ref: '#/components/responses/Error' }
+  /portal/sessions/{sessionId}:
+    delete:
+      operationId: deletePortalSession
+      tags: [Portal]
+      security: [{ portalCookieSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '204': { description: Session deleted }
 
   /providers:
     get:
@@ -485,6 +601,7 @@ paths:
 components:
   securitySchemes:
     cookieSession: { type: apiKey, in: cookie, name: vrrelay_session }
+    portalCookieSession: { type: apiKey, in: cookie, name: vrrelay_user_session }
     personalToken: { type: http, scheme: bearer }
     clusterNode:
       type: mutualTLS
@@ -509,6 +626,18 @@ components:
         required: true,
         content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
       }
+    PortalLogin:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalLoginRequest' } }
+    PortalConfiguration:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalConfiguration' } }
+    CreatePortalSession:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalCreateSessionRequest' } }
     CreateProvider:
       {
         required: true,
@@ -646,6 +775,30 @@ components:
         description: Authenticated browser session metadata,
         content: { application/json: { schema: { $ref: '#/components/schemas/AuthSession' } } }
       }
+    PortalStatus:
+      description: Public user portal availability
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalStatus' } }
+    PortalConfiguration:
+      description: User portal provider and profile policy
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalConfiguration' } }
+    PortalConfigurationState:
+      description: Current user portal policy
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalConfigurationState' } }
+    PortalAuthSession:
+      description: Authenticated provider user browser session
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalAuthSession' } }
+    PortalUser:
+      description: Authenticated provider user
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalUser' } }
+    PortalProfileList:
+      description: Profiles available to the authenticated provider user
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/PortalProfileList' } }
     Provider:
       {
         description: Provider without secret material,
@@ -955,7 +1108,55 @@ components:
         required: [password],
         properties: { password: { type: string, minLength: 1, maxLength: 256 } }
       }
-    AuthenticationMode: { type: string, enum: [user_token, api_key] }
+    PortalLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 256 }
+        password: { type: string, minLength: 1, maxLength: 256, writeOnly: true }
+    PortalUser:
+      type: object
+      required: [id, username, providerId]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        providerId: { type: string }
+    PortalAuthSession:
+      allOf:
+        - { $ref: '#/components/schemas/AuthSession' }
+        - type: object
+          required: [user]
+          properties: { user: { $ref: '#/components/schemas/PortalUser' } }
+    PortalStatus:
+      type: object
+      required: [configured]
+      properties:
+        configured: { type: boolean }
+        providerName: { type: string }
+    PortalConfiguration:
+      type: object
+      additionalProperties: false
+      required: [providerId, defaultProfileId, allowedProfileIds]
+      properties:
+        providerId: { type: string, minLength: 1 }
+        defaultProfileId: { type: string, minLength: 1 }
+        allowedProfileIds: { type: array, minItems: 1, items: { type: string, minLength: 1 } }
+    PortalConfigurationState:
+      type: object
+      required: [configuration]
+      properties:
+        configuration:
+          anyOf: [{ $ref: '#/components/schemas/PortalConfiguration' }, { type: 'null' }]
+    PortalCreateSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [source]
+      properties:
+        source: { $ref: '#/components/schemas/MediaSourceRef' }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        profileId: { type: string, minLength: 1 }
+    AuthenticationMode: { type: string, enum: [user_token, api_key, delegated] }
     PlatformMode: { type: string, enum: [universal, pc, quest, dual] }
     PlacementPolicy: { type: string, enum: [local, hosted, auto] }
     CompatibilityState: { type: string, enum: [experimental, verified, broken, retired] }
@@ -1147,6 +1348,12 @@ components:
         properties:
           { items: { type: array, items: { $ref: '#/components/schemas/ProfileRevision' } } }
       }
+    PortalProfileList:
+      type: object
+      required: [defaultProfileId, items]
+      properties:
+        defaultProfileId: { type: string }
+        items: { type: array, items: { $ref: '#/components/schemas/ProfileRevision' } }
     MediaCapabilities:
       type: object
       required: [ffmpegVersion, encoders, muxers, filters, pixelFormats]
@@ -1250,6 +1457,7 @@ components:
         assignedNodeId: { type: string }
         placementLocked: { type: boolean }
         preferredRegion: { type: string }
+        ownerId: { type: string }
         outputUrls: { type: object, additionalProperties: { type: string, format: uri } }
         errorMessage: { type: string }
         createdAt: { type: string, format: date-time }

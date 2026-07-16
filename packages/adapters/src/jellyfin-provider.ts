@@ -5,6 +5,7 @@ import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { isIP } from 'node:net';
 import type {
+  MediaArtwork,
   MediaProvider,
   PlaybackEvent,
   ProviderCredentials,
@@ -235,6 +236,45 @@ export class JellyfinProvider implements MediaProvider {
         allowPublicHttp: providerAllowsPublicHttp(connection)
       })
     );
+  }
+
+  async artwork(
+    connection: ProviderConnection,
+    secret: string,
+    itemId: string,
+    signal?: AbortSignal
+  ): Promise<MediaArtwork> {
+    const params = new URLSearchParams({ fillWidth: '640', quality: '90' });
+    const response = await this.#send(
+      `${connection.baseUrl.replace(/\/$/, '')}/Items/${encodeURIComponent(itemId)}/Images/Primary?${params}`,
+      {
+        headers: {
+          Accept: 'image/*',
+          Authorization: this.#authorization(secret),
+          'X-Emby-Token': secret
+        },
+        ...(signal ? { signal } : {}),
+        allowPublicHttp: providerAllowsPublicHttp(connection)
+      }
+    );
+    const status = response.statusCode ?? 0;
+    if (status >= 300 && status < 400) {
+      response.resume();
+      throw new Error('Jellyfin redirects are not allowed; configure the canonical server URL');
+    }
+    if (status < 200 || status >= 300) {
+      response.resume();
+      throw new Error(`Jellyfin artwork request failed (${status})`);
+    }
+    const headers = response.headers as Record<string, string | string[] | undefined>;
+    const header = headers['content-type'];
+    const contentTypeValue = typeof header === 'string' ? header : header?.[0];
+    const contentType = contentTypeValue?.split(';', 1)[0]?.trim();
+    if (!contentType?.startsWith('image/')) {
+      response.resume();
+      throw new Error('Jellyfin artwork response was not an image');
+    }
+    return { data: await this.#readBinary(response), contentType };
   }
 
   async resolveSource(
@@ -490,6 +530,21 @@ export class JellyfinProvider implements MediaProvider {
       chunks.push(buffer);
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
+  }
+
+  async #readBinary(response: IncomingMessage): Promise<Uint8Array> {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of response) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      bytes += buffer.length;
+      if (bytes > 8 * 1024 * 1024) {
+        response.destroy();
+        throw new Error('Jellyfin artwork exceeded the 8 MiB limit');
+      }
+      chunks.push(buffer);
+    }
+    return Buffer.concat(chunks);
   }
 
   #authorization(token?: string): string {
