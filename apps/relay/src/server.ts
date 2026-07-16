@@ -500,6 +500,9 @@ export async function createServer(
         defaultSrc: ["'self'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'", 'ws:', 'wss:'],
+        // Safari applies this directive to loopback HTTP pages and upgrades their
+        // root-relative assets to HTTPS, which leaves the packaged dashboard blank.
+        upgradeInsecureRequests: new URL(config.adminUrl).protocol === 'https:' ? [] : null,
         // SvelteKit's static SPA fallback emits a small inline bootstrap script.
         // Moving to a per-build hash or nonce is tracked as post-v1 hardening.
         scriptSrc: ["'self'", "'unsafe-inline'"],

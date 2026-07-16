@@ -196,6 +196,42 @@ describe('control-plane HTTP surface matrix', () => {
     await app.close();
   });
 
+  it.each([
+    {
+      name: 'local HTTP',
+      environment: {},
+      expectsUpgrade: false
+    },
+    {
+      name: 'public HTTPS',
+      environment: {
+        VRRELAY_PUBLIC_URL: 'https://relay.example.test',
+        VRRELAY_ADMIN_URL: 'https://relay.example.test',
+        VRRELAY_PLAYBACK_URL: 'https://relay.example.test',
+        VRRELAY_SETUP_TOKEN: 's'.repeat(40)
+      },
+      expectsUpgrade: true
+    },
+    {
+      name: 'local HTTP administration with public HTTPS playback',
+      environment: {
+        VRRELAY_PUBLIC_URL: 'https://relay.example.test',
+        VRRELAY_ADMIN_URL: 'http://127.0.0.1:8099',
+        VRRELAY_PLAYBACK_URL: 'https://play.example.test',
+        VRRELAY_SETUP_TOKEN: 's'.repeat(40)
+      },
+      expectsUpgrade: false
+    }
+  ])('sets browser asset-upgrade policy for $name', async ({ environment, expectsUpgrade }) => {
+    const app = await createServer(loadConfig(environment), inertServerServices, 'standalone');
+    const response = await app.inject({ method: 'GET', url: '/' });
+    const policy = response.headers['content-security-policy'];
+
+    expect(policy).toEqual(expect.any(String));
+    expect(policy?.includes('upgrade-insecure-requests')).toBe(expectsUpgrade);
+    await app.close();
+  });
+
   it('recognizes the complete loopback range without trusting private-network peers', () => {
     expect(['127.0.0.1', '127.20.30.40', '::1', '::ffff:127.0.0.9'].every(isLoopbackPeer)).toBe(
       true
