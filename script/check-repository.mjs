@@ -223,9 +223,15 @@ for (const required of [
 }
 
 const ciWorkflow = await readFile(resolve(root, '.github/workflows/ci.yml'), 'utf8');
+const integrationWorkflow = await readFile(
+  resolve(root, '.github/workflows/integration.yml'),
+  'utf8'
+);
 for (const required of [
   'docker/setup-qemu-action@',
   'platforms: linux/amd64,linux/arm64',
+  'script/install-pinned-ffmpeg-windows.ps1',
+  '/Applications/Xcode_26.3.app',
   'script/check-workflows.sh',
   'script/check-compose.sh',
   'script/container-smoke.sh 0.0.0-ci',
@@ -240,6 +246,14 @@ if (!releaseWorkflow.includes('script/container-smoke.sh'))
   failures.push('release workflow does not boot and verify the release container');
 if (!releaseWorkflow.includes('script/compose-smoke.sh'))
   failures.push('release workflow does not boot and verify standalone Compose');
+for (const [name, workflow] of [
+  ['CI', ciWorkflow],
+  ['distributed acceptance', integrationWorkflow],
+  ['release', releaseWorkflow]
+]) {
+  if (!workflow.includes('script/install-pinned-ffmpeg-linux.sh'))
+    failures.push(`${name} workflow does not install the pinned Linux FFmpeg runtime`);
+}
 if (/^\s+linux\/arm64:\s*$/m.test(ciWorkflow))
   failures.push(
     'CI treats linux/arm64 as an invalid build-action input instead of a platform value'
@@ -317,6 +331,14 @@ const ffmpegWindows = runtimeComponents.get('ffmpeg')?.artifacts?.['windows-x64'
 const ffmpegLinux = ['linux-x64', 'linux-arm64'].map(
   (target) => runtimeComponents.get('ffmpeg')?.artifacts?.[target]
 );
+const linuxFfmpegInstaller = await readFile(
+  resolve(root, 'script/install-pinned-ffmpeg-linux.sh'),
+  'utf8'
+);
+const windowsFfmpegInstaller = await readFile(
+  resolve(root, 'script/install-pinned-ffmpeg-windows.ps1'),
+  'utf8'
+);
 for (const required of [
   'provider',
   'releaseTag',
@@ -328,6 +350,14 @@ for (const required of [
 ]) {
   if (ffmpegWindows && !(required in (ffmpegWindows.buildRecipe ?? {})))
     failures.push(`Windows FFmpeg runtime lacks build recipe field ${required}`);
+}
+for (const required of [
+  ffmpegWindows?.file,
+  ffmpegWindows?.buildRecipe?.releaseTag,
+  'script\\verify-runtime.mjs'
+]) {
+  if (required && !windowsFfmpegInstaller.includes(required))
+    failures.push(`Windows FFmpeg installer does not consume pinned runtime ${required}`);
 }
 const sourceBuilder = await readFile(
   resolve(root, 'deploy/windows/build-corresponding-source.sh'),
@@ -343,6 +373,10 @@ for (const artifact of ffmpegLinux) {
   for (const required of [artifact?.file, artifact?.sha256]) {
     if (required && !dockerfile.includes(required))
       failures.push(`OCI image does not consume pinned FFmpeg runtime ${required}`);
+  }
+  for (const required of [artifact?.file, artifact?.buildRecipe?.releaseTag]) {
+    if (required && !linuxFfmpegInstaller.includes(required))
+      failures.push(`Linux FFmpeg installer does not consume pinned runtime ${required}`);
   }
   for (const value of Object.values(artifact?.buildRecipe ?? {}).flat()) {
     if (typeof value === 'string' && !sourceBuilder.includes(value))

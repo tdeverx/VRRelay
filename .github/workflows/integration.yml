@@ -13,6 +13,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: '22.23.1', cache: npm }
+      - name: Install the pinned FFmpeg runtime
+        run: |
+          runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
+          printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
       - run: npm ci
       - name: Run real-process distributed VOD smoke test
         shell: bash

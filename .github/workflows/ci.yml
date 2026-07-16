@@ -1,23 +1,38 @@
 name: CI
 on:
-  push:
+  push: { branches: [main] }
   pull_request:
 permissions: { contents: read }
 env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
 jobs:
   test:
-    strategy: { matrix: { os: [ubuntu-latest, macos-15, windows-latest], node: [22.23.1] } }
+    strategy: { matrix: { os: [ubuntu-latest, windows-latest], node: [22.23.1] } }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: '22.23.1', cache: npm }
+      - if: runner.os == 'Linux'
+        name: Install the pinned FFmpeg runtime
+        run: |
+          runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
+          printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
+      - if: runner.os == 'Windows'
+        name: Install the pinned FFmpeg runtime
+        shell: pwsh
+        run: |
+          $runtimeBin = & script/install-pinned-ffmpeg-windows.ps1 "$env:RUNNER_TEMP\vrrelay-ffmpeg"
+          $runtimeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: npm ci
       - run: npm run ci
   macos-host:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22.23.1', cache: npm }
+      - name: Select the Swift 6.2 toolchain
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
       - run: swift test --package-path apps/macos
       - run: swift build --package-path apps/macos -c release --arch arm64
       - name: Install pinned-FFmpeg build tools
@@ -33,12 +48,19 @@ jobs:
           test -s "$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg-build-metadata.json"
           test -s "$RUNNER_TEMP/vrrelay-ffmpeg/vrrelay-ffmpeg-7.1.5-darwin-arm64-source.tar.xz"
           node script/runtime-provenance.mjs --output "$RUNNER_TEMP/vrrelay-ffmpeg/provenance.json" "ffmpeg=$RUNNER_TEMP/vrrelay-ffmpeg/ffmpeg"
+          printf '%s\n' "$RUNNER_TEMP/vrrelay-ffmpeg" >> "$GITHUB_PATH"
+      - run: npm ci
+      - run: npm run ci
   browser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: '22.23.1', cache: npm }
+      - name: Install the pinned FFmpeg runtime
+        run: |
+          runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
+          printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser

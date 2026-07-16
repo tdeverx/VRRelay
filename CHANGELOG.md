@@ -120,6 +120,12 @@ retained evidence belong in the
   GHCR metadata, an expanded README/documentation index, current migration
   documentation, and an explicit distinction between remaining product work
   and external release qualification.
+- Select the Swift 6.2 Xcode toolchain explicitly on GitHub's macOS 15 runners
+  and keep release checksum generation shellcheck-safe on clean Linux runners.
+- Provision checksum-pinned FFmpeg 7.1.5 runtimes across hosted Linux, macOS,
+  and Windows checks instead of assuming runner state.
+- Run branch validation through pull requests while limiting direct-push CI to
+  `main`, avoiding duplicate hosted runs for Dependabot branches.
 - Harden Git and Docker build-context exclusions for local environments,
   signing material, OpenTofu state, databases, media, test reports, IDE state,
   and native artifacts; remove stale design screenshots containing

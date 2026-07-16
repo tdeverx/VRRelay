@@ -77,6 +77,11 @@ coalescing, completed per-worker attempt history, node-local failover bindings, 
 revocation, PostgreSQL and Redis restart tolerance, controller restart, and playback-grant recovery.
 It uses ports `19096`, `19100`, `19110`, `19201`, `19202`, `19211`, `19212`, `19379`, and `19432`.
 
+Hosted Linux and Windows checks install checksum-pinned FFmpeg 7.1.5 runtimes
+from `deploy/runtime-manifest.json`; hosted macOS checks build the pinned source
+recipe before running the same repository gate. Local runs use the compatible
+FFmpeg on `PATH`. CI never falls back silently to a distribution package.
+
 ## Integration boundaries
 
 Real-service tests are opt-in and read secrets only from ignored environment values. The Jellyfin command is documented in `CONTRIBUTING.md`. Hosted Azure Blob and GCS contract tests, extended destructive cluster recovery, native installers, and real VRChat clients require their target environments and remain release evidence rather than default unit tests.
