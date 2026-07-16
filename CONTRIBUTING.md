@@ -15,7 +15,7 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Required tools:
 
-- Node.js 22.23.1 and npm 10.9.2. The exact Node version is in `.nvmrc`.
+- Node.js 26.5.0 and npm 11.17.0. The exact Node version is in `.nvmrc`.
 - FFmpeg 7.x with `libx264`, AAC, HLS, and MPEG-TS support.
 - Git.
 

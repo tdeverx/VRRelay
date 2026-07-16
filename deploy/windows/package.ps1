@@ -24,14 +24,14 @@ function Get-VerifiedRuntime([string]$Url, [string]$Destination) {
   node "$Root\script\verify-runtime.mjs" $Destination
 }
 
-$NodeZip = "$Stage\downloads\node-v22.23.1-win-x64.zip"
+$NodeZip = "$Stage\downloads\node-v26.5.0-win-x64.zip"
 $MediaMtxZip = "$Stage\downloads\mediamtx_v1.18.2_windows_amd64.zip"
-$ElectronZip = "$Stage\downloads\electron-v39.8.10-win32-x64.zip"
+$ElectronZip = "$Stage\downloads\electron-v43.1.1-win32-x64.zip"
 $WinSW = "$Stage\downloads\WinSW-x64.exe"
 $FfmpegZip = "$Stage\downloads\ffmpeg-n7.1.5-1-g7d0e842004-win64-gpl-7.1.zip"
-Get-VerifiedRuntime 'https://nodejs.org/download/release/v22.23.1/node-v22.23.1-win-x64.zip' $NodeZip
+Get-VerifiedRuntime 'https://nodejs.org/download/release/v26.5.0/node-v26.5.0-win-x64.zip' $NodeZip
 Get-VerifiedRuntime 'https://github.com/bluenviron/mediamtx/releases/download/v1.18.2/mediamtx_v1.18.2_windows_amd64.zip' $MediaMtxZip
-Get-VerifiedRuntime 'https://github.com/electron/electron/releases/download/v39.8.10/electron-v39.8.10-win32-x64.zip' $ElectronZip
+Get-VerifiedRuntime 'https://github.com/electron/electron/releases/download/v43.1.1/electron-v43.1.1-win32-x64.zip' $ElectronZip
 Get-VerifiedRuntime 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' $WinSW
 Get-VerifiedRuntime 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n7.1.5-1-g7d0e842004-win64-gpl-7.1.zip' $FfmpegZip
 Expand-Archive $NodeZip "$Stage\downloads\node" -Force
@@ -39,7 +39,7 @@ Expand-Archive $MediaMtxZip "$Stage\downloads\mediamtx" -Force
 Expand-Archive $ElectronZip "$Stage\host" -Force
 Expand-Archive $FfmpegZip "$Stage\downloads\ffmpeg" -Force
 New-Item -ItemType Directory -Force "$Stage\host\resources\app" | Out-Null
-Copy-Item "$Stage\downloads\node\node-v22.23.1-win-x64\node.exe" "$Stage\runtime\node.exe"
+Copy-Item "$Stage\downloads\node\node-v26.5.0-win-x64\node.exe" "$Stage\runtime\node.exe"
 Copy-Item "$Stage\downloads\mediamtx\mediamtx.exe" "$Stage\runtime\mediamtx.exe"
 $FfmpegExe = Get-ChildItem "$Stage\downloads\ffmpeg" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
 if (-not $FfmpegExe) { throw 'Pinned FFmpeg archive did not contain ffmpeg.exe' }
@@ -57,7 +57,7 @@ Copy-Item "$Root\packages\*" "$Stage\runtime\packages" -Recurse -Force
 Copy-Item "$Root\package.json", "$Root\package-lock.json" "$Stage\runtime" -Force
 Copy-Item "$Root\LICENSE", "$Root\THIRD_PARTY_NOTICES.md", "$Root\deploy\runtime-manifest.json" "$Stage\runtime" -Force
 Copy-Item "$Root\deploy\native\mediamtx.yml" "$Stage\runtime\mediamtx.yml" -Force
-Push-Location "$Stage\runtime"; & "$Stage\downloads\node\node-v22.23.1-win-x64\npm.cmd" ci --omit=dev; Pop-Location
+Push-Location "$Stage\runtime"; & "$Stage\downloads\node\node-v26.5.0-win-x64\npm.cmd" ci --omit=dev; Pop-Location
 Copy-Item "$Root\apps\windows\dist\main.js" "$Stage\host\app\main.js" -Force
 $HostPackage = @{ name = 'vrrelay-windows-host'; version = $Version; main = 'main.js'; type = 'module' } | ConvertTo-Json -Compress
 Set-Content "$Stage\host\resources\app\package.json" $HostPackage

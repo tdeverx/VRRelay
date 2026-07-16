@@ -109,6 +109,9 @@ retained evidence belong in the
 
 ### Changed
 
+- Refresh the supported runtime and development toolchain to Node.js 26.5.0,
+  npm 11.17.0, Electron 43.1.1, ESLint 10, and the current compatible package
+  releases, with updated checksum-pinned native artifacts and CI coverage.
 - Recast the README and implementation status as an audited prerelease
   inventory, removing unsupported feature-complete, target-validation, and
   production-readiness claims.

@@ -20,9 +20,9 @@
     "mediamtx",
     "sveltekit"
   ],
-  "packageManager": "npm@10.9.2",
+  "packageManager": "npm@11.17.0",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=26.5"
   },
   "workspaces": [
     "apps/relay",
@@ -79,21 +79,27 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
-    "@eslint/js": "^9.37.0",
+    "@eslint/js": "^10.0.1",
     "@hey-api/openapi-ts": "^0.99.0",
     "@playwright/test": "^1.61.1",
-    "@types/node": "^24.7.2",
+    "@types/node": "^26.1.1",
     "cookie": "0.7.2",
-    "eslint": "^9.37.0",
+    "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^16.4.0",
+    "globals": "^17.7.0",
     "prettier": "^3.6.2",
-    "prettier-plugin-svelte": "^3.5.2",
+    "prettier-plugin-svelte": "^4.1.1",
     "tsx": "^4.20.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",
-    "uuid": "^11.1.1",
+    "uuid": "11.1.1",
     "vitest": "^4.1.10",
     "zod": "^4.4.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true
   }
 }

@@ -41,15 +41,15 @@ cp "$ROOT/deploy/runtime-manifest.json" "$RUNTIME/"
 cp "$ROOT/deploy/native/mediamtx.yml" "$RUNTIME/"
 DOWNLOADS="$ROOT/dist/macos/downloads"
 mkdir -p "$DOWNLOADS"
-NODE_ARCHIVE="$DOWNLOADS/node-v22.23.1-darwin-arm64.tar.gz"
+NODE_ARCHIVE="$DOWNLOADS/node-v26.5.0-darwin-arm64.tar.gz"
 MEDIAMTX_ARCHIVE="$DOWNLOADS/mediamtx_v1.18.2_darwin_arm64.tar.gz"
 FFMPEG_SOURCE="$DOWNLOADS/ffmpeg-7.1.5.tar.xz"
-[[ -f "$NODE_ARCHIVE" ]] || curl -fL "https://nodejs.org/download/release/v22.23.1/$(basename "$NODE_ARCHIVE")" -o "$NODE_ARCHIVE"
+[[ -f "$NODE_ARCHIVE" ]] || curl -fL "https://nodejs.org/download/release/v26.5.0/$(basename "$NODE_ARCHIVE")" -o "$NODE_ARCHIVE"
 [[ -f "$MEDIAMTX_ARCHIVE" ]] || curl -fL "https://github.com/bluenviron/mediamtx/releases/download/v1.18.2/$(basename "$MEDIAMTX_ARCHIVE")" -o "$MEDIAMTX_ARCHIVE"
 node "$ROOT/script/verify-runtime.mjs" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE"
 tar -xzf "$NODE_ARCHIVE" -C "$DOWNLOADS"
 tar -xzf "$MEDIAMTX_ARCHIVE" -C "$DOWNLOADS"
-cp "$DOWNLOADS/node-v22.23.1-darwin-arm64/bin/node" "$RUNTIME/bin/node"
+cp "$DOWNLOADS/node-v26.5.0-darwin-arm64/bin/node" "$RUNTIME/bin/node"
 cp "$DOWNLOADS/mediamtx" "$RUNTIME/bin/mediamtx"
 if [[ -n "${VRRELAY_FFMPEG_BINARY:-}" ]]; then
   [[ -x "$VRRELAY_FFMPEG_BINARY" ]] || { echo "VRRELAY_FFMPEG_BINARY must point to an executable FFmpeg 7.1.5 development binary" >&2; exit 1; }
@@ -66,8 +66,8 @@ else
   cp "$FFMPEG_BUILD/vrrelay-ffmpeg-7.1.5-darwin-arm64-source.tar.xz" "$FFMPEG_SOURCE_OUTPUT"
 fi
 "$ROOT/deploy/macos/bundle-dylibs.sh" "$RUNTIME/bin/ffmpeg" "$RUNTIME/lib"
-(cd "$RUNTIME" && PATH="$DOWNLOADS/node-v22.23.1-darwin-arm64/bin:$PATH" npm ci --omit=dev)
-rm -rf "$DOWNLOADS/node-v22.23.1-darwin-arm64" "$DOWNLOADS/mediamtx" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE" "$FFMPEG_SOURCE"
+(cd "$RUNTIME" && PATH="$DOWNLOADS/node-v26.5.0-darwin-arm64/bin:$PATH" npm ci --omit=dev)
+rm -rf "$DOWNLOADS/node-v26.5.0-darwin-arm64" "$DOWNLOADS/mediamtx" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE" "$FFMPEG_SOURCE"
 cp "$ROOT/deploy/macos/org.vrrelay.service.plist" "$STAGE/Library/LaunchDaemons/"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:VRRELAY_VERSION string $VERSION" "$STAGE/Library/LaunchDaemons/org.vrrelay.service.plist"
 chmod 0644 "$STAGE/Library/LaunchDaemons/org.vrrelay.service.plist"
