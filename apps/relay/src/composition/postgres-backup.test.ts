@@ -107,7 +107,13 @@ describe('PostgreSQL migration backup', () => {
         timeoutMs: 2_000
       })
     ).rejects.toThrow('pg_dump exceeded its 2000ms deadline');
-    await expect(readFileEventually(cleanupMarker)).resolves.toBe('done');
+    if (process.platform === 'win32') {
+      // Node terminates Windows child processes directly for SIGTERM; Windows
+      // does not deliver a catchable POSIX signal to run the cleanup handler.
+      await expect(stat(cleanupMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+    } else {
+      await expect(readFileEventually(cleanupMarker)).resolves.toBe('done');
+    }
   });
 
   it('redacts database credentials from pg_dump failures', async () => {

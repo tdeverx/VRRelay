@@ -242,7 +242,7 @@ describe('benchmark scenarios', () => {
       checks: [{ name: 'request-errors', passed: false, actual: 2, maximum: 0 }]
     });
     expect(JSON.parse(stdout[0])).toEqual(retained);
-    expect((await stat(output)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect((await stat(output)).mode & 0o777).toBe(0o600);
   });
 });
 

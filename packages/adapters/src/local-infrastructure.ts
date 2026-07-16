@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, open as openFile, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { BackendStatus, CachedObject } from '@vrrelay/domain';
 import type { CoordinationStore, ObjectStore, ObjectStorePutOptions } from '@vrrelay/application';
+import { withFileMutation } from './file-secret-storage.js';
 
 function status(
   category: BackendStatus['category'],
@@ -30,48 +31,76 @@ export class LocalObjectStore implements ObjectStore {
 
   async put(key: string, source: Readable, options: ObjectStorePutOptions): Promise<CachedObject> {
     const paths = this.#paths(key);
-    await mkdir(paths.directory, { recursive: true });
-    const temporary = `${paths.content}.${process.pid}.${randomUUID()}.part`;
-    const hash = createHash('sha256');
-    const hasher = new Transform({
-      transform(chunk, _encoding, callback) {
-        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
-        hash.update(bytes);
-        callback(null, bytes);
+    return withFileMutation(paths.metadata, async () => {
+      await mkdir(paths.directory, { recursive: true });
+      const temporary = `${paths.content}.${process.pid}.${randomUUID()}.part`;
+      const hash = createHash('sha256');
+      const hasher = new Transform({
+        transform(chunk, _encoding, callback) {
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+          hash.update(bytes);
+          callback(null, bytes);
+        }
+      });
+      try {
+        await pipeline(source, hasher, createWriteStream(temporary, { mode: 0o600 }));
+        const sha256 = hash.digest('hex');
+        if (options.sha256 && options.sha256 !== sha256)
+          throw new Error(`Object content hash mismatch for ${key}`);
+        await rename(temporary, paths.content);
+        const info = await stat(paths.content);
+        const now = new Date().toISOString();
+        const object: CachedObject = {
+          key,
+          size: info.size,
+          contentType: options.contentType,
+          etag: sha256,
+          sha256,
+          expiresAt: options.expiresAt ?? null,
+          createdAt: now,
+          lastAccessedAt: now
+        };
+        await this.#writeMetadata(paths.metadata, object);
+        return object;
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
       }
     });
-    try {
-      await pipeline(source, hasher, createWriteStream(temporary, { mode: 0o600 }));
-      const sha256 = hash.digest('hex');
-      if (options.sha256 && options.sha256 !== sha256)
-        throw new Error(`Object content hash mismatch for ${key}`);
-      await rename(temporary, paths.content);
-      const info = await stat(paths.content);
-      const now = new Date().toISOString();
-      const object: CachedObject = {
-        key,
-        size: info.size,
-        contentType: options.contentType,
-        etag: sha256,
-        sha256,
-        expiresAt: options.expiresAt ?? null,
-        createdAt: now,
-        lastAccessedAt: now
-      };
-      await this.#writeMetadata(paths.metadata, object);
-      return object;
-    } catch (error) {
-      await rm(temporary, { force: true });
-      throw error;
-    }
   }
 
   async stat(key: string): Promise<CachedObject | undefined> {
     const paths = this.#paths(key);
+    return withFileMutation(paths.metadata, () => this.#readMetadata(paths));
+  }
+
+  async open(key: string) {
+    const paths = this.#paths(key);
+    return withFileMutation(paths.metadata, async () => {
+      const object = await this.#readMetadata(paths);
+      if (!object) return undefined;
+      const file = await openFile(paths.content, 'r');
+      try {
+        const touched = { ...object, lastAccessedAt: new Date().toISOString() };
+        await this.#writeMetadata(paths.metadata, touched);
+        return file.createReadStream();
+      } catch (error) {
+        await file.close();
+        throw error;
+      }
+    });
+  }
+
+  async delete(key: string): Promise<void> {
+    const paths = this.#paths(key);
+    await withFileMutation(paths.metadata, () => this.#deleteObject(paths));
+  }
+
+  async #readMetadata(paths: { content: string; metadata: string }) {
     try {
       const object = JSON.parse(await readFile(paths.metadata, 'utf8')) as CachedObject;
       if (object.expiresAt && Date.parse(object.expiresAt) <= Date.now()) {
-        await this.delete(key);
+        await this.#deleteObject(paths);
         return undefined;
       }
       return object;
@@ -81,17 +110,7 @@ export class LocalObjectStore implements ObjectStore {
     }
   }
 
-  async open(key: string) {
-    const object = await this.stat(key);
-    if (!object) return undefined;
-    const paths = this.#paths(key);
-    const touched = { ...object, lastAccessedAt: new Date().toISOString() };
-    await this.#writeMetadata(paths.metadata, touched);
-    return createReadStream(paths.content);
-  }
-
-  async delete(key: string): Promise<void> {
-    const paths = this.#paths(key);
+  async #deleteObject(paths: { content: string; metadata: string }): Promise<void> {
     await Promise.all([rm(paths.content, { force: true }), rm(paths.metadata, { force: true })]);
   }
 

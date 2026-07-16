@@ -124,6 +124,9 @@ retained evidence belong in the
   and keep release checksum generation shellcheck-safe on clean Linux runners.
 - Provision checksum-pinned FFmpeg 7.1.5 runtimes across hosted Linux, macOS,
   and Windows checks instead of assuming runner state.
+- Close SQLite test fixtures before cleanup and make atomic object metadata,
+  PostgreSQL backup syncing, source-bundle parsing, and permission assertions
+  portable across Windows hosted validation.
 - Run branch validation through pull requests while limiting direct-push CI to
   `main`, avoiding duplicate hosted runs for Dependabot branches.
 - Harden Git and Docker build-context exclusions for local environments,

@@ -80,7 +80,9 @@ export async function createSourceBundleManifest(directory, output, createdAt) {
 }
 
 export function readArchiveManifest(archive) {
-  const entries = execFileSync('tar', ['-tJf', archive], { encoding: 'utf8' }).trim().split('\n');
+  const entries = execFileSync('tar', ['-tJf', archive], { encoding: 'utf8' })
+    .split(/\r?\n/u)
+    .filter(Boolean);
   const manifestEntry = entries.find((entry) => entry.endsWith('/SOURCE-BUNDLE.json'));
   if (!manifestEntry) throw new Error('FFmpeg source archive has no SOURCE-BUNDLE.json');
   const manifest = JSON.parse(

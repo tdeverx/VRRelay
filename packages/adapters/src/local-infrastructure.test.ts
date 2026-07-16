@@ -65,6 +65,26 @@ describe('local cloud-neutral infrastructure', () => {
     }
   });
 
+  it('does not resurrect metadata when an open races with deletion', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-objects-'));
+    dirs.push(dir);
+    const store = new LocalObjectStore(dir);
+
+    for (let round = 0; round < 20; round += 1) {
+      await store.put('shared-segment.ts', Readable.from('media'), {
+        contentType: 'video/mp2t'
+      });
+      const [stream] = await Promise.all([
+        store.open('shared-segment.ts'),
+        store.delete('shared-segment.ts')
+      ]);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks).toString()).toBe('media');
+      await expect(store.stat('shared-segment.ts')).resolves.toBeUndefined();
+    }
+  });
+
   it('enforces a single lease owner and propagates pubsub', async () => {
     const coordination = new MemoryCoordinationStore();
     expect(await coordination.acquire('segment:a', 'worker-a', 1000)).toBe(true);

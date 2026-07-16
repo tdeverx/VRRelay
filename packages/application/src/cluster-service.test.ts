@@ -14,9 +14,17 @@ import {
 import { InMemoryEventBus, type CertificateAuthority } from './index.js';
 
 const dirs: string[] = [];
-afterEach(async () =>
-  Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
-);
+const repositories: SqliteRepository[] = [];
+
+function trackRepository<T extends SqliteRepository>(repository: T): T {
+  repositories.push(repository);
+  return repository;
+}
+
+afterEach(async () => {
+  for (const repository of repositories.splice(0).reverse()) repository.close();
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 const capabilities = {
   encoders: ['libx264'],
@@ -159,7 +167,7 @@ describe('cluster service', () => {
   it('applies bounded agent log retention and query limits', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-agent-log-retention-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const events = new InMemoryEventBus();
     const cluster = new ClusterService(
@@ -197,7 +205,7 @@ describe('cluster service', () => {
   it('records bounded per-node egress metrics from local registration and heartbeat', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-node-egress-metrics-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const metrics = new PrometheusMetricsSink();
     const cluster = new ClusterService(
@@ -233,7 +241,7 @@ describe('cluster service', () => {
   it('consumes join tokens once and honors draining edges', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-cluster-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -272,7 +280,7 @@ describe('cluster service', () => {
   it('preserves a join token when CSR validation fails', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-invalid-csr-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -320,7 +328,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-retry-'));
     dirs.push(dir);
-    const repository = new FailBeforeEnrollmentCommitRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new FailBeforeEnrollmentCommitRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -384,7 +394,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-csr-binding-'));
     dirs.push(dir);
-    const repository = new FailBeforeEnrollmentCommitRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new FailBeforeEnrollmentCommitRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -435,7 +447,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-ambiguous-'));
     dirs.push(dir);
-    const repository = new CommitThenThrowEnrollmentRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new CommitThenThrowEnrollmentRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -478,7 +492,7 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-enrollment-coordination-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const coordination = new CommitThenThrowCoordinationStore();
     const certificates = new FakeCertificateAuthority();
@@ -537,7 +551,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-heartbeat-cas-'));
     dirs.push(dir);
-    const repository = new DrainDuringHeartbeatRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new DrainDuringHeartbeatRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -596,7 +612,7 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-heartbeat-contention-'));
     dirs.push(dir);
-    const repository = new ContendedHeartbeatRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new ContendedHeartbeatRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -642,7 +658,7 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-node-remove-cas-'));
     dirs.push(dir);
-    const repository = new ConflictOnceRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new ConflictOnceRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -687,7 +703,7 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-node-remove-dependency-'));
     dirs.push(dir);
-    const repository = new DependencyRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new DependencyRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -742,7 +758,7 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-binding-ambiguous-'));
     dirs.push(dir);
-    const repository = new AmbiguousBindingRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new AmbiguousBindingRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -833,7 +849,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-certificate-drain-race-'));
     dirs.push(dir);
-    const repository = new DrainDuringRotationRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new DrainDuringRotationRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -903,7 +921,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-certificate-revoke-race-'));
     dirs.push(dir);
-    const repository = new RevokeDuringRotationRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new RevokeDuringRotationRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -974,7 +994,9 @@ describe('cluster service', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-revoke-rotation-race-'));
     dirs.push(dir);
-    const repository = new RotateDuringRevocationRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(
+      new RotateDuringRevocationRepository(join(dir, 'state.sqlite'))
+    );
     await repository.migrate();
     const certificates = new FakeCertificateAuthority();
     const cluster = new ClusterService(
@@ -1008,7 +1030,7 @@ describe('cluster service', () => {
   it('allows only one concurrent consumer of a join token', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-cluster-race-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -1041,7 +1063,7 @@ describe('cluster service', () => {
   it('excludes encoder-incompatible and disconnected workers from placement', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-placement-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,
@@ -1145,7 +1167,7 @@ describe('cluster service', () => {
   it('degrades nodes after 45 seconds and marks them offline after 90 seconds', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-heartbeat-'));
     dirs.push(dir);
-    const repository = new SqliteRepository(join(dir, 'state.sqlite'));
+    const repository = trackRepository(new SqliteRepository(join(dir, 'state.sqlite')));
     await repository.migrate();
     const cluster = new ClusterService(
       repository,

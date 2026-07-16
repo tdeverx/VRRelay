@@ -140,7 +140,9 @@ export async function createPostgresMigrationBackup(
     if (!info.isFile() || info.size === 0)
       throw new Error('pg_dump did not produce a non-empty backup artifact');
     await chmod(temporary, 0o600);
-    const file = await open(temporary, 'r');
+    // Windows requires a writable handle for FlushFileBuffers, which backs
+    // FileHandle.sync(). The dump is already complete before this point.
+    const file = await open(temporary, 'r+');
     try {
       await file.sync();
     } finally {

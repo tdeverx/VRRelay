@@ -226,8 +226,10 @@ describe('SQLite repository migrations', () => {
     expect(backupPath).toMatch(
       /\.pre-migration-v2-.+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.bak$/
     );
-    expect(backupModeDuringCopy).toBe(0o600);
-    expect((await stat(backupPath!)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(backupModeDuringCopy).toBe(0o600);
+      expect((await stat(backupPath!)).mode & 0o777).toBe(0o600);
+    }
     const backup = new Database(backupPath!, { readonly: true, fileMustExist: true });
     expect(backup.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([
       { version: 1 },

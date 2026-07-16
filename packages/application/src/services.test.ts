@@ -26,9 +26,18 @@ import type { BackendStatus, CachedObject, ClusterNode, ProfileRevision } from '
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
 const dirs: string[] = [];
-afterEach(async () =>
-  Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
-);
+const repositories: SqliteRepository[] = [];
+
+function trackRepository<T extends SqliteRepository>(repository: T): T {
+  repositories.push(repository);
+  return repository;
+}
+
+afterEach(async () => {
+  for (const repository of repositories.splice(0).reverse()) repository.close();
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
 const provider: MediaProvider = {
   type: 'jellyfin',
   capabilities: ['search', 'direct_source'],
@@ -365,7 +374,7 @@ describe('profile lifecycle', () => {
   it('accepts implemented HLS and fragmented MP4 profile shapes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-implemented-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const service = new ProfileService(repo);
 
@@ -419,7 +428,7 @@ describe('profile lifecycle', () => {
     async (_name, overrides, expected) => {
       const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-rejected-'));
       dirs.push(dir);
-      const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+      const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
       await repo.migrate();
       const service = new ProfileService(repo);
 
@@ -449,7 +458,7 @@ describe('VOD relay service', () => {
 
       const dir = await mkdtemp(join(tmpdir(), `vrrelay-vod-provider-${reason}-`));
       dirs.push(dir);
-      const repo = new ProviderFailureRepository(join(dir, 'db.sqlite'));
+      const repo = trackRepository(new ProviderFailureRepository(join(dir, 'db.sqlite')));
       await repo.migrate();
       const now = new Date().toISOString();
       await repo.createProvider({
@@ -526,7 +535,7 @@ describe('VOD relay service', () => {
   it('publishes a finite manifest and coalesces identical segment work', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-'));
     dirs.push(dir);
-    const repo = new SessionConflictRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SessionConflictRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -774,7 +783,7 @@ describe('VOD relay service', () => {
   it('invalidates corrupt object-store restores and regenerates the segment', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-object-restore-'));
     dirs.push(dir);
-    const repo = new SessionConflictRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SessionConflictRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -882,7 +891,7 @@ describe('VOD relay service', () => {
   it('enforces disk cache pressure after segment generation without evicting the requested file', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-cache-pressure-'));
     dirs.push(dir);
-    const repo = new SessionConflictRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SessionConflictRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -964,7 +973,7 @@ describe('VOD relay service', () => {
   it('issues edge-scoped playback grants that honor session revocation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-edge-grant-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -1094,7 +1103,7 @@ describe('provider lifecycle', () => {
   it('persists explicit public HTTP approval without exposing the internal policy field', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-http-policy-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const secrets = new MemorySecretStore();
     const registry = new DefaultProviderRegistry();
@@ -1130,7 +1139,7 @@ describe('provider lifecycle', () => {
   it('removes the local credential and rejects deletion while a session depends on it', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-delete-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -1202,7 +1211,7 @@ describe('provider lifecycle', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-secret-retry-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -1254,7 +1263,7 @@ describe('provider lifecycle', () => {
 
       const dir = await mkdtemp(join(tmpdir(), `vrrelay-provider-finalize-${failurePoint}-`));
       dirs.push(dir);
-      const repo = new AmbiguousFinalizeRepository(join(dir, 'db.sqlite'));
+      const repo = trackRepository(new AmbiguousFinalizeRepository(join(dir, 'db.sqlite')));
       await repo.migrate();
       const now = new Date().toISOString();
       await repo.createProvider({
@@ -1311,7 +1320,7 @@ describe('provider lifecycle', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-validation-cas-'));
     dirs.push(dir);
-    const repo = new ValidationConflictRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new ValidationConflictRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createProvider({
@@ -1345,7 +1354,7 @@ describe('Live relay service', () => {
   it('returns publisher credentials once without persisting them in connection URLs', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const service = new LiveService(repo, {
       publicUrl: 'https://relay.example',
@@ -1592,7 +1601,7 @@ describe('Live relay service', () => {
   it('authorizes administrator-issued publisher replacement credentials without reopening the old token', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-replacement-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const metrics = new PrometheusMetricsSink();
     const service = new LiveService(
@@ -1695,7 +1704,7 @@ describe('Live relay service', () => {
   it('records the selected ingest origin and region when creating a live channel', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-origin-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     const origin = (id: string, region: string): ClusterNode => ({
@@ -1757,7 +1766,7 @@ describe('Live relay service', () => {
   it('normalizes live ingest with the selected live session profile', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-profile-normalization-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const profileService = new ProfileService(repo);
     await profileService.seed({
@@ -1870,7 +1879,7 @@ describe('Live relay service', () => {
   it('rejects conflicting normalization profiles for the same live channel', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-profile-conflict-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const profileService = new ProfileService(repo);
     const firstProfile = await profileService.createRevision(
@@ -1948,7 +1957,7 @@ describe('provider failover bindings', () => {
   it('requires a durable controller begin before idempotent worker credential cleanup', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-cleanup-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     await repo.createNode(sourceWorkerNode('worker-cleanup'));
     const secrets = new TrackingSecretStore();
@@ -1985,7 +1994,7 @@ describe('provider failover bindings', () => {
   it('resolves each worker credential from its own binding', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     await repo.createNode(sourceWorkerNode('worker-a'));
     await repo.createNode(sourceWorkerNode('worker-b'));
@@ -2177,7 +2186,7 @@ describe('provider failover bindings', () => {
   it('routes provider activity over the bound remote worker without local credential access', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-activity-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     await repo.createNode(sourceWorkerNode('worker-a'));
     const registry = providerBindingRegistry();
@@ -2239,7 +2248,7 @@ describe('provider failover bindings', () => {
   it('reconciles concurrent and replayed creation of the same binding without deleting the winner', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-race-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     await repo.createNode(sourceWorkerNode('worker-a'));
     const secrets = new TrackingSecretStore();
@@ -2303,7 +2312,7 @@ describe('provider failover bindings', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-commit-'));
     dirs.push(dir);
-    const repo = new ThrowAfterCommitRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new ThrowAfterCommitRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     await repo.createNode(sourceWorkerNode('worker-a'));
     const secrets = new TrackingSecretStore();
@@ -2338,7 +2347,7 @@ describe('provider failover bindings', () => {
 
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-provider-binding-unreadable-'));
     dirs.push(dir);
-    const repo = new UnreadableCommitRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new UnreadableCommitRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     await repo.createNode(sourceWorkerNode('worker-a'));
     const secrets = new TrackingSecretStore();
@@ -2364,7 +2373,7 @@ describe('crash recovery', () => {
   it('reclaims expired leases and removes partial worker output', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-recovery-'));
     dirs.push(dir);
-    const repo = new SqliteRepository(join(dir, 'db.sqlite'));
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const now = new Date().toISOString();
     await repo.createSegmentJob({
