@@ -47,7 +47,7 @@ jobs:
         run: |
           set -o pipefail
           npm run test:integration 2>&1 | tee acceptance.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: release-acceptance-logs
@@ -72,7 +72,7 @@ jobs:
             severity: 'HIGH,CRITICAL',
             exit-code: '1'
           }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with: { name: release-trivy-sarif, path: trivy.sarif, if-no-files-found: ignore }
       - uses: github/codeql-action/upload-sarif@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d # v3
@@ -201,7 +201,7 @@ jobs:
         run: deploy/windows/package.ps1
       - shell: bash
         run: find dist -maxdepth 1 -type f ! -name '*SHA256SUMS' -print0 | xargs -0 shasum -a 256 > "dist/VRRelay-${{ matrix.artifact }}-SHA256SUMS"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vrrelay-${{ matrix.artifact }}
           path: dist/
@@ -237,7 +237,7 @@ jobs:
         run: |
           (cd dist/release-metadata && sha256sum ./* > ../VRRelay-release-metadata-SHA256SUMS)
           mv dist/VRRelay-release-metadata-SHA256SUMS dist/release-metadata/
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vrrelay-release-metadata
           path: dist/release-metadata/
