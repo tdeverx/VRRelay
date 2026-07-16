@@ -21,6 +21,10 @@ upgrade/repair/uninstall evidence, or artifact vulnerability-scan evidence.
 - Windows release packaging verifies the supplied FFmpeg corresponding-source
   bundle with `script/windows-source-bundle.mjs --verify` before downloading or
   staging runtime binaries.
+- The release workflow now sets `VRRELAY_RELEASE_PACKAGING=1` for both native
+  jobs. Its Windows job downloads the hosted FFmpeg corresponding-source bundle,
+  verifies the configured SHA-256, and passes the verified local archive to the
+  Windows packager.
 - `script/check-native-packaging.mjs` validates the runtime manifest and static
   packaging contracts in CI:
   - every bundled runtime component declares version, license, source, and
@@ -30,6 +34,8 @@ upgrade/repair/uninstall evidence, or artifact vulnerability-scan evidence.
     provenance, package verification, and release signing/notarization gates;
   - Windows packaging includes notices, FFmpeg license material, runtime
     provenance, executable/installer signing, and source-bundle verification.
+  - the release workflow invokes native packaging in release mode and hands the
+    verified FFmpeg source bundle to the Windows packager.
 - `npm run check` now includes `npm run check:native-packaging`.
 
 ## Lean guardrails run

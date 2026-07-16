@@ -12,6 +12,7 @@ const windowsSource = readFileSync(
   resolve(root, 'deploy/windows/build-corresponding-source.sh'),
   'utf8'
 );
+const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8');
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 const failures = [];
 
@@ -162,6 +163,26 @@ for (const [source, text, message] of [
     windowsSource,
     'FFMPEG_COMMIT="7d0e8420048cffd0ca3883b877ead2390496d0b2"',
     'Windows corresponding-source recipe must pin the FFmpeg source commit'
+  ],
+  [
+    releaseWorkflow,
+    "VRRELAY_RELEASE_PACKAGING: '1'",
+    'release workflow must invoke native packagers in release mode'
+  ],
+  [
+    releaseWorkflow,
+    'VRRELAY_FFMPEG_SOURCE_BUNDLE_URL',
+    'release workflow must download the hosted FFmpeg corresponding-source bundle'
+  ],
+  [
+    releaseWorkflow,
+    'VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256',
+    'release workflow must verify the FFmpeg corresponding-source bundle checksum'
+  ],
+  [
+    releaseWorkflow,
+    'VRRELAY_FFMPEG_SOURCE_BUNDLE=$bundle',
+    'release workflow must pass the verified FFmpeg source bundle to Windows packaging'
   ]
 ]) {
   requireText(source, text, message);

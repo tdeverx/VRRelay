@@ -306,10 +306,11 @@ pending.
   installer-signing, notarization, Windows signing, or FFmpeg
   corresponding-source bundle inputs are missing. The checked-in native
   packaging guard also validates runtime manifest pins, notices/license
-  inclusion, runtime provenance wiring, and FFmpeg source recipe metadata, but
-  actual signed/notarized artifacts, clean-machine install/upgrade/uninstall
-  evidence, final SBOMs, final vulnerability scans, and release attestations
-  remain pending.
+  inclusion, runtime provenance wiring, FFmpeg source recipe metadata, and the
+  release workflow's release-mode/source-bundle handoff, but actual
+  signed/notarized artifacts, clean-machine install/upgrade/uninstall evidence,
+  final SBOMs, final vulnerability scans, and release attestations remain
+  pending.
 
 ## Release gates requiring target infrastructure or people
 

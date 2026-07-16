@@ -120,6 +120,7 @@ jobs:
           echo "VRRELAY_FFMPEG_BINARY=$(brew --prefix ffmpeg@7)/bin/ffmpeg" >> "$GITHUB_ENV"
       - if: runner.os == 'macOS'
         env:
+          VRRELAY_RELEASE_PACKAGING: '1'
           APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
           APPLE_INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
           APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
@@ -127,6 +128,22 @@ jobs:
       - if: runner.os == 'Windows'
         shell: pwsh
         env:
+          FFMPEG_SOURCE_BUNDLE_URL: ${{ vars.VRRELAY_FFMPEG_SOURCE_BUNDLE_URL }}
+          FFMPEG_SOURCE_BUNDLE_SHA256: ${{ vars.VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256 }}
+        run: |
+          if (-not $env:FFMPEG_SOURCE_BUNDLE_URL) { throw 'VRRELAY_FFMPEG_SOURCE_BUNDLE_URL is required' }
+          if (-not $env:FFMPEG_SOURCE_BUNDLE_SHA256) { throw 'VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256 is required' }
+          $bundle = Join-Path $env:RUNNER_TEMP 'ffmpeg-btbn-corresponding-source.tar.xz'
+          Invoke-WebRequest $env:FFMPEG_SOURCE_BUNDLE_URL -OutFile $bundle
+          $actual = (Get-FileHash $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:FFMPEG_SOURCE_BUNDLE_SHA256.ToLowerInvariant()) {
+            throw "FFmpeg source bundle SHA-256 mismatch: $actual"
+          }
+          "VRRELAY_FFMPEG_SOURCE_BUNDLE=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VRRELAY_RELEASE_PACKAGING: '1'
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: deploy/windows/package.ps1
