@@ -311,6 +311,11 @@ pending.
   signed/notarized artifacts, clean-machine install/upgrade/uninstall evidence,
   final SBOMs, final vulnerability scans, and release attestations remain
   pending.
+- Publication metadata is now guarded in CI: community files, the security
+  policy, issue templates, public release checklist repository gates, and
+  Dependabot coverage are checked by `script/check-repository.mjs`. Actual
+  GitHub repository settings, branch protection, security feature enablement,
+  public remote creation, and release publication remain Phase 12 gates.
 
 ## Release gates requiring target infrastructure or people
 

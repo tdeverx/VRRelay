@@ -28,6 +28,28 @@ async function files(directory) {
 const repositoryFiles = await files(root);
 const failures = [];
 
+for (const required of [
+  'CODE_OF_CONDUCT.md',
+  'CONTRIBUTING.md',
+  'GOVERNANCE.md',
+  'LICENSE',
+  'SECURITY.md',
+  'SUPPORT.md',
+  'THIRD_PARTY_NOTICES.md',
+  'docs/public-release-checklist.md',
+  '.github/dependabot.yml',
+  '.github/pull_request_template.md',
+  '.github/ISSUE_TEMPLATE/bug_report.yml',
+  '.github/ISSUE_TEMPLATE/config.yml',
+  '.github/ISSUE_TEMPLATE/feature_request.yml'
+]) {
+  try {
+    await access(resolve(root, required));
+  } catch {
+    failures.push(`public repository metadata is missing ${required}`);
+  }
+}
+
 for (const markdown of repositoryFiles.filter((path) => path.endsWith('.md'))) {
   const content = await readFile(markdown, 'utf8');
   for (const match of content.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
@@ -127,6 +149,45 @@ for (const required of [
 }
 if (!releaseWorkflow.includes('permissions: { contents: read }'))
   failures.push('release workflow does not default jobs to read-only repository access');
+
+const securityPolicy = await readFile(resolve(root, 'SECURITY.md'), 'utf8');
+for (const required of [
+  'Report a vulnerability',
+  "GitHub's **Security → Report a vulnerability** flow",
+  'Do not open a public issue'
+]) {
+  if (!securityPolicy.includes(required))
+    failures.push(`security policy is missing private-reporting guidance: ${required}`);
+}
+const bugTemplate = await readFile(resolve(root, '.github/ISSUE_TEMPLATE/bug_report.yml'), 'utf8');
+for (const required of ['Do not include credentials', 'This is not a security report']) {
+  if (!bugTemplate.includes(required))
+    failures.push(`bug template is missing security hygiene prompt: ${required}`);
+}
+const publicReleaseChecklist = await readFile(
+  resolve(root, 'docs/public-release-checklist.md'),
+  'utf8'
+);
+for (const required of [
+  'secret scanning',
+  'push protection',
+  'Dependabot alerts',
+  'private vulnerability reporting',
+  'code scanning',
+  'Protect `main`',
+  'Restrict tag creation'
+]) {
+  if (!publicReleaseChecklist.includes(required))
+    failures.push(`public release checklist is missing repository gate: ${required}`);
+}
+const dependabot = await readFile(resolve(root, '.github/dependabot.yml'), 'utf8');
+for (const required of [
+  'package-ecosystem: npm',
+  'package-ecosystem: github-actions',
+  'package-ecosystem: docker'
+]) {
+  if (!dependabot.includes(required)) failures.push(`Dependabot config is missing ${required}`);
+}
 
 const ciWorkflow = await readFile(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 for (const required of [

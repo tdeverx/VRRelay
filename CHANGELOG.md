@@ -46,6 +46,9 @@ retained evidence belong in the
   inputs, Windows signing inputs, runtime provenance, bundled notices/licenses,
   and a verified FFmpeg corresponding-source bundle for release-mode Windows
   packaging, with release workflow enforcement for those native release gates.
+- Publication metadata guardrails that keep security reporting, community files,
+  release checklist repository gates, issue templates, and Dependabot coverage
+  present before the public repository gate.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.
