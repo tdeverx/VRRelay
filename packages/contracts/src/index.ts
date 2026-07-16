@@ -249,6 +249,40 @@ export type BackendValidationRequest = z.infer<typeof BackendValidationRequestSc
 export const BackendActivationRequestSchema = BackendValidationRequestSchema;
 export type BackendActivationRequest = z.infer<typeof BackendActivationRequestSchema>;
 
+const ListenerAddressSchema = z
+  .string()
+  .min(3)
+  .max(260)
+  .refine((value) => /^.+:\d+$/.test(value), 'Listener address must use host:port format');
+
+export const RuntimeConfigurationSchema = z.object({
+  listenAddr: ListenerAddressSchema,
+  publicUrl: z.url(),
+  adminUrl: z.url(),
+  playbackUrl: z.url(),
+  trustedProxyCidrs: z.array(z.string().min(1).max(100)).max(32),
+  agentListenAddr: ListenerAddressSchema,
+  maxWorkers: z.number().int().min(1).max(32),
+  cacheTtlMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(7 * 24 * 60 * 60 * 1_000),
+  cacheLimitBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(10 * 1024 * 1024 * 1024 * 1024),
+  nodeName: z.string().trim().min(1).max(100),
+  nodeRegion: z.string().trim().min(1).max(100)
+});
+export type RuntimeConfiguration = z.infer<typeof RuntimeConfigurationSchema>;
+
+export const RuntimeConfigurationUpdateRequestSchema = RuntimeConfigurationSchema;
+export type RuntimeConfigurationUpdateRequest = z.infer<
+  typeof RuntimeConfigurationUpdateRequestSchema
+>;
+
 export const NodeHeartbeatRequestSchema = z.object({
   capabilities: NodeCapabilitySchema,
   state: z.enum(['online', 'degraded', 'draining']).default('online')

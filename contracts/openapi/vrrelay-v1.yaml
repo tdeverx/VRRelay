@@ -32,6 +32,51 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Readiness' }
         '503': { $ref: '#/components/responses/Readiness' }
+  /configuration/runtime:
+    get:
+      operationId: getRuntimeConfiguration
+      tags: [System]
+      responses:
+        '200': { $ref: '#/components/responses/RuntimeConfigurationState' }
+    put:
+      operationId: updateRuntimeConfiguration
+      tags: [System]
+      requestBody: { $ref: '#/components/requestBodies/RuntimeConfiguration' }
+      responses:
+        '200': { $ref: '#/components/responses/RuntimeConfigurationState' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /configuration/runtime/validate:
+    post:
+      operationId: validateRuntimeConfiguration
+      tags: [System]
+      requestBody: { $ref: '#/components/requestBodies/RuntimeConfiguration' }
+      responses:
+        '200':
+          description: Validated runtime configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, configuration]
+                properties:
+                  valid: { type: boolean, const: true }
+                  configuration: { $ref: '#/components/schemas/RuntimeConfiguration' }
+        '400': { $ref: '#/components/responses/Error' }
+  /configuration/runtime/restart:
+    post:
+      operationId: restartRuntime
+      tags: [System]
+      responses:
+        '200':
+          description: Service restart scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [restarting]
+                properties: { restarting: { type: boolean, const: true } }
+        '409': { $ref: '#/components/responses/Error' }
   /setup:
     get:
       operationId: getSetupStatus
@@ -565,6 +610,10 @@ components:
       required: true
       content:
         application/json: { schema: { $ref: '#/components/schemas/BackendActivationRequest' } }
+    RuntimeConfiguration:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/RuntimeConfiguration' } }
     EvictCache:
       {
         required: true,
@@ -780,6 +829,10 @@ components:
         description: Active backend health,
         content: { application/json: { schema: { $ref: '#/components/schemas/BackendList' } } }
       }
+    RuntimeConfigurationState:
+      description: Redacted runtime configuration and activation state
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/RuntimeConfigurationState' } }
     CacheList:
       {
         description: Cache inventory without filesystem paths,
@@ -1661,6 +1714,45 @@ components:
         projectId: { type: string, minLength: 1, maxLength: 200 }
         forcePathStyle: { type: boolean }
         intervalSeconds: { type: integer, minimum: 5, maximum: 300 }
+    RuntimeConfiguration:
+      type: object
+      required:
+        [
+          listenAddr,
+          publicUrl,
+          adminUrl,
+          playbackUrl,
+          trustedProxyCidrs,
+          agentListenAddr,
+          maxWorkers,
+          cacheTtlMs,
+          cacheLimitBytes,
+          nodeName,
+          nodeRegion
+        ]
+      properties:
+        listenAddr: { type: string, minLength: 3, maxLength: 260 }
+        publicUrl: { type: string, format: uri }
+        adminUrl: { type: string, format: uri }
+        playbackUrl: { type: string, format: uri }
+        trustedProxyCidrs:
+          { type: array, maxItems: 32, items: { type: string, minLength: 1, maxLength: 100 } }
+        agentListenAddr: { type: string, minLength: 3, maxLength: 260 }
+        maxWorkers: { type: integer, minimum: 1, maximum: 32 }
+        cacheTtlMs: { type: integer, minimum: 1000, maximum: 604800000 }
+        cacheLimitBytes: { type: integer, minimum: 1, maximum: 10995116277760 }
+        nodeName: { type: string, minLength: 1, maxLength: 100 }
+        nodeRegion: { type: string, minLength: 1, maxLength: 100 }
+    RuntimeConfigurationState:
+      type: object
+      required: [configuration, writable, restartSupported, restartRequired, environment, version]
+      properties:
+        configuration: { $ref: '#/components/schemas/RuntimeConfiguration' }
+        writable: { type: boolean }
+        restartSupported: { type: boolean }
+        restartRequired: { type: boolean }
+        environment: { type: string, enum: [development, production] }
+        version: { type: string }
     BackendActivationRequest:
       allOf: [{ $ref: '#/components/schemas/BackendValidationRequest' }]
     BackendStatus:

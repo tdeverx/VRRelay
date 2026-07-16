@@ -50,14 +50,19 @@ import {
   CacheInventoryQuerySchema,
   CacheEvictionRequestSchema,
   BackendValidationRequestSchema,
-  BackendActivationRequestSchema
+  BackendActivationRequestSchema,
+  RuntimeConfigurationUpdateRequestSchema
 } from '@vrrelay/contracts';
 import { isPrivateAddress, validateProviderUrl } from '@vrrelay/adapters';
-import { requiresSetupToken, type RelayConfig } from './config.js';
+import { requiresSetupToken, validateRuntimeConfiguration, type RelayConfig } from './config.js';
 import { publicProviderBinding, type ClusterNode } from '@vrrelay/domain';
 import { AuthService, type Principal } from './auth.js';
 import type { AgentController } from './agent-transport.js';
 import type { BackendService } from './backend-service.js';
+import {
+  persistRuntimeConfiguration,
+  publicRuntimeConfiguration
+} from './runtime-configuration.js';
 import {
   auditActor,
   auditedOperation,
@@ -453,6 +458,7 @@ export async function createServer(
       ? (nodeId) => Boolean(services.agentController?.connected(nodeId))
       : undefined
   );
+  let runtimeRestartRequired = false;
 
   const configuredLivePaths = new Map<string, Promise<void>>();
   const ensureLiveEdgePath = async (path: string): Promise<void> => {
@@ -731,6 +737,73 @@ export async function createServer(
   app.get('/api/v1/capabilities', async (request) => {
     await authenticate(request, ['sessions:read']);
     return services.capabilities;
+  });
+
+  app.get('/api/v1/configuration/runtime', async (request) => {
+    await authenticate(request, ['admin']);
+    return publicRuntimeConfiguration(config, runtimeRestartRequired);
+  });
+  app.post('/api/v1/configuration/runtime/validate', async (request) => {
+    await mutate(request, ['admin']);
+    const configuration = validateRuntimeConfiguration(
+      config,
+      parse(RuntimeConfigurationUpdateRequestSchema, request.body)
+    );
+    return { valid: true, configuration };
+  });
+  app.put('/api/v1/configuration/runtime', async (request) => {
+    const principal = await mutate(request, ['admin']);
+    if (!config.runtimeConfigPath)
+      throw new ApplicationError(
+        'configuration_read_only',
+        'Runtime configuration is managed by the deployment environment',
+        409
+      );
+    const result = await auditAs(
+      request,
+      principal,
+      {
+        category: 'backend',
+        action: 'runtime.configuration.stage',
+        target: { type: 'runtime-configuration' },
+        success: () => ({ context: { restartRequired: true } })
+      },
+      async () => {
+        const configuration = await persistRuntimeConfiguration(
+          config,
+          parse(RuntimeConfigurationUpdateRequestSchema, request.body)
+        );
+        runtimeRestartRequired = true;
+        return {
+          ...publicRuntimeConfiguration({ ...config, ...configuration }, true),
+          configuration
+        };
+      }
+    );
+    return result;
+  });
+  app.post('/api/v1/configuration/runtime/restart', async (request, reply) => {
+    const principal = await mutate(request, ['admin']);
+    if (config.restartMode !== 'exit')
+      throw new ApplicationError(
+        'restart_not_supported',
+        'This deployment must be restarted by its service manager',
+        409
+      );
+    const result = await auditAs(
+      request,
+      principal,
+      {
+        category: 'backend',
+        action: 'runtime.restart',
+        target: { type: 'runtime' }
+      },
+      async () => ({ restarting: true as const })
+    );
+    void reply.send(result);
+    const timer = setTimeout(() => process.exit(0), 250);
+    timer.unref();
+    return reply;
   });
 
   app.get('/api/v1/nodes', async (request) => {

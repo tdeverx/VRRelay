@@ -242,6 +242,44 @@ async function createVodSession(sessions: SessionService, playbackTtlSeconds: nu
 }
 
 describe('HTTP authentication boundary', () => {
+  it('keeps runtime configuration redacted, admin-only, CSRF-protected, and deployment-aware', async () => {
+    const { app, auth } = await securityFixture();
+    await auth.initialize(adminPassword);
+    const admin = await login(app);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/v1/configuration/runtime' })).statusCode
+    ).toBe(401);
+
+    const visible = await app.inject({
+      method: 'GET',
+      url: '/api/v1/configuration/runtime',
+      headers: { cookie: admin.cookie }
+    });
+    expect(visible.statusCode).toBe(200);
+    expect(visible.json()).toMatchObject({ writable: false, restartSupported: false });
+    expect(visible.body).not.toContain(setupToken);
+
+    const payload = visible.json().configuration;
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/v1/configuration/runtime',
+          headers: { cookie: admin.cookie },
+          payload
+        })
+      ).statusCode
+    ).toBe(401);
+    const readOnly = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/configuration/runtime',
+      headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrfToken },
+      payload
+    });
+    expect(readOnly.statusCode).toBe(409);
+    expect(readOnly.json()).toMatchObject({ error: { code: 'configuration_read_only' } });
+  });
+
   it('enforces remote setup authorization and returns a hardened login cookie', async () => {
     const { app } = await securityFixture();
     const passwordSentinel = 'setup-password-must-not-leak';

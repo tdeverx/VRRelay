@@ -9,6 +9,11 @@ semantic versioning after the first public release.
 - Simplified the macOS and Windows controllers to menu-bar/tray-only utilities with start, stop,
   restart, and system-browser dashboard actions; removed their embedded dashboard windows and
   native settings surface.
+- Added authenticated runtime configuration controls to the dashboard for listener and advertised
+  URLs, trusted proxies, agent networking, encoder/cache limits, node identity, provider health
+  revalidation, and supervised service restart. Native macOS installs persist only allowlisted,
+  non-secret values in a private runtime configuration file; orchestrated deployments remain
+  read-only in the dashboard.
 - Fixed relay placement in standalone mode: selecting **This node** no longer locks the dashboard,
   and the local source worker is now eligible for automatic placement without an agent connection
   to itself.

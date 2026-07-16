@@ -25,6 +25,7 @@ import type {
   CreateProviderBindingRequest,
   CreateProviderRequest,
   CreateSessionRequest,
+  RuntimeConfiguration,
   SessionControlRequest
 } from '@vrrelay/contracts';
 import { client as generatedClient } from '$lib/generated/vrrelay-api/client.gen';
@@ -50,6 +51,7 @@ import {
   getMediaCapabilities,
   getProviderItem,
   getReadiness,
+  getRuntimeConfiguration,
   getSession,
   getSetupStatus,
   initializeAdmin,
@@ -74,11 +76,14 @@ import {
   removeNode,
   replaceLivePublisher,
   retrySegmentJob,
+  restartRuntime,
   revokeNode,
   revokePersonalToken,
   rotateNodeCertificate,
   validateBackend,
-  validateProvider
+  validateProvider,
+  validateRuntimeConfiguration,
+  updateRuntimeConfiguration
 } from '$lib/generated/vrrelay-api/sdk.gen';
 
 // OpenAPI-generated operations own paths, methods, query serialization, and
@@ -148,6 +153,29 @@ export const api = {
         restartRequired: boolean;
       }>;
     }>(getReadiness(required)),
+  runtimeConfiguration: () =>
+    result<{
+      configuration: RuntimeConfiguration;
+      writable: boolean;
+      restartSupported: boolean;
+      restartRequired: boolean;
+      environment: 'development' | 'production';
+      version: string;
+    }>(getRuntimeConfiguration(required)),
+  validateRuntimeConfiguration: (body: RuntimeConfiguration) =>
+    result<{ valid: true; configuration: RuntimeConfiguration }>(
+      validateRuntimeConfiguration({ ...required, body })
+    ),
+  updateRuntimeConfiguration: (body: RuntimeConfiguration) =>
+    result<{
+      configuration: RuntimeConfiguration;
+      writable: boolean;
+      restartSupported: boolean;
+      restartRequired: boolean;
+      environment: 'development' | 'production';
+      version: string;
+    }>(updateRuntimeConfiguration({ ...required, body })),
+  restartRuntime: () => result<{ restarting: true }>(restartRuntime(required)),
   setupStatus: () =>
     result<{ configured: boolean; requiresToken: boolean }>(getSetupStatus(required)),
   setup: (password: string, setupToken?: string) =>

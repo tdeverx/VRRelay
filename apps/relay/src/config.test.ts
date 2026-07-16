@@ -1,9 +1,50 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfig, parseListenAddress, requiresSetupToken } from './config.js';
 
 describe('relay configuration', () => {
+  it('loads allowlisted runtime settings while preserving explicit environment authority', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'vrrelay-runtime-config-'));
+    const path = join(directory, 'runtime.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        listenAddr: '127.0.0.1:9000',
+        publicUrl: 'http://127.0.0.1:9000',
+        adminUrl: 'http://127.0.0.1:9000',
+        playbackUrl: 'http://127.0.0.1:9000',
+        trustedProxyCidrs: [],
+        agentListenAddr: '127.0.0.1:9100',
+        maxWorkers: 4,
+        cacheTtlMs: 60_000,
+        cacheLimitBytes: 1_000_000,
+        nodeName: 'Configured node',
+        nodeRegion: 'studio'
+      })
+    );
+    try {
+      expect(loadConfig({ VRRELAY_RUNTIME_CONFIG: path })).toMatchObject({
+        listenAddr: '127.0.0.1:9000',
+        adminUrl: 'http://127.0.0.1:9000',
+        maxWorkers: 4,
+        nodeName: 'Configured node'
+      });
+      expect(
+        loadConfig({
+          VRRELAY_RUNTIME_CONFIG: path,
+          VRRELAY_LISTEN_ADDR: '127.0.0.1:9200',
+          VRRELAY_MAX_WORKERS: '2'
+        })
+      ).toMatchObject({ listenAddr: '127.0.0.1:9200', maxWorkers: 2 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('uses and validates the release version override', () => {
     expect(loadConfig({ VRRELAY_VERSION: '1.2.3-rc.1' }).applicationVersion).toBe('1.2.3-rc.1');
     expect(() => loadConfig({ VRRELAY_VERSION: 'v1.2.3' })).toThrow();

@@ -584,6 +584,29 @@ export type BackendValidationRequest = {
     intervalSeconds?: number;
 };
 
+export type RuntimeConfiguration = {
+    listenAddr: string;
+    publicUrl: string;
+    adminUrl: string;
+    playbackUrl: string;
+    trustedProxyCidrs: Array<string>;
+    agentListenAddr: string;
+    maxWorkers: number;
+    cacheTtlMs: number;
+    cacheLimitBytes: number;
+    nodeName: string;
+    nodeRegion: string;
+};
+
+export type RuntimeConfigurationState = {
+    configuration: RuntimeConfiguration;
+    writable: boolean;
+    restartSupported: boolean;
+    restartRequired: boolean;
+    environment: 'development' | 'production';
+    version: string;
+};
+
 export type BackendActivationRequest = BackendValidationRequest;
 
 export type BackendStatus = {
@@ -764,6 +787,8 @@ export type ValidateBackend = BackendValidationRequestWritable;
 
 export type ActivateBackend = BackendActivationRequestWritable;
 
+export type RuntimeConfiguration2 = RuntimeConfiguration;
+
 export type EvictCache = CacheEvictionRequest;
 
 export type GetHealthData = {
@@ -806,6 +831,106 @@ export type GetReadinessResponses = {
 };
 
 export type GetReadinessResponse = GetReadinessResponses[keyof GetReadinessResponses];
+
+export type GetRuntimeConfigurationData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/configuration/runtime';
+};
+
+export type GetRuntimeConfigurationResponses = {
+    /**
+     * Redacted runtime configuration and activation state
+     */
+    200: RuntimeConfigurationState;
+};
+
+export type GetRuntimeConfigurationResponse = GetRuntimeConfigurationResponses[keyof GetRuntimeConfigurationResponses];
+
+export type UpdateRuntimeConfigurationData = {
+    body: RuntimeConfiguration2;
+    path?: never;
+    query?: never;
+    url: '/configuration/runtime';
+};
+
+export type UpdateRuntimeConfigurationErrors = {
+    /**
+     * Request failed
+     */
+    400: ApiError;
+    /**
+     * Request failed
+     */
+    409: ApiError;
+};
+
+export type UpdateRuntimeConfigurationError = UpdateRuntimeConfigurationErrors[keyof UpdateRuntimeConfigurationErrors];
+
+export type UpdateRuntimeConfigurationResponses = {
+    /**
+     * Redacted runtime configuration and activation state
+     */
+    200: RuntimeConfigurationState;
+};
+
+export type UpdateRuntimeConfigurationResponse = UpdateRuntimeConfigurationResponses[keyof UpdateRuntimeConfigurationResponses];
+
+export type ValidateRuntimeConfigurationData = {
+    body: RuntimeConfiguration2;
+    path?: never;
+    query?: never;
+    url: '/configuration/runtime/validate';
+};
+
+export type ValidateRuntimeConfigurationErrors = {
+    /**
+     * Request failed
+     */
+    400: ApiError;
+};
+
+export type ValidateRuntimeConfigurationError = ValidateRuntimeConfigurationErrors[keyof ValidateRuntimeConfigurationErrors];
+
+export type ValidateRuntimeConfigurationResponses = {
+    /**
+     * Validated runtime configuration
+     */
+    200: {
+        valid: true;
+        configuration: RuntimeConfiguration;
+    };
+};
+
+export type ValidateRuntimeConfigurationResponse = ValidateRuntimeConfigurationResponses[keyof ValidateRuntimeConfigurationResponses];
+
+export type RestartRuntimeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/configuration/runtime/restart';
+};
+
+export type RestartRuntimeErrors = {
+    /**
+     * Request failed
+     */
+    409: ApiError;
+};
+
+export type RestartRuntimeError = RestartRuntimeErrors[keyof RestartRuntimeErrors];
+
+export type RestartRuntimeResponses = {
+    /**
+     * Service restart scheduled
+     */
+    200: {
+        restarting: true;
+    };
+};
+
+export type RestartRuntimeResponse = RestartRuntimeResponses[keyof RestartRuntimeResponses];
 
 export type GetSetupStatusData = {
     body?: never;

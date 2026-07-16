@@ -9,6 +9,8 @@
   <key>WorkingDirectory</key><string>/Library/Application Support/VRRelay/runtime</string>
   <key>EnvironmentVariables</key><dict>
     <key>VRRELAY_DATA_DIR</key><string>/Library/Application Support/VRRelay/data</string>
+    <key>VRRELAY_RUNTIME_CONFIG</key><string>/Library/Application Support/VRRelay/data/runtime-config.json</string>
+    <key>VRRELAY_RESTART_MODE</key><string>exit</string>
     <key>VRRELAY_CACHE_DIR</key><string>/Library/Caches/VRRelay</string>
     <key>VRRELAY_FFMPEG</key><string>/Library/Application Support/VRRelay/runtime/bin/ffmpeg</string>
     <key>VRRELAY_MEDIAMTX_EXECUTABLE</key><string>/Library/Application Support/VRRelay/runtime/bin/mediamtx</string>

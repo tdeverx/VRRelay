@@ -16,6 +16,14 @@ both the TypeScript relay and bundled MediaMTX process, so quitting the menu uti
 does not stop active streams. Upgrades retain service data; the uninstall script removes binaries
 and retains data unless `--purge-data` is explicit.
 
+Native installs also set `VRRELAY_RUNTIME_CONFIG` to a private file in the retained data directory
+and enable supervised exit/restart. The authenticated **Settings → Network** and **Runtime and
+maintenance** panels validate and persist only the documented non-secret listener, URL, proxy,
+capacity, cache, and node-label fields. Environment variables still take precedence, so Docker,
+Kubernetes, and other orchestrated deployments are displayed as read-only instead of having their
+declarative configuration silently overridden. A saved native configuration becomes active only
+after the administrator selects **Restart relay**.
+
 The default macOS packager builds FFmpeg 7.1.5 from the structured,
 checksum-pinned Apple Silicon recipe in `deploy/runtime-manifest.json`; it no
 longer packages Homebrew's FFmpeg dependency graph. Install the recipe's build
