@@ -17,6 +17,9 @@ semantic versioning after the first public release.
   by provider identity and all mutations remain CSRF-protected.
 - Fixed dashboard and user-portal mutations in newly opened tabs by recovering each session's CSRF
   token from a same-site companion cookie.
+- Fixed first-run portal access so adding the first delegated Jellyfin endpoint automatically enables
+  the user portal with the default VOD profile. Settings also repairs existing single-endpoint setups
+  that predate the automatic handoff.
 - Added a complete, parallel shadcn-svelte Luma dashboard preview under `/new/*`, including every
   administrator route, responsive Sidebar/Sheet navigation, table/card data views, the four-step
   relay workflow, session-only interface switching, and persistent system/light/dark themes. The

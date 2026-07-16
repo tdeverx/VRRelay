@@ -37,6 +37,7 @@
   let baseUrl = $state('http://127.0.0.1:8096/jellyfin');
   let allowPublicHttp = $state(false);
   let portalProviderId = $state('');
+  let portalConfigured = $state(false);
   let defaultProfileId = $state('');
   let allowedProfileIds = $state<string[]>([]);
   let tokenName = $state('Unity client');
@@ -91,6 +92,17 @@
       runtime = runtimeResult;
       runtimeDraft = structuredClone(runtimeResult.configuration);
       trustedProxyCidrs = runtimeResult.configuration.trustedProxyCidrs.join(', ');
+      portalConfigured = Boolean(portalResult.configuration);
+      if (!portalConfigured && portalProviderId) {
+        try {
+          if (await enablePortal(portalProviderId))
+            toast.success('User portal enabled with the default profile.');
+        } catch (reason) {
+          toast.error(
+            reason instanceof Error ? reason.message : 'Could not enable the user portal.'
+          );
+        }
+      }
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
       toast.error(reason instanceof Error ? reason.message : 'Could not load settings.');
@@ -108,8 +120,24 @@
         allowPublicHttp
       });
       providers = [provider, ...providers];
-      portalProviderId = provider.id;
-      toast.success('Jellyfin endpoint added.');
+      if (!portalConfigured) {
+        portalProviderId = provider.id;
+        try {
+          if (await enablePortal(provider.id)) {
+            toast.success('Jellyfin endpoint added and user portal enabled.');
+          } else {
+            toast.warning('Endpoint added. Create a profile before enabling the user portal.');
+          }
+        } catch (reason) {
+          toast.warning(
+            reason instanceof Error
+              ? `Endpoint added, but the user portal could not be enabled: ${reason.message}`
+              : 'Endpoint added, but the user portal could not be enabled.'
+          );
+        }
+      } else {
+        toast.success('Jellyfin endpoint added.');
+      }
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Connection failed.');
     } finally {
@@ -125,6 +153,26 @@
       defaultProfileId = allowedProfileIds[0] ?? '';
   }
 
+  async function enablePortal(providerId: string): Promise<boolean> {
+    const preferredProfileId =
+      defaultProfileId ||
+      profileChoices.find((profile) => profile.delivery.playlistType === 'vod')?.profileId ||
+      profileChoices[0]?.profileId ||
+      '';
+    if (!preferredProfileId) return false;
+    defaultProfileId = preferredProfileId;
+    allowedProfileIds = allowedProfileIds.includes(preferredProfileId)
+      ? allowedProfileIds
+      : [...new Set([preferredProfileId, ...allowedProfileIds])];
+    await api.updatePortalConfiguration({
+      providerId,
+      defaultProfileId,
+      allowedProfileIds
+    });
+    portalConfigured = true;
+    return true;
+  }
+
   async function savePortalConfiguration() {
     if (!portalProviderId || !defaultProfileId || allowedProfileIds.length === 0) return;
     busy = true;
@@ -135,6 +183,7 @@
         allowedProfileIds
       };
       await api.updatePortalConfiguration(configuration);
+      portalConfigured = true;
       toast.success('User portal configuration saved.');
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not save the user portal.');

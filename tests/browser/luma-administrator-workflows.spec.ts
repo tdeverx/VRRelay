@@ -176,12 +176,17 @@ test('serves the dashboard namespace and a per-user Jellyfin relay portal', asyn
   await freshSettingsPage.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
   await freshSettingsPage.getByRole('button', { name: 'Add endpoint' }).click();
   await expect(freshSettingsPage.getByText('Per-user login')).toBeVisible();
+  await expect(
+    freshSettingsPage.getByText('Jellyfin endpoint added and user portal enabled.')
+  ).toBeVisible();
   expect(
     await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))
   ).toBeTruthy();
-  await freshSettingsPage.getByRole('button', { name: 'Save user access' }).click();
-  await expect(freshSettingsPage.getByText('User portal configuration saved.')).toBeVisible();
   await freshSettingsPage.close();
+
+  const portalStatusResponse = await page.request.get('/api/v1/portal/status');
+  expect(portalStatusResponse.ok()).toBe(true);
+  expect(await portalStatusResponse.json()).toMatchObject({ configured: true });
 
   await page.goto('/portal/login');
   await page.getByLabel('Username').fill('browser-user');
