@@ -1,31 +1,153 @@
 #cloud-config
 package_update: true
-packages: [docker.io, docker-compose-v2]
+packages:
+  - docker.io
+  - docker-compose-v2
+
+bootcmd:
+  - mkdir -p /etc/vrrelay /opt/vrrelay /var/lib/vrrelay /var/lib/vrrelay/data /var/cache/vrrelay
+  - chmod 0700 /etc/vrrelay /var/lib/vrrelay /var/lib/vrrelay/data /var/cache/vrrelay
+  - chmod 0755 /opt/vrrelay
+
 write_files:
   - path: /etc/vrrelay/node.env
+    owner: root:root
     permissions: '0600'
     content: |
-      VRRELAY_NODE_ID=${node_id}
-      VRRELAY_NODE_NAME=${node_name}
-      VRRELAY_NODE_REGION=${region}
-      VRRELAY_NODE_ROLES=${roles}
-      VRRELAY_PUBLIC_URL=${public_url}
-      VRRELAY_CONTROLLER_AGENT_URL=${controller_agent_url}
-      VRRELAY_CONTROLLER_ENROLLMENT_URL=${controller_enrollment_url}
-      VRRELAY_NODE_JOIN_TOKEN=${single_use_join_token}
-      VRRELAY_MASTER_KEY=${master_key}
+${runtime_env}
+  - path: /etc/vrrelay/mediamtx.env
+    owner: root:root
+    permissions: '0600'
+    content: |
+${mediamtx_env}
+  - path: /opt/vrrelay/compose.yml
+    owner: root:root
+    permissions: '0644'
+    content: |
+      name: vrrelay-vm
+      services:
+        relay:
+          profiles: ['${role_profile}']
+          image: '${image_ref}'
+          restart: unless-stopped
+          read_only: true
+          tmpfs:
+            - /tmp
+          env_file:
+            - /etc/vrrelay/node.env
+          volumes:
+            - /var/lib/vrrelay/data:/data
+            - /var/cache/vrrelay:/cache
+${relay_ports_block}
+%{ if enable_origin ~}
+        mediamtx-origin:
+          profiles: ['ingest-origin']
+          image: '${mediamtx_image_ref}'
+          restart: unless-stopped
+          depends_on:
+            relay:
+              condition: service_started
+          env_file:
+            - /etc/vrrelay/mediamtx.env
+          environment:
+            MTX_AUTHMETHOD: http
+            MTX_AUTHHTTPADDRESS: http://relay:8099/internal/mediamtx/auth
+            MTX_API: 'yes'
+            MTX_APIADDRESS: :9997
+            MTX_HLSVARIANT: mpegts
+            MTX_WEBRTCLOCALUDPADDRESS: :8189
+          ports:
+            - '1935:1935'
+            - '8889:8889'
+            - '8189:8189/udp'
+            - '8890:8890/udp'
+%{ endif ~}
+%{ if enable_edge ~}
+        mediamtx-edge:
+          profiles: ['edge']
+          image: '${mediamtx_image_ref}'
+          restart: unless-stopped
+          depends_on:
+            relay:
+              condition: service_started
+          environment:
+            MTX_AUTHMETHOD: http
+            MTX_AUTHHTTPADDRESS: http://relay:8099/internal/mediamtx/auth
+            MTX_HLSVARIANT: mpegts
+%{ endif ~}
+  - path: /usr/local/sbin/vrrelay-scrub-join-token
+    owner: root:root
+    permissions: '0750'
+    content: |
+      #!/bin/sh
+      # SPDX-License-Identifier: GPL-3.0-or-later
+      set -eu
+      env_file=/etc/vrrelay/node.env
+      identity_file=/var/lib/vrrelay/data/secrets.json
+      if [ ! -f "$identity_file" ]; then
+        exit 0
+      fi
+      if ! grep -q '"cluster:node-identity"' "$identity_file"; then
+        exit 0
+      fi
+      if ! grep -q '^VRRELAY_NODE_JOIN_TOKEN=' "$env_file"; then
+        exit 0
+      fi
+      tmp_file="$(mktemp)"
+      sed '/^VRRELAY_NODE_JOIN_TOKEN=/d' "$env_file" > "$tmp_file"
+      cat "$tmp_file" > "$env_file"
+      rm -f "$tmp_file"
+      chmod 0600 "$env_file"
   - path: /etc/systemd/system/vrrelay.service
+    owner: root:root
+    permissions: '0644'
     content: |
       [Unit]
+      Description=VRRelay ${role_profile} node
       After=docker.service network-online.target
+      Wants=network-online.target
       Requires=docker.service
+
       [Service]
+      Type=simple
+      WorkingDirectory=/opt/vrrelay
       Restart=always
-      EnvironmentFile=/etc/vrrelay/node.env
-      ExecStart=/usr/bin/docker run --rm --name vrrelay --env-file /etc/vrrelay/node.env -p 8099:8099 ghcr.io/vrrelay/vrrelay:0.1.0
-      ExecStop=/usr/bin/docker stop vrrelay
+      RestartSec=5s
+      ExecStartPre=/usr/bin/docker compose --profile ${role_profile} pull --quiet
+      ExecStart=/usr/bin/docker compose --profile ${role_profile} up --remove-orphans
+      ExecStop=/usr/bin/docker compose --profile ${role_profile} down
+
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/vrrelay-token-scrub.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Remove consumed VRRelay node join token
+      After=vrrelay.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/vrrelay-scrub-join-token
+  - path: /etc/systemd/system/vrrelay-token-scrub.timer
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Poll for a persisted VRRelay node identity and scrub the join token
+
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=5min
+      Unit=vrrelay-token-scrub.service
+
+      [Install]
+      WantedBy=timers.target
+
 runcmd:
+  - install -d -m 0700 /etc/vrrelay /var/lib/vrrelay /var/lib/vrrelay/data /var/cache/vrrelay
+  - install -d -m 0755 /opt/vrrelay
   - systemctl daemon-reload
-  - systemctl enable --now vrrelay
+  - systemctl enable --now vrrelay.service
+  - systemctl enable --now vrrelay-token-scrub.timer

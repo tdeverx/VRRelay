@@ -33,6 +33,17 @@ release-candidate deployment evidence.
 - `script/check-kubernetes-templates.mjs` statically guards the migration hook
   and runtime templates so local checks catch accidental SQLite fallback even
   when Helm is unavailable.
+- `deploy/opentofu` now renders provider-neutral, role-specific cloud-init for
+  supplied VMs rather than only documenting that a provider module should exist.
+  The module requires digest-pinned VRRelay and MediaMTX image refs, forces
+  PostgreSQL/Valkey runtime mode, persists node data/cache, renders the required
+  MediaMTX sidecars for ingest-origin and edge nodes, and emits non-secret
+  `cloud_init_sha256` evidence hashes alongside sensitive user data.
+- The rendered cloud-init installs a post-enrollment scrub timer that removes
+  `VRRELAY_NODE_JOIN_TOKEN` from `/etc/vrrelay/node.env` after
+  `cluster:node-identity` appears in the encrypted file secret store.
+- `script/check-cloud-init.mjs` statically guards the OpenTofu/cloud-init
+  contract without requiring provider credentials or an OpenTofu binary.
 
 ## Lean guardrails run
 
@@ -41,6 +52,7 @@ Commands:
 ```text
 npm run check:compose
 npm run check:kubernetes
+npm run check:cloud-init
 npm run ci
 ```
 
@@ -51,13 +63,15 @@ publishes MediaMTX ingest ports, edge only publishes the relay playback port,
 and no data-plane relay inherits `VRRELAY_AGENT_LISTEN_ADDR`. The Kubernetes
 template checker confirmed that the migration hook cannot silently use SQLite
 defaults and that runtime deployments continue to load role-scoped Secrets. The
-local full CI gate passed 373 tests with 23 intentional skips and reported zero
-npm vulnerabilities.
+cloud-init/OpenTofu checker confirmed role-specific VM user-data rendering,
+persistent data/cache mounts, digest-pinned image inputs, MediaMTX sidecars, and
+post-enrollment join-token cleanup. The local full CI gate passed 373 tests with
+23 intentional skips and reported zero npm vulnerabilities.
 
 ## Deferred to later Phase 10 and final high-pass verification
 
 - True multi-host-equivalent boot evidence with separate hosts or separate
   network namespaces.
 - Rendered Helm, Kubernetes TLS, network-policy, upgrade, and recovery evidence.
-- Backup/restore rehearsal, cloud-neutral VM/OpenTofu implementation, OCI digest
-  pinning, GPU-path deployment evidence, and rollback evidence.
+- Backup/restore rehearsal, true cloud-VM boot evidence, release OCI digest
+  selection, GPU-path deployment evidence, and rollback evidence.

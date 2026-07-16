@@ -284,8 +284,11 @@ pending.
   retained target-environment benchmark evidence remain release work.
 - Multi-host Compose now has explicit role profiles and semantic render checks,
   and the Helm migration hook now forces PostgreSQL with writable migration
-  backup storage, but true multi-host boot evidence, rendered Helm/TLS behavior,
-  cloud-neutral VM provisioning, native installers, signing/notarization,
+  backup storage. Provider-neutral OpenTofu now renders role-specific VM
+  cloud-init with persistent data/cache, MediaMTX sidecars, digest-pinned image
+  inputs, and post-enrollment join-token cleanup, but true multi-host boot
+  evidence, rendered Helm/TLS behavior, real cloud-VM boot evidence, native
+  installers, signing/notarization,
   supply-chain evidence, upgrade/rollback, and clean-target installation have
   not passed their release gates.
 

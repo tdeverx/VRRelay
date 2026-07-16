@@ -30,6 +30,9 @@ retained evidence belong in the
   semantic checks for role-owned ports/listeners.
 - Kubernetes migration-hook PostgreSQL wiring with writable migration backup
   storage and local template checks against SQLite fallback.
+- Provider-neutral OpenTofu cloud-init rendering for role-specific VMs, with
+  digest-pinned images, persistent node data/cache, MediaMTX sidecars, and
+  post-enrollment join-token cleanup.
 - Unit, integration, real-service smoke, deployment, and repository-check
   harnesses. Target services and destructive scenarios remain opt-in release
   evidence rather than default-unit-test guarantees.
