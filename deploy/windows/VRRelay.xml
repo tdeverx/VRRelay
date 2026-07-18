@@ -7,6 +7,8 @@
   <workingdirectory>%BASE%\runtime</workingdirectory>
   <env name="VRRELAY_DATA_DIR" value="%ProgramData%\VRRelay\data"/>
   <env name="VRRELAY_CACHE_DIR" value="%ProgramData%\VRRelay\cache"/>
+  <env name="VRRELAY_RUNTIME_CONFIG" value="%ProgramData%\VRRelay\config\runtime-config.json"/>
+  <env name="VRRELAY_RESTART_MODE" value="exit"/>
   <env name="VRRELAY_VERSION" value="__VRRELAY_VERSION__"/>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>

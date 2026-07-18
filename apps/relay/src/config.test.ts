@@ -4,9 +4,42 @@ import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, parseListenAddress, requiresSetupToken } from './config.js';
+import {
+  loadConfig,
+  parseListenAddress,
+  requiresSetupToken,
+  validateRuntimeConfiguration
+} from './config.js';
 
 describe('relay configuration', () => {
+  it('accepts exact interface listeners and normalizes bracketed IPv6 parsing', () => {
+    const current = loadConfig({});
+    const configuration = {
+      listenAddr: '192.0.2.18:8099',
+      publicUrl: current.publicUrl,
+      adminUrl: current.adminUrl,
+      playbackUrl: current.playbackUrl,
+      trustedProxyCidrs: current.trustedProxyCidrs,
+      agentListenAddr: current.agentListenAddr,
+      maxWorkers: current.maxWorkers,
+      cacheTtlMs: current.cacheTtlMs,
+      cacheLimitBytes: current.cacheLimitBytes,
+      nodeName: current.nodeName,
+      nodeRegion: current.nodeRegion
+    };
+    expect(validateRuntimeConfiguration(current, configuration).listenAddr).toBe('192.0.2.18:8099');
+    expect(parseListenAddress('[2001:db8::18]:8099')).toEqual({
+      host: '2001:db8::18',
+      port: 8099
+    });
+    expect(() =>
+      validateRuntimeConfiguration(current, {
+        ...configuration,
+        listenAddr: 'relay.example.test:8099'
+      })
+    ).toThrow(/literal IPv4 or IPv6 address/);
+  });
+
   it('loads allowlisted runtime settings while preserving explicit environment authority', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'vrrelay-runtime-config-'));
     const path = join(directory, 'runtime.json');
@@ -285,7 +318,7 @@ describe('relay configuration', () => {
 
   it('validates listen addresses before passing them to the network server', () => {
     expect(parseListenAddress('127.0.0.1:8099')).toEqual({ host: '127.0.0.1', port: 8099 });
-    expect(parseListenAddress('[::1]:8100')).toEqual({ host: '[::1]', port: 8100 });
+    expect(parseListenAddress('[::1]:8100')).toEqual({ host: '::1', port: 8100 });
     expect(() => parseListenAddress('127.0.0.1:not-a-port')).toThrow();
     expect(() => parseListenAddress('127.0.0.1:0')).toThrow();
     expect(() => parseListenAddress('127.0.0.1:65536')).toThrow();

@@ -691,6 +691,10 @@
                   disabled={!runtime?.writable}
                   oninput={() => (runtimeValidated = false)}
                 />
+                <Field.Description>
+                  Use localhost, a specific interface IP, or 0.0.0.0 for every IPv4 interface. IPv6
+                  addresses may use brackets, for example [::]:8099.
+                </Field.Description>
               </Field.Field>
               <Field.Field>
                 <Field.Label for="agent-address">Agent listen address</Field.Label>

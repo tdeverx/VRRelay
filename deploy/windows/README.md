@@ -6,7 +6,7 @@ an Inno Setup installer.
 The installer registers WinSW as an automatic background service. The relay
 service supervises its bundled MediaMTX child, so service recovery covers both
 the API/transcoder and OBS ingest runtime. The tray starts at user sign-in, opens the dashboard
-in the system browser, and requests UAC elevation only for start, stop, or restart through
+at the exact listener saved in `%ProgramData%\VRRelay\config\runtime-config.json`, and requests UAC elevation only for start, stop, or restart through
 Windows SCM; quitting the tray never terminates streams.
 
 FFmpeg 8.1.2 is downloaded from the exact BtbN GPL build referenced by the

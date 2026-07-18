@@ -6,6 +6,7 @@
 #include <atomic>
 #include <string>
 #include <thread>
+#include <vector>
 
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -130,15 +131,89 @@ std::wstring executablePath() {
   return path;
 }
 
-std::wstring dashboardUrl() {
-  const DWORD required = GetEnvironmentVariableW(L"VRRELAY_PUBLIC_URL", nullptr, 0);
-  if (required == 0) return kDefaultDashboard;
+std::wstring environmentValue(const wchar_t* name) {
+  const DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
+  if (required == 0) return {};
   std::wstring value(required, L'\0');
-  const DWORD written = GetEnvironmentVariableW(
-      L"VRRELAY_PUBLIC_URL", value.data(), static_cast<DWORD>(value.size()));
-  if (written == 0 || written >= static_cast<DWORD>(value.size())) return kDefaultDashboard;
+  const DWORD written =
+      GetEnvironmentVariableW(name, value.data(), static_cast<DWORD>(value.size()));
+  if (written == 0 || written >= static_cast<DWORD>(value.size())) return {};
   value.resize(written);
   return value;
+}
+
+std::wstring utf8ToWide(const std::string& value) {
+  if (value.empty()) return {};
+  const int required = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+  if (required <= 0) return {};
+  std::wstring converted(static_cast<size_t>(required), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+          static_cast<int>(value.size()), converted.data(), required) != required)
+    return {};
+  return converted;
+}
+
+std::wstring runtimeListenAddress() {
+  const std::wstring programData = environmentValue(L"ProgramData");
+  if (programData.empty()) return {};
+  const std::wstring path = programData + L"\\VRRelay\\config\\runtime-config.json";
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return {};
+  LARGE_INTEGER size{};
+  if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 || size.QuadPart > 1024 * 1024) {
+    CloseHandle(file);
+    return {};
+  }
+  std::vector<char> bytes(static_cast<size_t>(size.QuadPart));
+  DWORD read = 0;
+  const BOOL succeeded = ReadFile(
+      file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr);
+  CloseHandle(file);
+  if (!succeeded || static_cast<size_t>(read) != bytes.size()) return {};
+
+  const std::string json(bytes.begin(), bytes.end());
+  size_t position = json.find("\"listenAddr\"");
+  if (position == std::string::npos) return {};
+  position = json.find(':', position + 12);
+  if (position == std::string::npos) return {};
+  position = json.find_first_not_of(" \t\r\n", position + 1);
+  if (position == std::string::npos || json[position] != '"') return {};
+  const size_t end = json.find('"', position + 1);
+  if (end == std::string::npos) return {};
+  const std::string value = json.substr(position + 1, end - position - 1);
+  if (value.find('\\') != std::string::npos) return {};
+  return utf8ToWide(value);
+}
+
+std::wstring localDashboardUrl(const std::wstring& listenAddress) {
+  const size_t separator = listenAddress.rfind(L':');
+  if (separator == std::wstring::npos || separator == 0 || separator + 1 >= listenAddress.size())
+    return {};
+  std::wstring host = listenAddress.substr(0, separator);
+  const std::wstring port = listenAddress.substr(separator + 1);
+  unsigned long portNumber = 0;
+  for (const wchar_t character : port) {
+    if (character < L'0' || character > L'9') return {};
+    portNumber = portNumber * 10 + static_cast<unsigned long>(character - L'0');
+    if (portNumber > 65'535) return {};
+  }
+  if (portNumber == 0) return {};
+  if (host.size() >= 2 && host.front() == L'[' && host.back() == L']')
+    host = host.substr(1, host.size() - 2);
+  if (host.empty()) return {};
+  if (host == L"0.0.0.0" || host == L"::") host = L"127.0.0.1";
+  const bool ipv6 = host.find(L':') != std::wstring::npos;
+  return L"http://" + (ipv6 ? L"[" + host + L"]" : host) + L":" + port;
+}
+
+std::wstring dashboardUrl() {
+  const std::wstring local = localDashboardUrl(runtimeListenAddress());
+  if (!local.empty()) return local;
+  const std::wstring configured = environmentValue(L"VRRELAY_PUBLIC_URL");
+  return configured.empty() ? kDefaultDashboard : configured;
 }
 
 void showError(HWND window, DWORD error) {

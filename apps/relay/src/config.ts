@@ -288,13 +288,9 @@ export function validateRuntimeConfiguration(
 ): RuntimeConfiguration {
   const runtime = RuntimeConfigurationSchema.parse(input);
   const listener = parseListenAddress(runtime.listenAddr);
-  if (
-    !isLoopbackRuntimeHost(listener.host) &&
-    listener.host !== '0.0.0.0' &&
-    listener.host !== '::'
-  )
+  if (!isLoopbackRuntimeHost(listener.host) && isIP(listener.host) === 0)
     throw new Error(
-      'Dashboard/API listener must use loopback or a wildcard address so local recovery remains available'
+      'Dashboard/API listener host must be localhost or a literal IPv4 or IPv6 address'
     );
   parseListenAddress(runtime.agentListenAddr);
   ConfigSchema.parse({ ...current, ...runtime });
@@ -429,7 +425,15 @@ export function requiresSetupToken(publicUrl: string): boolean {
 export function parseListenAddress(value: string): { host: string; port: number } {
   const index = value.lastIndexOf(':');
   if (index <= 0) throw new Error('VRRELAY_LISTEN_ADDR must be host:port');
-  const host = value.slice(0, index);
+  const rawHost = value.slice(0, index);
+  const hasOpeningBracket = rawHost.startsWith('[');
+  const hasClosingBracket = rawHost.endsWith(']');
+  if (hasOpeningBracket !== hasClosingBracket)
+    throw new Error('VRRELAY_LISTEN_ADDR has invalid IPv6 brackets');
+  const host = hasOpeningBracket ? rawHost.slice(1, -1) : rawHost;
+  if (!host) throw new Error('VRRELAY_LISTEN_ADDR host must not be empty');
+  if (hasOpeningBracket && isIP(host) !== 6)
+    throw new Error('VRRELAY_LISTEN_ADDR brackets may only contain an IPv6 address');
   const portText = value.slice(index + 1);
   if (!/^\d+$/.test(portText)) throw new Error('VRRELAY_LISTEN_ADDR port must be an integer');
   const port = Number(portText);

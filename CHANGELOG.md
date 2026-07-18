@@ -6,6 +6,10 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Allowed native Network settings to bind the dashboard/API to a specific IPv4 or IPv6 interface
+  instead of requiring loopback or a wildcard. The macOS menu app and Windows tray follow that
+  saved local listener, and Windows native installs now enable writable runtime settings through a
+  non-secret, user-readable configuration projection separate from protected service data.
 - Fixed Network settings saves reporting that the runtime configuration could not be cloned after
   the server had already persisted it.
 - Fixed the macOS menu app opening a blank dashboard on first launch or after a failed service

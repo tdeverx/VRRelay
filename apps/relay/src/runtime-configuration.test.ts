@@ -38,9 +38,21 @@ describe('runtime configuration', () => {
       await expect(
         persistRuntimeConfiguration(config, {
           ...configuration,
-          listenAddr: '192.168.1.20:8099'
+          listenAddr: '192.0.2.20:8099'
         })
-      ).rejects.toThrow(/local recovery/);
+      ).resolves.toMatchObject({ listenAddr: '192.0.2.20:8099' });
+      await expect(
+        persistRuntimeConfiguration(config, {
+          ...configuration,
+          listenAddr: '[2001:db8::20]:8099'
+        })
+      ).resolves.toMatchObject({ listenAddr: '[2001:db8::20]:8099' });
+      await expect(
+        persistRuntimeConfiguration(config, {
+          ...configuration,
+          listenAddr: 'relay.example.test:8099'
+        })
+      ).rejects.toThrow(/literal IPv4 or IPv6 address/);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

@@ -13,6 +13,7 @@ const windowsPackage = readFileSync(resolve(root, 'deploy/windows/package.ps1'),
 const windowsHost = readFileSync(resolve(root, 'apps/windows/VRRelayTray.cpp'), 'utf8');
 const windowsBuild = readFileSync(resolve(root, 'deploy/windows/build-tray.ps1'), 'utf8');
 const windowsInstaller = readFileSync(resolve(root, 'deploy/windows/installer.iss'), 'utf8');
+const windowsService = readFileSync(resolve(root, 'deploy/windows/VRRelay.xml'), 'utf8');
 const windowsSource = readFileSync(
   resolve(root, 'deploy/windows/build-corresponding-source.sh'),
   'utf8'
@@ -391,6 +392,26 @@ for (const [source, text, message] of [
     windowsInstaller,
     'Parameters: "--quit"',
     'Windows uninstaller must stop the tray controller cleanly'
+  ],
+  [
+    windowsInstaller,
+    'VRRelay\\config"; Permissions: admins-full system-full users-readexec',
+    'Windows installer must expose only the non-secret runtime configuration to the tray user'
+  ],
+  [
+    windowsService,
+    'VRRELAY_RUNTIME_CONFIG',
+    'Windows service must enable authenticated runtime configuration'
+  ],
+  [
+    windowsService,
+    'VRRELAY_RESTART_MODE',
+    'Windows service must enable supervised runtime restarts'
+  ],
+  [
+    windowsHost,
+    'config\\\\runtime-config.json',
+    'Windows tray must follow the listener saved by the service'
   ],
   [
     ciWorkflow,

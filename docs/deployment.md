@@ -24,13 +24,18 @@ logging back in starts them again. Upgrades retain service data. Run `deploy/mac
 from a trusted checkout to unload the user service and remove its installed runtime while retaining
 data; pass `--purge-data` only when the retained data should also be deleted.
 
-Native installs also set `VRRELAY_RUNTIME_CONFIG` to a private file in the retained data directory
+Native installs also set `VRRELAY_RUNTIME_CONFIG` to a service-owned file in retained application
+state
 and enable supervised exit/restart. The authenticated **Settings → Network** and **Runtime and
 maintenance** panels validate and persist only the documented non-secret listener, URL, proxy,
 capacity, cache, and node-label fields. Environment variables still take precedence, so Docker,
 Kubernetes, and other orchestrated deployments are displayed as read-only instead of having their
 declarative configuration silently overridden. A saved native configuration becomes active only
-after the user selects **Restart relay**.
+after the user selects **Restart relay**. Listener hosts may be `localhost`, a literal IPv4 or IPv6
+interface address, or a wildcard. Native controllers map wildcard listeners to loopback and follow
+an exact saved interface address when opening or checking the local dashboard. On Windows, the
+non-secret runtime file lives under `%ProgramData%\VRRelay\config`; protected databases and service
+data remain under the separately restricted data directory.
 
 The default macOS packager builds FFmpeg 8.1.2 from the structured,
 checksum-pinned Apple Silicon recipe in `deploy/runtime-manifest.json`; it no

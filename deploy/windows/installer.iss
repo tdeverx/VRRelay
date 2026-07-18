@@ -25,6 +25,7 @@ Source: "..\..\dist\windows\VRRelay.xml"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\VRRelay"; Permissions: admins-full system-full; Flags: uninsneveruninstall
+Name: "{commonappdata}\VRRelay\config"; Permissions: admins-full system-full users-readexec; Flags: uninsneveruninstall
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\host"
