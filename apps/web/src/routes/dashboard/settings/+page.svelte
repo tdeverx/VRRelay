@@ -329,9 +329,10 @@
     if (!request || !runtime?.writable) return;
     busy = true;
     try {
-      runtime = await api.updateRuntimeConfiguration(request);
-      runtimeDraft = structuredClone(runtime.configuration);
-      trustedProxyCidrs = runtime.configuration.trustedProxyCidrs.join(', ');
+      const result = await api.updateRuntimeConfiguration(request);
+      runtimeDraft = structuredClone(result.configuration);
+      trustedProxyCidrs = result.configuration.trustedProxyCidrs.join(', ');
+      runtime = result;
       runtimeValidated = true;
       toast.success('Configuration saved.');
     } catch (reason) {

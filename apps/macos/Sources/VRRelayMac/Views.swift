@@ -8,6 +8,7 @@ struct RelayMenu: View {
         Text(service.statusMessage)
         Divider()
         Button("Open Dashboard") { service.openDashboard() }
+            .disabled(service.isChangingState)
         Divider()
         Button("Start Relay") { service.start() }
             .disabled(service.isRunning || service.isChangingState)

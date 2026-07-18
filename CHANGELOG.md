@@ -6,6 +6,11 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed Network settings saves reporting that the runtime configuration could not be cloned after
+  the server had already persisted it.
+- Fixed the macOS menu app opening a blank dashboard on first launch or after a failed service
+  start. **Open Dashboard** now installs or repairs the background service, waits for its health
+  endpoint, and opens the browser only after the dashboard is ready.
 - Migrated the web application to the SvelteKit 3 prerelease line and Cookie 2, moved framework
   configuration into Vite, adopted the native `#lib` alias, and refreshed the remaining stable
   Svelte, Tailwind, Lucide, and AWS SDK dependencies.
