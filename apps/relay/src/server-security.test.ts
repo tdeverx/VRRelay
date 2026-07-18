@@ -91,7 +91,7 @@ afterEach(async () => {
   await Promise.all(fixtures.splice(0).map((fixture) => fixture.close()));
 });
 
-async function securityFixture(): Promise<SecurityFixture> {
+async function securityFixture(environment: NodeJS.ProcessEnv = {}): Promise<SecurityFixture> {
   const directory = await mkdtemp(join(tmpdir(), 'vrrelay-http-security-'));
   const repository = new SqliteRepository(join(directory, 'state.sqlite'));
   await repository.migrate();
@@ -186,7 +186,8 @@ async function securityFixture(): Promise<SecurityFixture> {
     VRRELAY_PUBLIC_URL: 'https://relay.example.test',
     VRRELAY_ADMIN_URL: 'https://admin.example.test',
     VRRELAY_PLAYBACK_URL: 'https://play.example.test',
-    VRRELAY_SETUP_TOKEN: setupToken
+    VRRELAY_SETUP_TOKEN: setupToken,
+    ...environment
   });
   const app = await createServer(config, services, 'standalone');
   const fixture: SecurityFixture = {
@@ -297,7 +298,9 @@ describe('HTTP authentication boundary', () => {
   });
 
   it('enforces remote setup authorization and returns a hardened login cookie', async () => {
-    const { app } = await securityFixture();
+    const { app } = await securityFixture({
+      VRRELAY_TRUSTED_PROXY_CIDRS: '127.0.0.0/8'
+    });
     const passwordSentinel = 'setup-password-must-not-leak';
     const wrongSetupToken = 'w'.repeat(40);
 
@@ -357,7 +360,7 @@ describe('HTTP authentication boundary', () => {
     expect(setCookie).toMatch(/vrrelay_csrf=/);
     expect(setCookie).toMatch(/HttpOnly/i);
     expect(setCookie).toMatch(/SameSite=Strict/i);
-    expect(setCookie).toMatch(/Secure/i);
+    expect(setCookie).not.toMatch(/Secure/i);
     expect(setCookie).toMatch(/Path=\//i);
     const setCookies = Array.isArray(authenticated.headers['set-cookie'])
       ? authenticated.headers['set-cookie']
@@ -366,7 +369,16 @@ describe('HTTP authentication boundary', () => {
     expect(csrfCookie).toBeDefined();
     expect(csrfCookie).not.toMatch(/HttpOnly/i);
     expect(csrfCookie).toMatch(/SameSite=Strict/i);
-    expect(csrfCookie).toMatch(/Secure/i);
+    expect(csrfCookie).not.toMatch(/Secure/i);
+
+    const proxiedHttps = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'x-forwarded-proto': 'https' },
+      payload: { password: adminPassword }
+    });
+    expect(proxiedHttps.statusCode).toBe(200);
+    expect(String(proxiedHttps.headers['set-cookie'])).toMatch(/Secure/i);
   });
 
   it('enforces browser CSRF and PAT scopes, expiry, and revocation at route level', async () => {

@@ -687,14 +687,14 @@ export async function createServer(
       reply.setCookie('vrrelay_session', session.token, {
         httpOnly: true,
         sameSite: 'strict',
-        secure: config.adminUrl.startsWith('https://'),
+        secure: request.protocol === 'https',
         path: '/',
         expires: new Date(session.expiresAt)
       });
       reply.setCookie('vrrelay_csrf', session.csrfToken, {
         httpOnly: false,
         sameSite: 'strict',
-        secure: config.adminUrl.startsWith('https://'),
+        secure: request.protocol === 'https',
         path: '/',
         expires: new Date(session.expiresAt)
       });
@@ -755,14 +755,14 @@ export async function createServer(
       reply.setCookie('vrrelay_user_session', session.token, {
         httpOnly: true,
         sameSite: 'strict',
-        secure: config.adminUrl.startsWith('https://'),
+        secure: request.protocol === 'https',
         path: '/',
         expires: new Date(session.expiresAt)
       });
       reply.setCookie('vrrelay_portal_csrf', session.csrfToken, {
         httpOnly: false,
         sameSite: 'strict',
-        secure: config.adminUrl.startsWith('https://'),
+        secure: request.protocol === 'https',
         path: '/',
         expires: new Date(session.expiresAt)
       });

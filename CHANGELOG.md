@@ -14,6 +14,9 @@ semantic versioning after the first public release.
 - Fixed Safari rendering the loopback dashboard as a blank page after an HTTPS public/admin URL was
   saved. Same-origin assets no longer receive a redundant policy that upgrades the native app's
   local HTTP recovery URL to HTTPS.
+- Fixed local administrator and portal logins after an HTTPS admin URL is advertised. Session and
+  CSRF cookies now use the actual trusted request protocol, remaining secure behind HTTPS while
+  working through the native app's loopback HTTP recovery URL.
 - Migrated the web application to the SvelteKit 3 prerelease line and Cookie 2, moved framework
   configuration into Vite, adopted the native `#lib` alias, and refreshed the remaining stable
   Svelte, Tailwind, Lucide, and AWS SDK dependencies.
