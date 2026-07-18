@@ -11,15 +11,6 @@
     <script>
       (() => {
         const root = document.documentElement;
-        const isNew = ['/new', '/dashboard', '/portal'].some(
-          (prefix) => location.pathname === prefix || location.pathname.startsWith(prefix + '/')
-        );
-        if (!isNew) {
-          root.removeAttribute('data-ui');
-          root.classList.add('dark');
-          return;
-        }
-        root.dataset.ui = 'new';
         const preference = localStorage.getItem('vrrelay.theme') || 'system';
         const dark =
           preference === 'dark' ||

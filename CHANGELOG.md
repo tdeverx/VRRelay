@@ -6,11 +6,17 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Promoted the Luma administrator dashboard as the sole interface, removed the retired Nova route
+  and component tree plus the interface switch, and removed the former `/new/*` preview namespace.
+  `/dashboard/*` is now the only administrator route tree.
+- Improved the dashboard Network settings with a guided Nginx Proxy Manager publishing flow:
+  one-hostname URL defaults, precise trusted-proxy guidance, an NPM front-door checklist, and a
+  Docker-network discovery command. The dashboard continues to leave DNS, certificates, router
+  forwarding, and reverse-proxy administration outside the relay security boundary.
 - Added the Luma user portal with per-user Jellyfin authentication, account-scoped catalog access,
   administrator-controlled default/allowed profiles, and simple shareable relay-link creation. The
-  administrator Luma interface is also available under `/dashboard/*`; `/new/*` remains a preview
-  alias, while the base URL selects the portal or dashboard unless the legacy interface was
-  explicitly selected for the current browser session.
+  administrator Luma interface is available under `/dashboard/*`, while the base URL selects the
+  portal or dashboard.
 - Refined portal discovery to stay empty until a user searches, return only movies and shows, and
   open a show-specific season and episode chooser. Active relay links now stay above discovery, and
   movie, show, season, and episode artwork is fetched through an authenticated same-origin proxy.
@@ -23,10 +29,9 @@ semantic versioning after the first public release.
 - Fixed first-run portal access so adding the first delegated Jellyfin endpoint automatically enables
   the user portal with the default VOD profile. Settings also repairs existing single-endpoint setups
   that predate the automatic handoff.
-- Added a complete, parallel shadcn-svelte Luma dashboard preview under `/new/*`, including every
+- Added a complete shadcn-svelte Luma dashboard under `/dashboard/*`, including every
   administrator route, responsive Sidebar/Sheet navigation, table/card data views, the four-step
-  relay workflow, session-only interface switching, and persistent system/light/dark themes. The
-  existing Nova routes remain unchanged and canonical pending explicit visual and workflow approval.
+  relay workflow, and persistent system/light/dark themes.
 - Replaced the macOS installer package with a drag-to-Applications DMG. The signed app now carries
   the sealed runtime and installs or upgrades its system LaunchDaemon from the native menu after
   administrator approval; CI publishes a development DMG for every macOS run.

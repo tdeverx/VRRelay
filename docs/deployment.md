@@ -118,3 +118,16 @@ The Windows tray is a dependency-free Win32 C++ executable. It starts for the in
 - For an existing reverse proxy, publish the relay only to the private Docker network or loopback and proxy both ordinary HTTP and WebSocket upgrades to port 8099.
 
 Quest-facing playback must use a trusted HTTPS certificate. The relay's internal Jellyfin source route is loopback-only and must never be exposed or rewritten by a reverse proxy.
+
+### Dashboard-guided reverse-proxy setup
+
+Native installations can configure their advertised URLs and trusted proxy CIDRs in
+**Settings → Network**. Select **Nginx Proxy Manager**, enter the public hostname, and use
+**Use for all URLs** to set the public, administration, and playback HTTPS origins together.
+The page includes the required NPM front-door checklist and a command for finding its Docker
+network subnet. Enter only the subnet or address NPM uses when it connects to VRRelay; never
+trust a public catch-all range. Validate and save the configuration, then restart the relay.
+
+The dashboard does not control DNS, router forwarding, Nginx Proxy Manager, or certificates.
+Docker, Kubernetes, and other environment-managed deployments remain read-only; configure their
+equivalent `VRRELAY_*` values in the deployment instead.
