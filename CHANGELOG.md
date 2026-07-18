@@ -6,6 +6,9 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed the macOS menu app's **Start Relay** and **Open Dashboard** recovery actions after a
+  listener change. An unhealthy but already-loaded LaunchAgent is now restarted so pending runtime
+  settings take effect instead of leaving the old listener running.
 - Allowed native Network settings to bind the dashboard/API to a specific IPv4 or IPv6 interface
   instead of requiring loopback or a wildcard. The macOS menu app and Windows tray follow that
   saved local listener, and Windows native installs now enable writable runtime settings through a

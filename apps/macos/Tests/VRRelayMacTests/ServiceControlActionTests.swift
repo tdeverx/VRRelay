@@ -22,6 +22,10 @@ final class ServiceControlActionTests: XCTestCase {
         XCTAssertEqual(arguments, ["/Users/O'Brien/VRRelay.app/install-service.sh", "restart"])
     }
 
+    func testUnhealthyServiceRecoveryRestartsAnAlreadyLoadedService() {
+        XCTAssertEqual(ServiceControlAction.recovery, .restart)
+    }
+
     func testDashboardUsesExactConfiguredInterface() {
         XCTAssertEqual(
             LocalDashboardURL.resolve(listenAddress: "192.0.2.18:8099").absoluteString,

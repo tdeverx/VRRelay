@@ -10,6 +10,8 @@ enum ServiceControlAction: String, CaseIterable {
     case restart
     case stop
 
+    static var recovery: Self { .restart }
+
     func helperArguments(helperPath: String) -> [String] { [helperPath, rawValue] }
 }
 
@@ -65,7 +67,7 @@ final class RelayService {
         }
     }
 
-    func start() { perform(.start, pendingMessage: "Starting background service…") }
+    func start() { perform(.recovery, pendingMessage: "Starting background service…") }
     func stop() { perform(.stop, pendingMessage: "Stopping background service…") }
     func restart() { perform(.restart, pendingMessage: "Restarting background service…") }
 
@@ -77,7 +79,7 @@ final class RelayService {
                 statusMessage = "Background service running"
                 NSWorkspace.shared.open(dashboardURL)
             } else {
-                perform(.start, pendingMessage: "Starting background service…") { [dashboardURL] in
+                perform(.recovery, pendingMessage: "Starting background service…") { [dashboardURL] in
                     NSWorkspace.shared.open(dashboardURL)
                 }
             }
