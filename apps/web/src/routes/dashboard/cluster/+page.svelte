@@ -28,22 +28,22 @@
     PublicProviderConnection,
     SegmentJob
   } from '@vrrelay/domain';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import PageHeader from '$lib/new-ui/components/PageHeader.svelte';
-  import LoadState from '$lib/new-ui/components/LoadState.svelte';
-  import StatusBadge from '$lib/new-ui/components/StatusBadge.svelte';
-  import { Badge } from '$lib/new-ui/components/ui/badge';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Dialog from '$lib/new-ui/components/ui/dialog';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import * as ScrollArea from '$lib/new-ui/components/ui/scroll-area';
-  import * as Select from '$lib/new-ui/components/ui/select';
-  import { Switch } from '$lib/new-ui/components/ui/switch';
-  import * as Tabs from '$lib/new-ui/components/ui/tabs';
-  import * as Table from '$lib/new-ui/components/ui/table';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
+  import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
+  import { Badge } from '#lib/new-ui/components/ui/badge';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Dialog from '#lib/new-ui/components/ui/dialog';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import * as ScrollArea from '#lib/new-ui/components/ui/scroll-area';
+  import * as Select from '#lib/new-ui/components/ui/select';
+  import { Switch } from '#lib/new-ui/components/ui/switch';
+  import * as Tabs from '#lib/new-ui/components/ui/tabs';
+  import * as Table from '#lib/new-ui/components/ui/table';
 
   let nodes = $state<Array<ClusterNode & { agent: { connected: boolean; connectedAt?: string } }>>(
     []

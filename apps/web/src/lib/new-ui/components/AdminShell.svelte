@@ -18,16 +18,16 @@
     TestTubeDiagonal,
     UserRound
   } from '@lucide/svelte';
-  import { api } from '$lib/api';
-  import * as DropdownMenu from '$lib/new-ui/components/ui/dropdown-menu';
-  import * as Sidebar from '$lib/new-ui/components/ui/sidebar';
-  import * as Select from '$lib/new-ui/components/ui/select';
-  import { Separator } from '$lib/new-ui/components/ui/separator';
+  import { api } from '#lib/api';
+  import * as DropdownMenu from '#lib/new-ui/components/ui/dropdown-menu';
+  import * as Sidebar from '#lib/new-ui/components/ui/sidebar';
+  import * as Select from '#lib/new-ui/components/ui/select';
+  import { Separator } from '#lib/new-ui/components/ui/separator';
   import {
     readThemePreference,
     setThemePreference,
     type ThemePreference
-  } from '$lib/new-ui/state.svelte';
+  } from '#lib/new-ui/state.svelte';
 
   let { children, rail }: { children: Snippet; rail?: Snippet } = $props();
   let health = $state<Awaited<ReturnType<typeof api.health>> | null>(null);

@@ -4,17 +4,17 @@
   import { Copy, Film, Link2, LogOut, Search, Trash2, Tv } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import type { MediaItem, ProfileRevision, RelaySession } from '@vrrelay/domain';
-  import { isAuthenticatedError, portalApi } from '$lib/api';
-  import PortalArtwork from '$lib/new-ui/components/PortalArtwork.svelte';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Dialog from '$lib/new-ui/components/ui/dialog';
-  import * as Empty from '$lib/new-ui/components/ui/empty';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import * as Select from '$lib/new-ui/components/ui/select';
-  import { Separator } from '$lib/new-ui/components/ui/separator';
-  import { Skeleton } from '$lib/new-ui/components/ui/skeleton';
+  import { isAuthenticatedError, portalApi } from '#lib/api';
+  import PortalArtwork from '#lib/new-ui/components/PortalArtwork.svelte';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Dialog from '#lib/new-ui/components/ui/dialog';
+  import * as Empty from '#lib/new-ui/components/ui/empty';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import * as Select from '#lib/new-ui/components/ui/select';
+  import { Separator } from '#lib/new-ui/components/ui/separator';
+  import { Skeleton } from '#lib/new-ui/components/ui/skeleton';
 
   let username = $state('');
   let search = $state('');

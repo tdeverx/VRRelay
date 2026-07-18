@@ -3,10 +3,10 @@
   import { onMount } from 'svelte';
   import { afterNavigate, goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { api } from '$lib/api';
-  import { Toaster } from '$lib/new-ui/components/ui/sonner';
-  import { TooltipProvider } from '$lib/new-ui/components/ui/tooltip';
-  import { applyRouteTheme, readThemePreference } from '$lib/new-ui/state.svelte';
+  import { api } from '#lib/api';
+  import { Toaster } from '#lib/new-ui/components/ui/sonner';
+  import { TooltipProvider } from '#lib/new-ui/components/ui/tooltip';
+  import { applyRouteTheme, readThemePreference } from '#lib/new-ui/state.svelte';
 
   let { children } = $props();
   let ready = $state(false);

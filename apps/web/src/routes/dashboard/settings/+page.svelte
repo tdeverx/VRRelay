@@ -11,19 +11,19 @@
     Scope
   } from '@vrrelay/domain';
   import type { PortalConfigurationRequest, RuntimeConfiguration } from '@vrrelay/contracts';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import PageHeader from '$lib/new-ui/components/PageHeader.svelte';
-  import StatusBadge from '$lib/new-ui/components/StatusBadge.svelte';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Alert from '$lib/new-ui/components/ui/alert';
-  import * as AlertDialog from '$lib/new-ui/components/ui/alert-dialog';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import * as Select from '$lib/new-ui/components/ui/select';
-  import { Switch } from '$lib/new-ui/components/ui/switch';
-  import * as Tabs from '$lib/new-ui/components/ui/tabs';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Alert from '#lib/new-ui/components/ui/alert';
+  import * as AlertDialog from '#lib/new-ui/components/ui/alert-dialog';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import * as Select from '#lib/new-ui/components/ui/select';
+  import { Switch } from '#lib/new-ui/components/ui/switch';
+  import * as Tabs from '#lib/new-ui/components/ui/tabs';
 
   type Section = 'connections' | 'tokens' | 'network' | 'runtime';
   let section = $state<Section>('connections');

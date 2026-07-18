@@ -5,16 +5,16 @@
   import { ArrowLeft, FlaskConical } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import type { ProfileRevision } from '@vrrelay/domain';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import PageHeader from '$lib/new-ui/components/PageHeader.svelte';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Alert from '$lib/new-ui/components/ui/alert';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import * as Select from '$lib/new-ui/components/ui/select';
-  import { Switch } from '$lib/new-ui/components/ui/switch';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Alert from '#lib/new-ui/components/ui/alert';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import * as Select from '#lib/new-ui/components/ui/select';
+  import { Switch } from '#lib/new-ui/components/ui/switch';
 
   let profiles = $state<ProfileRevision[]>([]);
   let encoders = $state<
