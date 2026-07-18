@@ -27,6 +27,7 @@ async function files(directory) {
 }
 
 const repositoryFiles = await files(root);
+const repositoryRelativeFiles = new Set(repositoryFiles.map((path) => relative(root, path)));
 const failures = [];
 const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 const rootLock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
@@ -330,13 +331,22 @@ for (const template of helmTemplates) {
 const versionedSources = await Promise.all(
   [
     'apps/relay/src/server.ts',
-    'apps/web/src/lib/components/AppShell.svelte',
-    'apps/web/src/routes/compatibility/+page.svelte'
+    'apps/web/src/lib/new-ui/components/AdminShell.svelte',
+    'apps/web/src/routes/dashboard/compatibility/+page.svelte'
   ].map((path) => readFile(resolve(root, path), 'utf8'))
 );
 for (const source of versionedSources) {
   if (source.includes("'0.1.0'") || source.includes('v0.1.0'))
     failures.push('runtime or dashboard contains a hard-coded application version');
+}
+for (const retiredPath of [
+  'apps/web/src/hooks.ts',
+  'apps/web/src/lib/components/AppShell.svelte',
+  'apps/web/src/routes/new/+page.svelte',
+  'apps/web/src/routes/settings/+page.svelte'
+]) {
+  if (repositoryRelativeFiles.has(retiredPath))
+    failures.push(`retired dashboard compatibility path was restored: ${retiredPath}`);
 }
 
 const runtimeManifest = JSON.parse(

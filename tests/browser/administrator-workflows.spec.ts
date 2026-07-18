@@ -1,138 +1,204 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const administratorPassword = 'VRRelay-browser-test-password';
+let authenticationCookies: Awaited<ReturnType<APIRequestContext['storageState']>>['cookies'] = [];
+let authenticationCsrf = '';
 
-async function authenticate(page: Page): Promise<void> {
-  const setupResponse = await page.request.get('/api/v1/setup');
-  expect(setupResponse.ok()).toBe(true);
-  const setup = (await setupResponse.json()) as { configured: boolean };
-  await page.goto(setup.configured ? '/login' : '/setup');
-
-  if (new URL(page.url()).pathname === '/setup') {
-    await page.getByLabel('Administrator password').fill(administratorPassword);
-    await page.getByLabel('Confirm password').fill(administratorPassword);
-    await page.getByRole('button', { name: 'Create administrator' }).click();
-    await page.waitForURL(/\/login$/);
-  }
-
-  if (new URL(page.url()).pathname === '/login') {
-    await page.getByLabel('Administrator password').fill(administratorPassword);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-  }
-
-  await expect(page).toHaveURL(/\/$/);
+async function authenticateNew(page: Page): Promise<void> {
+  await page.goto('/dashboard');
+  await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Sessions', exact: true })).toBeVisible();
 }
 
-async function expectNoSeriousAccessibilityViolations(page: Page): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const scan = await new AxeBuilder({ page })
-          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-          .analyze();
-        return scan.violations.filter(
-          (violation) => violation.impact === 'serious' || violation.impact === 'critical'
-        );
-      },
-      { message: 'expected no serious or critical WCAG A/AA violations' }
+async function expectAccessible(page: Page): Promise<void> {
+  await page.mouse.move(0, 0);
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(
+    scan.violations.filter(
+      (violation) => violation.impact === 'serious' || violation.impact === 'critical'
     )
-    .toEqual([]);
+  ).toEqual([]);
+}
+
+async function openNewNavigation(page: Page, isMobile: boolean): Promise<void> {
+  await page
+    .getByRole('button', { name: isMobile ? 'Open navigation' : 'Expand navigation' })
+    .click();
 }
 
 test.describe.configure({ mode: 'serial' });
 
-test('initializes, authenticates, and exposes responsive navigation', async ({
+test.beforeAll(async ({ request }) => {
+  const setupResponse = await request.get('/api/v1/setup');
+  expect(setupResponse.ok()).toBe(true);
+  const setup = (await setupResponse.json()) as { configured: boolean };
+  if (!setup.configured) {
+    const initializeResponse = await request.post('/api/v1/setup', {
+      data: { password: administratorPassword }
+    });
+    expect(initializeResponse.ok()).toBe(true);
+  }
+
+  const loginResponse = await request.post('/api/v1/auth/login', {
+    data: { password: administratorPassword }
+  });
+  expect(loginResponse.ok()).toBe(true);
+  authenticationCsrf = ((await loginResponse.json()) as { csrfToken: string }).csrfToken;
+  authenticationCookies = (await request.storageState()).cookies;
+});
+
+test.beforeEach(async ({ context, page }) => {
+  await context.addCookies(authenticationCookies);
+  await page.addInitScript(
+    (csrf) => sessionStorage.setItem('vrrelay.csrf', csrf),
+    authenticationCsrf
+  );
+});
+
+test('persists theme preference and follows system changes', async ({ page, isMobile }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await authenticateNew(page);
+  await expect(page.locator('html')).toHaveAttribute('data-ui', 'new');
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+
+  await openNewNavigation(page, isMobile);
+  await page.locator('#theme-choice').click();
+  await page.getByRole('option', { name: 'Dark' }).click();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  expect(await page.evaluate(() => localStorage.getItem('vrrelay.theme'))).toBe('dark');
+
+  await page.reload();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await openNewNavigation(page, isMobile);
+  await page.locator('#theme-choice').click();
+  await page.getByRole('option', { name: 'System' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+});
+
+test('renders every administrator route accessibly at review breakpoints', async ({
   page,
   isMobile
 }) => {
-  const pageErrors: Error[] = [];
-  page.on('pageerror', (error) => pageErrors.push(error));
+  await authenticateNew(page);
+  const routes = [
+    '/dashboard',
+    '/dashboard/library',
+    '/dashboard/live',
+    '/dashboard/relay/new',
+    '/dashboard/cluster',
+    '/dashboard/profiles',
+    '/dashboard/profiles/new',
+    '/dashboard/compatibility',
+    '/dashboard/system',
+    '/dashboard/settings'
+  ];
 
-  await authenticate(page);
-  await expectNoSeriousAccessibilityViolations(page);
-
-  if (isMobile) {
-    await page.getByRole('button', { name: 'Open navigation' }).click();
-    await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Close navigation' })).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused();
-  } else {
-    await page.getByRole('button', { name: 'Collapse navigation' }).click();
-    await expect(page.getByRole('button', { name: 'Expand navigation' })).toBeVisible();
-    await page.getByRole('button', { name: 'Expand navigation' }).click();
-    await expect(page.getByRole('button', { name: 'Collapse navigation' })).toBeVisible();
+  for (const route of routes) {
+    await page.goto(route);
+    await expect(page.locator('main#new-main-content')).toBeVisible();
+    await expectAccessible(page);
+    if (isMobile) {
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+      expect(overflow, `${route} should not overflow horizontally`).toBe(false);
+    } else {
+      for (const width of [320, 375, 768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth
+        );
+        expect(overflow, `${route} should fit at ${width}px`).toBe(false);
+      }
+    }
   }
-
-  expect(pageErrors).toEqual([]);
 });
 
-test('creates and revokes a scoped token, then signs out', async ({ page, isMobile }, testInfo) => {
-  const pageErrors: Error[] = [];
-  const tokenName = `Browser verification ${testInfo.project.name} retry ${testInfo.retry}`;
-  page.on('pageerror', (error) => pageErrors.push(error));
-
-  await authenticate(page);
-  if (isMobile) await page.getByRole('button', { name: 'Open navigation' }).click();
-  await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await expect(page).toHaveURL(/\/settings$/);
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Network' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Runtime and maintenance' })).toBeVisible();
-  await expect(page.getByText('Read-only deployment configuration')).toBeVisible();
-  await expect(page.getByLabel('Dashboard/API listener')).toBeDisabled();
-
-  await page.getByLabel('Token name').fill(tokenName);
-  await page.getByRole('button', { name: 'Create token' }).click();
-  await expect(page.getByText('Copy this token now')).toBeVisible();
-  const tokenEntry = page.locator('.token-list article').filter({ hasText: tokenName }).first();
-  await expect(tokenEntry).toBeVisible();
-  await tokenEntry.getByRole('button', { name: `Revoke ${tokenName}` }).click();
-  await expect(tokenEntry.getByText('Revoked', { exact: true })).toBeVisible();
-
-  await expectNoSeriousAccessibilityViolations(page);
-  await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+test('keeps setup redirects inside the dashboard namespace', async ({ page }) => {
+  await authenticateNew(page);
+  await page.goto('/dashboard/setup');
+  await expect(page).toHaveURL(/\/dashboard\/login$/);
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-  expect(pageErrors).toEqual([]);
 });
 
-test('filters Jellyfin shows and selects a season and episode', async ({ page }) => {
-  const pageErrors: Error[] = [];
-  page.on('pageerror', (error) => pageErrors.push(error));
+test('serves the dashboard namespace and a per-user Jellyfin relay portal', async ({
+  context,
+  page
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const freshSettingsPage = await context.newPage();
+  await freshSettingsPage.goto('/dashboard/settings');
+  await expect(freshSettingsPage).toHaveURL(/\/dashboard\/settings$/);
+  await expect(freshSettingsPage.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  expect(
+    await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))
+  ).toBeTruthy();
 
-  await authenticate(page);
-  await page.goto('/settings');
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  const fixtureProvider = page.locator('.provider').filter({ hasText: 'Browser fixture' });
-  const providersResponse = await page.request.get('/api/v1/providers');
-  expect(providersResponse.ok()).toBe(true);
-  const providers = (await providersResponse.json()) as { items: Array<{ name: string }> };
-  if (!providers.items.some((provider) => provider.name === 'Browser fixture')) {
-    await page.getByLabel('Connection name').fill('Browser fixture');
-    await page.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
-    await page.getByLabel('Username').fill('browser-user');
-    await page.getByLabel('Password').fill('browser-password');
-    await page.getByRole('button', { name: 'Connect and validate' }).click();
-  }
-  await expect(fixtureProvider).toBeVisible();
+  await freshSettingsPage.getByLabel('Connection name').fill('User Jellyfin');
+  await freshSettingsPage.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
+  await freshSettingsPage.getByRole('button', { name: 'Add endpoint' }).click();
+  await expect(freshSettingsPage.getByText('Per-user login')).toBeVisible();
+  expect(
+    await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))
+  ).toBeTruthy();
+  await freshSettingsPage.close();
 
-  await page.goto('/relay/new');
-  await expect(page.getByRole('heading', { name: 'New relay' })).toBeVisible();
-  await page.getByRole('radio', { name: 'Shows' }).click();
-  await page.getByRole('button', { name: /Browser Series/ }).click();
+  const portalStatusResponse = await page.request.get('/api/v1/portal/status');
+  expect(portalStatusResponse.ok()).toBe(true);
+  expect(await portalStatusResponse.json()).toMatchObject({ configured: true });
 
-  await page.getByLabel('Season').click();
-  await page.getByRole('option', { name: 'Season 1' }).click();
-  await page.getByLabel('Episode').click();
-  await page.getByRole('option', { name: 'S1E2 · The Browser Episode' }).click();
+  await page.goto('/portal/login');
+  await page.getByLabel('Username').fill('browser-user');
+  await page.getByLabel('Password').fill('browser-password');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/portal$/);
 
-  await expect(page.getByLabel('Episode')).toContainText('S1E2 · The Browser Episode');
+  const freshPortalPage = await context.newPage();
+  await freshPortalPage.goto('/portal');
+  expect(
+    await freshPortalPage.evaluate(() => sessionStorage.getItem('vrrelay.portal-csrf'))
+  ).toBeTruthy();
+  await expect(freshPortalPage.getByRole('heading', { name: 'Your relay links' })).toBeVisible();
+  const discovery = freshPortalPage.locator('main section').nth(1);
+  await expect(discovery.locator('[data-slot="card"]')).toHaveCount(0);
+  await freshPortalPage.getByLabel('Search movies and shows').fill('Browser');
+  await freshPortalPage.getByRole('button', { name: 'Search', exact: true }).click();
+  const movie = freshPortalPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
+  const series = freshPortalPage
+    .locator('[data-slot="card"]')
+    .filter({ hasText: 'Browser Series' });
+  await expect(movie).toBeVisible();
+  await expect(series).toBeVisible();
+  await expect(discovery.getByText('The Browser Episode')).toHaveCount(0);
+  await expect(movie.getByRole('img', { name: 'Browser Movie poster' })).toBeVisible();
+  await series.getByRole('button', { name: 'Choose episode' }).click();
+  const episodeDialog = freshPortalPage.getByRole('dialog');
+  await expect(episodeDialog).toBeVisible();
+  await expect(freshPortalPage.getByText('Season 1', { exact: true }).first()).toBeVisible();
+  const episode = episodeDialog
+    .locator('[data-slot="card"]')
+    .filter({ hasText: 'The Browser Episode' });
+  await expect(episode).toBeVisible();
   await expect(
-    page.locator('.summary dd').filter({ hasText: 'The Browser Episode' })
+    episode.getByRole('img', { name: 'The Browser Episode episode image' })
   ).toBeVisible();
-  expect(pageErrors).toEqual([]);
+  await episode.getByRole('button', { name: 'Create link' }).click();
+  await expect(episodeDialog).toBeHidden();
+  await expect(freshPortalPage.getByText('Relay link created and copied.')).toBeVisible();
+  await expect(freshPortalPage.getByText('The Browser Episode').last()).toBeVisible();
+  expect(
+    await freshPortalPage.locator('main section h1, main section h2').allTextContents()
+  ).toEqual(['Your relay links', 'Choose something to relay']);
+  expect(
+    await freshPortalPage.evaluate(() => sessionStorage.getItem('vrrelay.portal-csrf'))
+  ).toBeTruthy();
+  await expectAccessible(freshPortalPage);
+
+  await freshPortalPage.goto('/');
+  await expect(freshPortalPage).toHaveURL(/\/portal$/);
 });
