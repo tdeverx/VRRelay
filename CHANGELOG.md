@@ -50,6 +50,8 @@ semantic versioning after the first public release.
   the sealed runtime and installs or upgrades a per-user LaunchAgent without administrator
   approval. The relay and menu app start automatically at login, and CI publishes a development
   DMG for every macOS run.
+- Fixed per-user LaunchAgent rendering so installed runtime arguments replace the packaged
+  placeholders instead of being inserted alongside them.
 - Added explicit Jellyfin movie/show filtering and a series → season → episode picker before
   playable track selection, including hierarchical provider-contract and desktop/mobile browser
   coverage. Single HTTP `kinds` query values are normalized correctly at the API boundary.

@@ -33,8 +33,8 @@ NEXT_PLIST="$(/usr/bin/mktemp "$TARGET_ROOT/service-plist.XXXXXX")"
 cleanup() { [[ -z "$NEXT_PLIST" ]] || /bin/rm -f "$NEXT_PLIST"; }
 trap cleanup EXIT INT TERM
 /usr/bin/ditto "$RESOURCE_ROOT/org.vrrelay.service.plist" "$NEXT_PLIST"
-/usr/bin/plutil -replace ProgramArguments.0 -string "$TARGET_RUNTIME/bin/node" "$NEXT_PLIST"
-/usr/bin/plutil -replace ProgramArguments.1 -string "$TARGET_RUNTIME/apps/relay/dist/main.js" "$NEXT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 $TARGET_RUNTIME/bin/node" "$NEXT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :ProgramArguments:1 $TARGET_RUNTIME/apps/relay/dist/main.js" "$NEXT_PLIST"
 /usr/bin/plutil -replace WorkingDirectory -string "$TARGET_RUNTIME" "$NEXT_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_DATA_DIR -string "$TARGET_ROOT/data" "$NEXT_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_RUNTIME_CONFIG -string "$TARGET_ROOT/data/runtime-config.json" "$NEXT_PLIST"

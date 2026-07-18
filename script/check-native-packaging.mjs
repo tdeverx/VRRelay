@@ -45,6 +45,11 @@ requireText(
   '<key>LSUIElement</key><true/>',
   'macOS menu-bar controller must not show a Dock icon'
 );
+rejectText(
+  macInstaller,
+  'plutil -replace ProgramArguments.',
+  'macOS installer must not insert duplicate LaunchAgent arguments with plutil array key paths'
+);
 requireText(
   windowsHost,
   'Shell_NotifyIconW',
@@ -274,6 +279,11 @@ for (const [source, text, message] of [
     macInstaller,
     'launchctl bootstrap "$SERVICE_DOMAIN"',
     'macOS app service installation must bootstrap the per-user LaunchAgent'
+  ],
+  [
+    macInstaller,
+    'PlistBuddy -c "Set :ProgramArguments:0',
+    'macOS app service installation must replace the LaunchAgent argument template in place'
   ],
   [macVerifier, 'runtime-provenance.json', 'macOS DMG verifier must validate runtime provenance'],
   [macVerifier, 'hdiutil attach', 'macOS DMG verifier must mount the final disk image'],
