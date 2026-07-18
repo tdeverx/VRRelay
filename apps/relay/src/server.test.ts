@@ -212,18 +212,16 @@ describe('control-plane HTTP surface matrix', () => {
   it.each([
     {
       name: 'local HTTP',
-      environment: {},
-      expectsUpgrade: false
+      environment: {}
     },
     {
-      name: 'public HTTPS',
+      name: 'public HTTPS advertised URL reached through local recovery',
       environment: {
         VRRELAY_PUBLIC_URL: 'https://relay.example.test',
         VRRELAY_ADMIN_URL: 'https://relay.example.test',
         VRRELAY_PLAYBACK_URL: 'https://relay.example.test',
         VRRELAY_SETUP_TOKEN: 's'.repeat(40)
-      },
-      expectsUpgrade: true
+      }
     },
     {
       name: 'local HTTP administration with public HTTPS playback',
@@ -232,16 +230,15 @@ describe('control-plane HTTP surface matrix', () => {
         VRRELAY_ADMIN_URL: 'http://127.0.0.1:8099',
         VRRELAY_PLAYBACK_URL: 'https://play.example.test',
         VRRELAY_SETUP_TOKEN: 's'.repeat(40)
-      },
-      expectsUpgrade: false
+      }
     }
-  ])('sets browser asset-upgrade policy for $name', async ({ environment, expectsUpgrade }) => {
+  ])('keeps same-origin dashboard assets usable for $name', async ({ environment }) => {
     const app = await createServer(loadConfig(environment), inertServerServices, 'standalone');
     const response = await app.inject({ method: 'GET', url: '/' });
     const policy = response.headers['content-security-policy'];
 
     expect(policy).toEqual(expect.any(String));
-    expect(policy?.includes('upgrade-insecure-requests')).toBe(expectsUpgrade);
+    expect(policy).not.toContain('upgrade-insecure-requests');
     await app.close();
   });
 

@@ -11,6 +11,9 @@ semantic versioning after the first public release.
 - Fixed the macOS menu app opening a blank dashboard on first launch or after a failed service
   start. **Open Dashboard** now installs or repairs the background service, waits for its health
   endpoint, and opens the browser only after the dashboard is ready.
+- Fixed Safari rendering the loopback dashboard as a blank page after an HTTPS public/admin URL was
+  saved. Same-origin assets no longer receive a redundant policy that upgrades the native app's
+  local HTTP recovery URL to HTTPS.
 - Migrated the web application to the SvelteKit 3 prerelease line and Cookie 2, moved framework
   configuration into Vite, adopted the native `#lib` alias, and refreshed the remaining stable
   Svelte, Tailwind, Lucide, and AWS SDK dependencies.
