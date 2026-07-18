@@ -2,11 +2,11 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { Activity } from '@lucide/svelte';
-  import { portalApi } from '$lib/api';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
+  import { portalApi } from '#lib/api';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
 
   let username = $state('');
   let password = $state('');

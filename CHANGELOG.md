@@ -6,6 +6,9 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Migrated the web application to the SvelteKit 3 prerelease line and Cookie 2, moved framework
+  configuration into Vite, adopted the native `#lib` alias, and refreshed the remaining stable
+  Svelte, Tailwind, Lucide, and AWS SDK dependencies.
 - Promoted the Luma administrator dashboard as the sole interface, removed the retired Nova route
   and component tree plus the interface switch, and removed the former `/new/*` preview namespace.
   `/dashboard/*` is now the only administrator route tree.

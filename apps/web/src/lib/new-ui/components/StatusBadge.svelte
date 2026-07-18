@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge } from '$lib/new-ui/components/ui/badge';
+  import { Badge } from '#lib/new-ui/components/ui/badge';
 
   let { value }: { value: string } = $props();
   let className = $derived(

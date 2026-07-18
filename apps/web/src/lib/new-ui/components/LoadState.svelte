@@ -1,8 +1,8 @@
 <script lang="ts">
   import { AlertCircle, Inbox } from '@lucide/svelte';
-  import * as Alert from '$lib/new-ui/components/ui/alert';
-  import * as Empty from '$lib/new-ui/components/ui/empty';
-  import { Skeleton } from '$lib/new-ui/components/ui/skeleton';
+  import * as Alert from '#lib/new-ui/components/ui/alert';
+  import * as Empty from '#lib/new-ui/components/ui/empty';
+  import { Skeleton } from '#lib/new-ui/components/ui/skeleton';
 
   let {
     loading = false,

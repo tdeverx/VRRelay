@@ -3,12 +3,12 @@
   import { page } from '$app/state';
   import { LoaderCircle, LogIn } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import { api } from '$lib/api';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
+  import { api } from '#lib/api';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
 
   let password = $state('');
   let pending = $state(false);

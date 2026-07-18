@@ -4,14 +4,14 @@
   import { page } from '$app/state';
   import { Plus } from '@lucide/svelte';
   import type { ProfileRevision } from '@vrrelay/domain';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import PageHeader from '$lib/new-ui/components/PageHeader.svelte';
-  import LoadState from '$lib/new-ui/components/LoadState.svelte';
-  import StatusBadge from '$lib/new-ui/components/StatusBadge.svelte';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Table from '$lib/new-ui/components/ui/table';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
+  import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Table from '#lib/new-ui/components/ui/table';
 
   let profiles = $state<ProfileRevision[]>([]);
   let loading = $state(true);

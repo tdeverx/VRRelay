@@ -4,14 +4,14 @@
   import { page } from '$app/state';
   import { Film, Plus, Search } from '@lucide/svelte';
   import type { MediaItem, PublicProviderConnection } from '@vrrelay/domain';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import PageHeader from '$lib/new-ui/components/PageHeader.svelte';
-  import LoadState from '$lib/new-ui/components/LoadState.svelte';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import * as Select from '$lib/new-ui/components/ui/select';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import * as Select from '#lib/new-ui/components/ui/select';
 
   let providers = $state<PublicProviderConnection[]>([]);
   let items = $state<MediaItem[]>([]);

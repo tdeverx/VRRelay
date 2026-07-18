@@ -11,18 +11,18 @@
     ProfileRevision,
     PublicProviderConnection
   } from '@vrrelay/domain';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import { Button } from '$lib/new-ui/components/ui/button';
-  import * as Alert from '$lib/new-ui/components/ui/alert';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Field from '$lib/new-ui/components/ui/field';
-  import { Input } from '$lib/new-ui/components/ui/input';
-  import { Progress } from '$lib/new-ui/components/ui/progress';
-  import * as Select from '$lib/new-ui/components/ui/select';
-  import * as Sheet from '$lib/new-ui/components/ui/sheet';
-  import { Switch } from '$lib/new-ui/components/ui/switch';
-  import * as ToggleGroup from '$lib/new-ui/components/ui/toggle-group';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { Button } from '#lib/new-ui/components/ui/button';
+  import * as Alert from '#lib/new-ui/components/ui/alert';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Field from '#lib/new-ui/components/ui/field';
+  import { Input } from '#lib/new-ui/components/ui/input';
+  import { Progress } from '#lib/new-ui/components/ui/progress';
+  import * as Select from '#lib/new-ui/components/ui/select';
+  import * as Sheet from '#lib/new-ui/components/ui/sheet';
+  import { Switch } from '#lib/new-ui/components/ui/switch';
+  import * as ToggleGroup from '#lib/new-ui/components/ui/toggle-group';
 
   type MediaMode = 'movies' | 'shows';
   const steps = ['Source', 'Tracks', 'Output', 'Review'];

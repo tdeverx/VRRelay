@@ -3,14 +3,14 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { Activity, Cpu, Database, Gauge } from '@lucide/svelte';
-  import { api, isAuthenticatedError } from '$lib/api';
-  import { adminRoute } from '$lib/new-ui/state.svelte';
-  import PageHeader from '$lib/new-ui/components/PageHeader.svelte';
-  import LoadState from '$lib/new-ui/components/LoadState.svelte';
-  import StatusBadge from '$lib/new-ui/components/StatusBadge.svelte';
-  import * as Card from '$lib/new-ui/components/ui/card';
-  import * as Table from '$lib/new-ui/components/ui/table';
-  import { Progress } from '$lib/new-ui/components/ui/progress';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
+  import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
+  import * as Card from '#lib/new-ui/components/ui/card';
+  import * as Table from '#lib/new-ui/components/ui/table';
+  import { Progress } from '#lib/new-ui/components/ui/progress';
 
   let health = $state<Awaited<ReturnType<typeof api.health>> | null>(null);
   let readiness = $state<Awaited<ReturnType<typeof api.readiness>> | null>(null);

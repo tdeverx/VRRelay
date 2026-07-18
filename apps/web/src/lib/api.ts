@@ -30,7 +30,7 @@ import type {
   RuntimeConfiguration,
   SessionControlRequest
 } from '@vrrelay/contracts';
-import { client as generatedClient } from '$lib/generated/vrrelay-api/client.gen';
+import { client as generatedClient } from '#lib/generated/vrrelay-api/client.gen';
 import {
   activateBackend,
   browseCatalog,
@@ -98,7 +98,7 @@ import {
   validateRuntimeConfiguration,
   updatePortalConfiguration,
   updateRuntimeConfiguration
-} from '$lib/generated/vrrelay-api/sdk.gen';
+} from '#lib/generated/vrrelay-api/sdk.gen';
 
 // OpenAPI-generated operations own paths, methods, query serialization, and
 // request bodies. This module only adds browser authentication concerns and a

@@ -36,8 +36,8 @@ if (rootPackage.devDependencies?.['typescript-compat'] !== 'npm:@typescript/type
   failures.push('TypeScript API tooling must use the official TypeScript 6 compatibility package');
 if (rootPackage.overrides?.['@sveltejs/kit']?.cookie !== '$cookie')
   failures.push('SvelteKit must share the root API-compatible Cookie security release');
-if (rootPackage.devDependencies?.cookie !== '0.7.2')
-  failures.push('the root Cookie declaration must anchor SvelteKit compatibility at 0.7.2');
+if (rootPackage.devDependencies?.cookie !== '2.0.1')
+  failures.push('the root Cookie declaration must anchor SvelteKit 3 compatibility at 2.0.1');
 for (const consumer of ['gaxios', 'teeny-request']) {
   if (rootPackage.overrides?.[consumer]?.uuid !== '14.0.1')
     failures.push(`${consumer} must use the patched UUID 14 security override`);
@@ -150,7 +150,7 @@ for (const route of documentedRoutes) {
 }
 
 const webApiFacade = await readFile(resolve(root, 'apps/web/src/lib/api.ts'), 'utf8');
-if (!webApiFacade.includes('$lib/generated/vrrelay-api/sdk.gen'))
+if (!webApiFacade.includes('#lib/generated/vrrelay-api/sdk.gen'))
   failures.push('web API facade does not use generated OpenAPI operations');
 if (webApiFacade.includes('generatedClient.request('))
   failures.push('web API facade bypasses generated OpenAPI operations with a handwritten request');

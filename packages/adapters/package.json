@@ -18,7 +18,7 @@
   "dependencies": {
     "@vrrelay/domain": "*",
     "@vrrelay/application": "*",
-    "@aws-sdk/client-s3": "^3.1088.0",
+    "@aws-sdk/client-s3": "^3.1090.0",
     "@azure/storage-blob": "^12.33.0",
     "@google-cloud/storage": "^7.21.0",
     "better-sqlite3": "^12.11.1",
