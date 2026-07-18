@@ -3,19 +3,14 @@ import AppKit
 import Foundation
 import Observation
 import OSLog
+import ServiceManagement
 
 enum ServiceControlAction: String, CaseIterable {
     case start
     case restart
     case stop
 
-    func privilegedCommand(helperPath: String) -> String {
-        "/bin/zsh \(Self.shellQuote(helperPath)) \(rawValue)"
-    }
-
-    private static func shellQuote(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
-    }
+    func helperArguments(helperPath: String) -> [String] { [helperPath, rawValue] }
 }
 
 @MainActor @Observable
@@ -30,10 +25,14 @@ final class RelayService {
     let dashboardURL = URL(string: "http://127.0.0.1:8099")!
 
     private init() {
+        registerLoginItem()
         monitor = .scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
             Task { @MainActor [weak self] in await self?.refreshStatus() }
         }
-        Task { await refreshStatus() }
+        Task {
+            await refreshStatus()
+            perform(.start, pendingMessage: "Starting background service…")
+        }
     }
 
     func start() { perform(.start, pendingMessage: "Starting background service…") }
@@ -41,12 +40,17 @@ final class RelayService {
     func restart() { perform(.restart, pendingMessage: "Restarting background service…") }
 
     func openDashboard() {
-        if isRunning {
-            NSWorkspace.shared.open(dashboardURL)
-            return
-        }
-        perform(.start, pendingMessage: "Starting background service…") { [dashboardURL] in
-            NSWorkspace.shared.open(dashboardURL)
+        guard !isChangingState else { return }
+        Task {
+            if await serviceIsHealthy() {
+                isRunning = true
+                statusMessage = "Background service running"
+                NSWorkspace.shared.open(dashboardURL)
+            } else {
+                perform(.start, pendingMessage: "Starting background service…") { [dashboardURL] in
+                    NSWorkspace.shared.open(dashboardURL)
+                }
+            }
         }
     }
 
@@ -87,10 +91,9 @@ final class RelayService {
         }
         isChangingState = true
         statusMessage = pendingMessage
-        let command = action.privilegedCommand(helperPath: helper.path)
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                Self.runPrivileged(command)
+                Self.runHelper(action.helperArguments(helperPath: helper.path))
             }.value
             if result.status == 0 {
                 if action == .stop {
@@ -106,25 +109,30 @@ final class RelayService {
                     isChangingState = false
                     statusMessage = "Background service did not become available"
                 }
-            } else if result.output.contains("(-128)") || result.output.localizedCaseInsensitiveContains("cancel") {
-                isChangingState = false
-                statusMessage = "Administrator approval was cancelled"
             } else {
                 isChangingState = false
                 statusMessage = "Service \(action.rawValue) failed: \(result.output)"
-                logger.error("System service action failed: \(result.output, privacy: .public)")
+                logger.error("User service action failed: \(result.output, privacy: .private)")
             }
         }
     }
 
-    nonisolated private static func runPrivileged(_ command: String) -> (status: Int32, output: String) {
+    private func registerLoginItem() {
+        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else { return }
+        let loginItem = SMAppService.mainApp
+        guard loginItem.status == .notRegistered else { return }
+        do {
+            try loginItem.register()
+        } catch {
+            logger.error("Could not register login item: \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
+    nonisolated private static func runHelper(_ arguments: [String]) -> (status: Int32, output: String) {
         let process = Process()
         let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        let appleScriptCommand = command
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        process.arguments = ["-e", "do shell script \"\(appleScriptCommand)\" with administrator privileges"]
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = arguments
         process.standardOutput = pipe
         process.standardError = pipe
         do {

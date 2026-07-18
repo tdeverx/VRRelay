@@ -47,8 +47,9 @@ semantic versioning after the first public release.
   administrator route, responsive Sidebar/Sheet navigation, table/card data views, the four-step
   relay workflow, and persistent system/light/dark themes.
 - Replaced the macOS installer package with a drag-to-Applications DMG. The signed app now carries
-  the sealed runtime and installs or upgrades its system LaunchDaemon from the native menu after
-  administrator approval; CI publishes a development DMG for every macOS run.
+  the sealed runtime and installs or upgrades a per-user LaunchAgent without administrator
+  approval. The relay and menu app start automatically at login, and CI publishes a development
+  DMG for every macOS run.
 - Added explicit Jellyfin movie/show filtering and a series → season → episode picker before
   playable track selection, including hierarchical provider-contract and desktop/mobile browser
   coverage. Single HTTP `kinds` query values are normalized correctly at the API boundary.

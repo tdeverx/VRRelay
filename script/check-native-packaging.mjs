@@ -272,8 +272,8 @@ for (const [source, text, message] of [
   ],
   [
     macInstaller,
-    'launchctl bootstrap system',
-    'macOS app service installation must bootstrap the system LaunchDaemon'
+    'launchctl bootstrap "$SERVICE_DOMAIN"',
+    'macOS app service installation must bootstrap the per-user LaunchAgent'
   ],
   [macVerifier, 'runtime-provenance.json', 'macOS DMG verifier must validate runtime provenance'],
   [macVerifier, 'hdiutil attach', 'macOS DMG verifier must mount the final disk image'],

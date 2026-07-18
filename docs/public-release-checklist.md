@@ -36,7 +36,7 @@ This checklist defines the difference between a buildable repository, a release 
 - Update `CHANGELOG.md`, compatibility evidence, implementation status, runtime manifest, and upgrade notes.
 - Create the version tag only after the candidate commit has passed every gate. The release workflow reruns CI, distributed acceptance, and high/critical security scanning before building artifacts.
 - Verify artifact checksums, SBOM/provenance, install each final artifact, and perform one post-package VRChat smoke test before marking the GitHub release non-prerelease.
-- Verify `/api/v1/health`, the dashboard, OCI labels, Helm app version, macOS DMG/app/LaunchDaemon metadata, and Windows installer metadata all report the normalized release tag.
+- Verify `/api/v1/health`, the dashboard, OCI labels, Helm app version, macOS DMG/app/LaunchAgent metadata, and Windows installer metadata all report the normalized release tag.
 - Publish known limitations prominently. Experimental codecs and delivery methods remain labelled experimental until recorded VRChat evidence promotes them.
 
 The public repository may be opened after the feature-complete release-candidate gate passes, before the supported-v1 target-environment gates are complete, provided the README and implementation status make that distinction explicit. A private development remote may exist earlier. “Feature complete” means the documented v1 scope is implemented; “released” additionally requires every target-environment and real-client gate above.

@@ -11,15 +11,17 @@ VRRELAY_LISTEN_ADDR=127.0.0.1:8099 node apps/relay/dist/main.js
 The SwiftPM menu-bar controller builds with `swift build --package-path apps/macos`. It is a
 menu-bar-only utility with no Dock icon, application window, embedded browser, or settings window.
 The macOS artifact is a drag-to-Applications DMG containing the app and an Applications shortcut.
-After copying `VRRelay.app` to Applications, open it and choose **Start relay**. macOS asks for
-administrator approval while the app copies its sealed runtime to `/Library/Application
-Support/VRRelay`, installs `org.vrrelay.service` as a system LaunchDaemon, and starts it. **Restart
-relay** applies the runtime bundled with the current app before restarting; **Stop relay** leaves
-the runtime and retained data installed. The menu opens the dashboard in the system browser.
+After copying `VRRelay.app` to Applications, open it. No administrator approval is required: the
+app copies its sealed runtime to `~/Library/Application Support/VRRelay`, installs
+`org.vrrelay.service` as a per-user LaunchAgent, and starts it. The app also registers itself as a
+login item when launched from Applications. **Restart relay** applies the runtime bundled with the
+current app before restarting; **Stop relay** leaves the runtime and retained data installed. The
+menu opens the dashboard in the system browser.
 
-The LaunchDaemon supervises both the TypeScript relay and bundled MediaMTX process, so quitting the
-menu utility or logging out does not stop active streams. Upgrades retain service data. Run
-`deploy/macos/uninstall.sh` from a trusted checkout to remove installed binaries while retaining
+The LaunchAgent supervises both the TypeScript relay and bundled MediaMTX process independently of
+the menu utility and starts at each login. Logging out ends the current user's relay processes;
+logging back in starts them again. Upgrades retain service data. Run `deploy/macos/uninstall.sh`
+from a trusted checkout to unload the user service and remove its installed runtime while retaining
 data; pass `--purge-data` only when the retained data should also be deleted.
 
 Native installs also set `VRRELAY_RUNTIME_CONFIG` to a private file in the retained data directory
@@ -28,7 +30,7 @@ maintenance** panels validate and persist only the documented non-secret listene
 capacity, cache, and node-label fields. Environment variables still take precedence, so Docker,
 Kubernetes, and other orchestrated deployments are displayed as read-only instead of having their
 declarative configuration silently overridden. A saved native configuration becomes active only
-after the administrator selects **Restart relay**.
+after the user selects **Restart relay**.
 
 The default macOS packager builds FFmpeg 8.1.2 from the structured,
 checksum-pinned Apple Silicon recipe in `deploy/runtime-manifest.json`; it no

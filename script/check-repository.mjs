@@ -455,11 +455,19 @@ const macService = await readFile(
 );
 const macViews = await readFile(resolve(root, 'apps/macos/Sources/VRRelayMac/Views.swift'), 'utf8');
 const macInstaller = await readFile(resolve(root, 'deploy/macos/install-service.sh'), 'utf8');
-if (!macService.includes('install-service') || !macInstaller.includes('system/org.vrrelay.service'))
-  failures.push('macOS host does not install and control the packaged system LaunchDaemon');
-for (const forbidden of ['Library/LaunchAgents', 'gui/', '/Users/admin/Documents/VRR']) {
+if (!macService.includes('install-service') || !macInstaller.includes('gui/$USER_ID'))
+  failures.push('macOS host does not install and control the packaged per-user LaunchAgent');
+for (const forbidden of [
+  '/Library/LaunchDaemons',
+  'system/org.vrrelay.service',
+  'administrator privileges',
+  '/usr/bin/osascript',
+  '/Users/admin/Documents/VRR'
+]) {
   if (`${macService}\n${macViews}\n${macInstaller}`.includes(forbidden))
-    failures.push(`macOS host contains development-only service path ${forbidden}`);
+    failures.push(
+      `macOS host contains a forbidden service path or elevation mechanism: ${forbidden}`
+    );
 }
 if (macViews.includes('repositoryPath'))
   failures.push('macOS settings expose the removed developer repository path');

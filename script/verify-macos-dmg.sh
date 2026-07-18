@@ -39,12 +39,17 @@ require_equal() {
 require_equal "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" 'org.vrrelay.app' 'Application identifier'
 require_equal "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" "$EXPECTED_VERSION" 'Application version'
 require_equal "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" "$EXPECTED_BUILD" 'Application build'
-require_equal "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$SERVICE")" 'org.vrrelay.service' 'LaunchDaemon label'
-require_equal "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:VRRELAY_VERSION' "$SERVICE")" "$EXPECTED_VERSION" 'LaunchDaemon version'
-require_equal "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$SERVICE")" '/Library/Application Support/VRRelay/runtime/bin/node' 'LaunchDaemon executable'
-[[ -x "$INSTALLER" ]] || { echo 'Privileged service installer is missing or not executable' >&2; exit 1; }
+require_equal "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$SERVICE")" 'org.vrrelay.service' 'LaunchAgent label'
+require_equal "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:VRRELAY_VERSION' "$SERVICE")" "$EXPECTED_VERSION" 'LaunchAgent version'
+require_equal "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$SERVICE")" 'VRRELAY_RUNTIME/bin/node' 'LaunchAgent executable template'
+require_equal "$(<"$RUNTIME/build-id.txt")" "$EXPECTED_VERSION-$EXPECTED_BUILD" 'Runtime build identifier'
+[[ -x "$INSTALLER" ]] || { echo 'User service installer is missing or not executable' >&2; exit 1; }
 grep -Fq 'runtime.next' "$INSTALLER"
-grep -Fq 'launchctl bootstrap system' "$INSTALLER"
+grep -Fq 'launchctl bootstrap "$SERVICE_DOMAIN"' "$INSTALLER"
+if grep -Eq 'osascript|administrator privileges|/Library/LaunchDaemons|bootstrap system' "$INSTALLER"; then
+  echo 'User service installer contains a legacy elevation or LaunchDaemon path' >&2
+  exit 1
+fi
 
 codesign --verify --deep --strict "$APP"
 require_equal "$(lipo -archs "$APP/Contents/MacOS/VRRelayMac")" arm64 'Application architecture'
