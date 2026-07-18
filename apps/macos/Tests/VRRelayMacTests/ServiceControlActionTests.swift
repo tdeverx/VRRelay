@@ -21,4 +21,29 @@ final class ServiceControlActionTests: XCTestCase {
         )
         XCTAssertEqual(arguments, ["/Users/O'Brien/VRRelay.app/install-service.sh", "restart"])
     }
+
+    func testDashboardUsesExactConfiguredInterface() {
+        XCTAssertEqual(
+            LocalDashboardURL.resolve(listenAddress: "192.0.2.18:8099").absoluteString,
+            "http://192.0.2.18:8099"
+        )
+    }
+
+    func testDashboardMapsWildcardListenerToLoopback() {
+        XCTAssertEqual(
+            LocalDashboardURL.resolve(listenAddress: "0.0.0.0:8099").absoluteString,
+            "http://127.0.0.1:8099"
+        )
+        XCTAssertEqual(
+            LocalDashboardURL.resolve(listenAddress: "[::]:8099").absoluteString,
+            "http://127.0.0.1:8099"
+        )
+    }
+
+    func testDashboardFallsBackForMissingListener() {
+        XCTAssertEqual(
+            LocalDashboardURL.resolve(listenAddress: nil),
+            LocalDashboardURL.fallback
+        )
+    }
 }

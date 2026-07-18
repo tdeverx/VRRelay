@@ -54,7 +54,7 @@ if [[ -f "$TARGET_PLIST" ]] && /usr/bin/cmp -s "$NEXT_PLIST" "$TARGET_PLIST"; th
   PLIST_CHANGED=0
 fi
 
-if [[ "$ACTION" == "restart" || "$RUNTIME_CHANGED" -eq 1 || "$PLIST_CHANGED" -eq 1 ]]; then
+if [[ "$RUNTIME_CHANGED" -eq 1 || "$PLIST_CHANGED" -eq 1 ]]; then
   /bin/launchctl bootout "$SERVICE_TARGET" 2>/dev/null || true
 fi
 
@@ -78,7 +78,15 @@ if [[ "$PLIST_CHANGED" -eq 1 ]]; then
 fi
 
 if ! /bin/launchctl print "$SERVICE_TARGET" >/dev/null 2>&1; then
-  /bin/launchctl bootstrap "$SERVICE_DOMAIN" "$TARGET_PLIST"
+  BOOTSTRAPPED=0
+  for bootstrap_attempt in {1..20}; do
+    if /bin/launchctl bootstrap "$SERVICE_DOMAIN" "$TARGET_PLIST" 2>/dev/null; then
+      BOOTSTRAPPED=1
+      break
+    fi
+    /bin/sleep 0.25
+  done
+  [[ "$BOOTSTRAPPED" -eq 1 ]] || /bin/launchctl bootstrap "$SERVICE_DOMAIN" "$TARGET_PLIST"
 fi
 /bin/launchctl enable "$SERVICE_TARGET"
 if [[ "$ACTION" == "restart" ]]; then /bin/launchctl kickstart -k "$SERVICE_TARGET"; fi

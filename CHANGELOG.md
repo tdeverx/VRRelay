@@ -52,6 +52,9 @@ semantic versioning after the first public release.
   DMG for every macOS run.
 - Fixed per-user LaunchAgent rendering so installed runtime arguments replace the packaged
   placeholders instead of being inserted alongside them.
+- Fixed the macOS menu controller to follow an exact configured LAN listener for health checks and
+  dashboard opening. Ordinary LaunchAgent restarts now use launchd's in-place restart operation,
+  avoiding unnecessary unload/bootstrap races.
 - Added explicit Jellyfin movie/show filtering and a series → season → episode picker before
   playable track selection, including hierarchical provider-contract and desktop/mobile browser
   coverage. Single HTTP `kinds` query values are normalized correctly at the API boundary.

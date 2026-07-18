@@ -13,6 +13,25 @@ enum ServiceControlAction: String, CaseIterable {
     func helperArguments(helperPath: String) -> [String] { [helperPath, rawValue] }
 }
 
+enum LocalDashboardURL {
+    static let fallback = URL(string: "http://127.0.0.1:8099")!
+
+    static func resolve(listenAddress: String?) -> URL {
+        guard let listenAddress, !listenAddress.isEmpty,
+              var components = URLComponents(string: "http://\(listenAddress)") else {
+            return fallback
+        }
+        if components.host == "0.0.0.0" || components.host == "::" || components.host == "[::]" {
+            components.host = "127.0.0.1"
+        }
+        return components.url ?? fallback
+    }
+}
+
+private struct RuntimeConfigurationProjection: Decodable {
+    let listenAddr: String?
+}
+
 @MainActor @Observable
 final class RelayService {
     static let shared = RelayService()
@@ -22,7 +41,18 @@ final class RelayService {
     var isRunning = false
     var isChangingState = false
     var statusMessage = "Checking service…"
-    let dashboardURL = URL(string: "http://127.0.0.1:8099")!
+    var dashboardURL: URL {
+        let configurationURL = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Application Support/VRRelay/data/runtime-config.json")
+        guard let data = try? Data(contentsOf: configurationURL),
+              let configuration = try? JSONDecoder().decode(
+                  RuntimeConfigurationProjection.self,
+                  from: data
+              ) else {
+            return LocalDashboardURL.fallback
+        }
+        return LocalDashboardURL.resolve(listenAddress: configuration.listenAddr)
+    }
 
     private init() {
         registerLoginItem()

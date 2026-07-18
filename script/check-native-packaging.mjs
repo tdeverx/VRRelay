@@ -50,6 +50,11 @@ rejectText(
   'plutil -replace ProgramArguments.',
   'macOS installer must not insert duplicate LaunchAgent arguments with plutil array key paths'
 );
+rejectText(
+  macInstaller,
+  '"$ACTION" == "restart" ||',
+  'macOS installer must not unload the LaunchAgent for an ordinary same-build restart'
+);
 requireText(
   windowsHost,
   'Shell_NotifyIconW',
