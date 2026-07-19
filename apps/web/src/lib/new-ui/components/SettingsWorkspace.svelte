@@ -761,6 +761,20 @@
                 </Field.Description>
               {/if}
             </Field.Field>
+            <Field.Field>
+              <Field.Label for="viewer-region-header">Viewer region header</Field.Label>
+              <Input
+                id="viewer-region-header"
+                bind:value={runtimeDraft.viewerRegionHeader}
+                placeholder="x-vrrelay-region"
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              />
+              <Field.Description>
+                Accepted only from the trusted proxy CIDRs above. The value must match a configured
+                node region.
+              </Field.Description>
+            </Field.Field>
           </Field.Group>
           {#if accessMode === 'nginx-proxy-manager'}
             <div class="rounded-lg border p-4 text-sm">
@@ -868,6 +882,25 @@
                   runtimeValidated = false;
                 }}
               /></Field.Field
+            ><Field.Field
+              ><Field.Label for="producer-idle-timeout"
+                >VOD producer idle time (seconds)</Field.Label
+              ><Input
+                id="producer-idle-timeout"
+                type="number"
+                min="15"
+                max="600"
+                value={Math.round(runtimeDraft.vodProducerIdleTimeoutMs / 1_000)}
+                disabled={!runtime?.writable}
+                oninput={(event) => {
+                  runtimeDraft!.vodProducerIdleTimeoutMs = Math.round(
+                    Number(event.currentTarget.value) * 1_000
+                  );
+                  runtimeValidated = false;
+                }}
+              /><Field.Description
+                >Stops the continuous source connection after demand goes quiet.</Field.Description
+              ></Field.Field
             ></Field.Group
           ></Card.Content
         >{#if runtime?.restartRequired}<Card.Footer

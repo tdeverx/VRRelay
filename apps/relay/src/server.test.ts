@@ -35,6 +35,7 @@ import {
   rotateNodeCertificateWithDelivery,
   setNodeDrainWithDelivery,
   shouldRateLimitRequest,
+  trustedViewerRegion,
   type ControlPlaneHttpSurface,
   type ServerServices
 } from './server.js';
@@ -151,6 +152,40 @@ describe('HTTP log redaction', () => {
     );
     expect(redactRequestUrl('/internal/source/source-grant')).toBe('/internal/source/[REDACTED]');
     expect(redactRequestUrl('/api/v1/sessions')).toBe('/api/v1/sessions');
+  });
+});
+
+describe('trusted viewer region headers', () => {
+  const request = (value: string, rawHeaders = ['X-VRRelay-Region', value]) =>
+    ({
+      headers: { 'x-vrrelay-region': value },
+      raw: { socket: { remoteAddress: '192.0.2.10' }, rawHeaders }
+    }) as never;
+
+  it('accepts one exact configured region only from a trusted peer', () => {
+    expect(
+      trustedViewerRegion(request('london'), 'x-vrrelay-region', () => true, ['london', 'sydney'])
+    ).toBe('london');
+    expect(
+      trustedViewerRegion(request('london'), 'x-vrrelay-region', () => false, ['london'])
+    ).toBeUndefined();
+  });
+
+  it('rejects malformed, duplicate, and unmatched region values', () => {
+    expect(
+      trustedViewerRegion(request('London'), 'x-vrrelay-region', () => true, ['london'])
+    ).toBeUndefined();
+    expect(
+      trustedViewerRegion(
+        request('london', ['X-VRRelay-Region', 'london', 'X-VRRelay-Region', 'sydney']),
+        'x-vrrelay-region',
+        () => true,
+        ['london', 'sydney']
+      )
+    ).toBeUndefined();
+    expect(
+      trustedViewerRegion(request('new-york'), 'x-vrrelay-region', () => true, ['london'])
+    ).toBeUndefined();
   });
 });
 
@@ -427,7 +462,10 @@ describe('control-plane HTTP surface matrix', () => {
       headers: { 'x-forwarded-for': '127.0.0.1', 'user-agent': 'fixture' }
     });
     expect([trusted.statusCode, untrusted.statusCode]).toEqual([200, 200]);
-    expect(identities).toEqual(['198.51.100.7|fixture', '203.0.113.9|fixture']);
+    expect(identities).toHaveLength(2);
+    expect(identities[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(identities[1]).toMatch(/^[a-f0-9]{64}$/);
+    expect(identities[0]).not.toBe(identities[1]);
     await app.close();
   });
 });

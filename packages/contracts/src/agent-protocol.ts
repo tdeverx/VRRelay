@@ -2,7 +2,9 @@
 import { z } from 'zod';
 import { CachedObjectSchema, NodeCapabilitySchema } from '@vrrelay/domain';
 
-const StrictNodeCapabilitySchema = NodeCapabilitySchema.strict();
+const StrictNodeCapabilitySchema = NodeCapabilitySchema.extend({
+  vodProducerVersion: z.number().int().min(0)
+}).strict();
 
 const IdentifierSchema = z.string().min(1).max(200);
 const JobIdentifierSchema = z.string().min(1).max(500);
@@ -96,7 +98,14 @@ const JobOfferPayloadSchema = z
     jobId: JobIdentifierSchema,
     sessionId: IdentifierSchema,
     contentKey: z.string().min(1).max(2_000),
-    segmentIndex: z.number().int().nonnegative()
+    segmentIndex: z.number().int().nonnegative(),
+    sourceCredential: z
+      .object({
+        accessToken: z.string().min(1).max(8_192),
+        providerUserId: z.string().min(1).max(500)
+      })
+      .strict()
+      .optional()
   })
   .strict();
 
@@ -149,6 +158,7 @@ const JobFailedPayloadSchema = z
   })
   .strict();
 const JobCancelPayloadSchema = z.object({ jobId: JobIdentifierSchema }).strict();
+const ProducerStopPayloadSchema = z.object({ sessionId: IdentifierSchema }).strict();
 const CacheInventoryPayloadSchema = z.object({}).strict();
 const CacheEvictPayloadSchema = z
   .object({
@@ -271,6 +281,8 @@ export const AgentEnvelopeSchema = z.discriminatedUnion('kind', [
   envelope('heartbeat', CapabilityPayloadSchema),
   envelope('capabilities', CapabilityPayloadSchema),
   envelope('job.offer', JobOfferPayloadSchema),
+  envelope('producer.start', JobOfferPayloadSchema),
+  envelope('producer.stop', ProducerStopPayloadSchema),
   envelope('job.accept', JobAcceptedPayloadSchema),
   envelope('job.reject', JobRejectedPayloadSchema),
   envelope('job.progress', JobProgressPayloadSchema),

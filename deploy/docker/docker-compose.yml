@@ -20,6 +20,8 @@ services:
       VRRELAY_MEDIAMTX_READ_TOKEN: ${VRRELAY_MEDIAMTX_READ_TOKEN:?Set a random read token}
       VRRELAY_MEDIAMTX_ALLOW_INTERNAL_READ: 'true'
       VRRELAY_MAX_WORKERS: ${VRRELAY_MAX_WORKERS:-2}
+      VRRELAY_VIEWER_REGION_HEADER: ${VRRELAY_VIEWER_REGION_HEADER:-x-vrrelay-region}
+      VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: ${VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT:-60s}
     volumes:
       - vrrelay-data:/data
       - vrrelay-cache:/cache

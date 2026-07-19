@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { spawn } from 'node:child_process';
-import { mkdir, rename, rm } from 'node:fs/promises';
+import { access, mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import type {
@@ -8,7 +8,9 @@ import type {
   MediaCapabilities,
   ResolvedSource,
   SegmentRequest,
-  Transcoder
+  Transcoder,
+  VodProducerRequest,
+  ProducedVodSegment
 } from '@vrrelay/application';
 import type { ProfileRevision } from '@vrrelay/domain';
 
@@ -117,8 +119,9 @@ export class FFmpegTranscoder implements Transcoder {
       '-loglevel',
       'warning',
       '-nostdin',
-      '-ss',
-      request.startSeconds.toFixed(3),
+      ...(request.source.positionedAtSeconds === request.startSeconds
+        ? []
+        : ['-ss', request.startSeconds.toFixed(3)]),
       ...this.#inputArgs(request.source, request.profile),
       '-t',
       request.duration.toFixed(3),
@@ -146,6 +149,100 @@ export class FFmpegTranscoder implements Transcoder {
       await rm(temporary, { force: true });
       throw error;
     }
+  }
+
+  async produceVod(
+    request: VodProducerRequest,
+    directory: string,
+    onSegment: (segment: ProducedVodSegment) => Promise<void>,
+    signal?: AbortSignal
+  ): Promise<void> {
+    await mkdir(directory, { recursive: true });
+    const fmp4 = request.profile.delivery.segmentType === 'fmp4';
+    const extension = fmp4 ? 'm4s' : 'ts';
+    const playlist = join(directory, 'producer.m3u8');
+    const pattern = join(directory, `segment-%d.${extension}`);
+    const initialBurst = Math.min(30, Math.max(6, request.profile.delivery.segmentDuration * 3));
+    const args = [
+      '-hide_banner',
+      '-loglevel',
+      'warning',
+      '-nostdin',
+      '-ss',
+      request.startSeconds.toFixed(3),
+      '-readrate',
+      '1',
+      '-readrate_initial_burst',
+      initialBurst.toFixed(3),
+      ...this.#inputArgs(request.source, request.profile),
+      '-t',
+      request.duration.toFixed(3),
+      '-map',
+      '0:v:0',
+      '-map',
+      request.audioTrack === undefined ? '0:a:0?' : `0:${request.audioTrack}?`,
+      ...this.#videoArgs(request.profile, request.source, request.subtitleTrack),
+      ...this.#audioArgs(request.profile),
+      '-f',
+      'hls',
+      '-hls_time',
+      request.profile.delivery.segmentDuration.toFixed(3),
+      '-hls_list_size',
+      '0',
+      '-hls_flags',
+      'independent_segments+temp_file',
+      '-start_number',
+      String(request.startSegmentIndex),
+      '-hls_segment_filename',
+      pattern,
+      ...(fmp4
+        ? ['-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4']
+        : ['-hls_segment_type', 'mpegts']),
+      '-y',
+      playlist
+    ];
+    const published = new Set<number>();
+    const scan = async () => {
+      const files = await readdir(directory).catch(() => [] as string[]);
+      const ready = files
+        .map((file) => ({ file, match: file.match(new RegExp(`^segment-(\\d+)\\.${extension}$`)) }))
+        .filter((entry): entry is { file: string; match: RegExpMatchArray } => Boolean(entry.match))
+        .map((entry) => ({ file: entry.file, index: Number(entry.match[1]) }))
+        .filter((entry) => !published.has(entry.index))
+        .sort((left, right) => left.index - right.index);
+      const initPath = fmp4 ? join(directory, 'init.mp4') : undefined;
+      if (initPath)
+        try {
+          await access(initPath);
+        } catch {
+          return;
+        }
+      for (const segment of ready) {
+        await onSegment({
+          index: segment.index,
+          path: join(directory, segment.file),
+          ...(initPath ? { initPath } : {})
+        });
+        published.add(segment.index);
+      }
+    };
+    let outcome: { error?: unknown } | undefined;
+    const running = this.#run(args, undefined, signal).then(
+      () => {
+        outcome = {};
+      },
+      (error) => {
+        outcome = { error };
+      }
+    );
+    while (!outcome) {
+      await scan();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await running;
+    await scan();
+    if (outcome.error)
+      throw outcome.error instanceof Error ? outcome.error : new Error('VOD producer failed');
   }
 
   async streamFragmentedMp4(
@@ -240,7 +337,13 @@ export class FFmpegTranscoder implements Transcoder {
       .join('');
     const decode = profile.video.decodeMode;
     const hardware = decode === 'auto' || decode === 'software' ? [] : ['-hwaccel', decode];
-    return [...hardware, ...(headerBlock ? ['-headers', headerBlock] : []), '-i', source.url];
+    return [
+      ...hardware,
+      ...(headerBlock ? ['-headers', headerBlock] : []),
+      ...(source.positionedAtSeconds !== undefined ? ['-seekable', '0'] : []),
+      '-i',
+      source.url
+    ];
   }
 
   #videoArgs(profile: ProfileRevision, source?: ResolvedSource, subtitleTrack?: number): string[] {

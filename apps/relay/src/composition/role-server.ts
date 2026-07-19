@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import helmet from '@fastify/helmet';
@@ -65,8 +65,12 @@ function authorizeEdgeMediaMtxRead(
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-function viewerIdentity(request: FastifyRequest): string {
-  return `${request.ip}|${String(request.headers['user-agent'] ?? 'unknown').slice(0, 256)}`;
+function viewerIdentity(request: FastifyRequest, key: Buffer): string {
+  return createHmac('sha256', key)
+    .update(request.ip)
+    .update('\0')
+    .update(String(request.headers['user-agent'] ?? 'unknown').slice(0, 256))
+    .digest('hex');
 }
 
 function metricsAuthorized(config: RelayConfig, request: FastifyRequest): boolean {
@@ -81,6 +85,8 @@ export async function createRoleServer(
   config: RelayConfig,
   services: RoleServerServices
 ): Promise<FastifyInstance> {
+  const viewerIdentityKey = randomBytes(32);
+  const viewerAffinity = (request: FastifyRequest) => viewerIdentity(request, viewerIdentityKey);
   const app = Fastify({
     logger: {
       level: process.env.VRRELAY_LOG_LEVEL ?? 'info',
@@ -265,7 +271,7 @@ export async function createRoleServer(
     app.get('/play/:token/index.m3u8', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
       const token = (request.params as { token: string }).token;
-      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
       const base = `${config.playbackUrl.replace(/\/$/, '')}/play/${token}/segment`;
       const manifest = await services.sessions.manifest(token, base);
       services.sessions.recordEgress(Buffer.byteLength(manifest), session.id);
@@ -273,14 +279,15 @@ export async function createRoleServer(
     });
     app.get('/play/:token/segment/:index.ts', async (request, reply) => {
       const params = request.params as { token: string; index: string };
-      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const segmentIndex = Number(params.index);
+      const session = await services.sessions.touchViewer(
+        params.token,
+        viewerAffinity(request),
+        segmentIndex
+      );
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
-      const path = await services.sessions.segment(
-        params.token,
-        Number(params.index),
-        controller.signal
-      );
+      const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'public, max-age=31536000, immutable');
@@ -294,14 +301,15 @@ export async function createRoleServer(
     });
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
-      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const segmentIndex = Number(params.index);
+      const session = await services.sessions.touchViewer(
+        params.token,
+        viewerAffinity(request),
+        segmentIndex
+      );
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
-      const path = await services.sessions.segment(
-        params.token,
-        Number(params.index),
-        controller.signal
-      );
+      const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'public, max-age=31536000, immutable');
@@ -315,7 +323,7 @@ export async function createRoleServer(
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = (request.params as { token: string }).token;
-      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.initSegment(token, controller.signal);
@@ -332,7 +340,7 @@ export async function createRoleServer(
     });
     app.get('/play/:token/live.m3u8', async (request, reply) => {
       const token = (request.params as { token: string }).token;
-      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
       const channel = await services.sessions.resolveLive(token);
       const response = await fetchLiveHlsWithPathRecovery(
         channel.path,
@@ -354,7 +362,7 @@ export async function createRoleServer(
       const params = request.params as { token: string; '*': string };
       if (!params['*'] || params['*'].includes('..') || params['*'].includes('\\'))
         return reply.status(400).send();
-      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(params.token, viewerAffinity(request));
       const channel = await services.sessions.resolveLive(params.token);
       const response = await fetchLiveHlsWithPathRecovery(
         channel.path,

@@ -8,8 +8,17 @@ const username = process.env.FIXTURE_USERNAME ?? 'fixture-user';
 const password = process.env.FIXTURE_PASSWORD ?? 'fixture-password';
 const accessToken = process.env.FIXTURE_ACCESS_TOKEN ?? 'fixture-access-token';
 const media = statSync(mediaPath);
-const durationSeconds = 12;
-const stats = { authentications: 0, sourceRequests: 0, playbackEvents: 0 };
+const durationSeconds = 80;
+const stats = {
+  authentications: 0,
+  sourceRequests: 0,
+  sourceRequestRanges: [],
+  sourceStartTimeTicks: [],
+  activeSourceRequests: 0,
+  maximumConcurrentSourceRequests: 0,
+  completedSourceRequests: 0,
+  playbackEvents: 0
+};
 
 function json(response, status, body) {
   const encoded = Buffer.from(JSON.stringify(body));
@@ -65,6 +74,25 @@ function item() {
 
 function streamMedia(request, response) {
   stats.sourceRequests += 1;
+  stats.sourceRequestRanges.push(request.headers.range ?? null);
+  const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'fixture'}`);
+  stats.sourceStartTimeTicks.push(requestUrl.searchParams.get('StartTimeTicks'));
+  if (stats.sourceRequestRanges.length > 20) stats.sourceRequestRanges.shift();
+  if (stats.sourceStartTimeTicks.length > 20) stats.sourceStartTimeTicks.shift();
+  stats.activeSourceRequests += 1;
+  stats.maximumConcurrentSourceRequests = Math.max(
+    stats.maximumConcurrentSourceRequests,
+    stats.activeSourceRequests
+  );
+  let completed = false;
+  const finish = () => {
+    if (completed) return;
+    completed = true;
+    stats.activeSourceRequests -= 1;
+    stats.completedSourceRequests += 1;
+  };
+  response.once('close', finish);
+  response.once('finish', finish);
   const range = request.headers.range;
   if (!range) {
     response.writeHead(200, {

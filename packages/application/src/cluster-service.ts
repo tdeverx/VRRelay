@@ -16,6 +16,7 @@ import type {
   ClusterRepository,
   CoordinationStore,
   EventBus,
+  EdgeSelectionContext,
   MetricsSink,
   SignedCertificate,
   TrafficDirector
@@ -60,22 +61,44 @@ export interface ClusterServiceOptions {
   metrics?: MetricsSink;
 }
 
+function edgeSelectionContext(
+  context: EdgeSelectionContext | string,
+  legacyPreferredRegion?: string
+): EdgeSelectionContext {
+  return typeof context === 'string'
+    ? {
+        sessionId: context,
+        affinityKey: context,
+        ...(legacyPreferredRegion ? { preferredRegion: legacyPreferredRegion } : {})
+      }
+    : context;
+}
+
 export class BuiltinTrafficDirector implements TrafficDirector {
   readonly kind = 'builtin';
 
   async selectEdge(
-    sessionId: string,
+    contextInput: EdgeSelectionContext | string,
     nodes: readonly ClusterNode[],
-    preferredRegion?: string
+    legacyPreferredRegion?: string
   ): Promise<ClusterNode | undefined> {
+    const context = edgeSelectionContext(contextInput, legacyPreferredRegion);
     const eligible = nodes.filter((node) => node.roles.includes('edge') && node.state === 'online');
     if (!eligible.length) return undefined;
-    const regional = preferredRegion
-      ? eligible.filter((node) => node.region === preferredRegion)
+    const viewerRegional = context.viewerRegion
+      ? eligible.filter((node) => node.region === context.viewerRegion)
       : [];
-    const pool = regional.length ? regional : eligible;
+    const preferredRegional = context.preferredRegion
+      ? eligible.filter((node) => node.region === context.preferredRegion)
+      : [];
+    const pool = viewerRegional.length
+      ? viewerRegional
+      : preferredRegional.length
+        ? preferredRegional
+        : eligible;
     return [...pool].sort(
-      (left, right) => this.#score(sessionId, right) - this.#score(sessionId, left)
+      (left, right) =>
+        this.#score(context.affinityKey, right) - this.#score(context.affinityKey, left)
     )[0];
   }
 
@@ -117,27 +140,35 @@ export class StaticTrafficDirector implements TrafficDirector {
   constructor(private readonly options: StaticTrafficDirectorOptions = {}) {}
 
   async selectEdge(
-    _sessionId: string,
+    contextInput: EdgeSelectionContext | string,
     nodes: readonly ClusterNode[],
-    preferredRegion?: string
+    legacyPreferredRegion?: string
   ): Promise<ClusterNode | undefined> {
+    const context = edgeSelectionContext(contextInput, legacyPreferredRegion);
     const eligible = nodes.filter((node) => node.roles.includes('edge') && node.state === 'online');
     if (!eligible.length) return undefined;
 
     if (this.options.nodeId) {
       const selected = eligible.find((node) => node.id === this.options.nodeId);
       if (!selected) return undefined;
+      if (
+        typeof contextInput === 'string' &&
+        legacyPreferredRegion &&
+        selected.region !== legacyPreferredRegion
+      )
+        return undefined;
       if (this.options.region && selected.region !== this.options.region) return undefined;
-      if (preferredRegion && selected.region !== preferredRegion) return undefined;
       return selected;
     }
 
     const configuredRegion = this.options.region
       ? eligible.filter((node) => node.region === this.options.region)
       : [];
-    const requestedRegion = preferredRegion
-      ? eligible.filter((node) => node.region === preferredRegion)
-      : [];
+    const requestedRegion = context.viewerRegion
+      ? eligible.filter((node) => node.region === context.viewerRegion)
+      : context.preferredRegion
+        ? eligible.filter((node) => node.region === context.preferredRegion)
+        : [];
     const pool = configuredRegion.length
       ? configuredRegion
       : requestedRegion.length
@@ -179,11 +210,11 @@ export class SwitchableTrafficDirector implements TrafficDirector {
   }
 
   selectEdge(
-    sessionId: string,
+    context: EdgeSelectionContext | string,
     nodes: readonly ClusterNode[],
-    preferredRegion?: string
+    legacyPreferredRegion?: string
   ): Promise<ClusterNode | undefined> {
-    return this.delegate.selectEdge(sessionId, nodes, preferredRegion);
+    return this.delegate.selectEdge(context, nodes, legacyPreferredRegion);
   }
 
   health() {
@@ -625,17 +656,31 @@ export class ClusterService {
     return this.repository.getNode(id);
   }
 
-  async selectEdge(sessionId: string, preferredRegion?: string): Promise<EdgeRoute | undefined> {
-    const node = await this.director.selectEdge(sessionId, await this.list(), preferredRegion);
+  async selectEdge(
+    sessionId: string,
+    preferredRegion?: string,
+    viewerRegion?: string
+  ): Promise<EdgeRoute | undefined> {
+    const node = await this.director.selectEdge(
+      {
+        sessionId,
+        affinityKey: sessionId,
+        ...(viewerRegion ? { viewerRegion } : {}),
+        ...(preferredRegion ? { preferredRegion } : {})
+      },
+      await this.list()
+    );
     if (!node) return undefined;
     const route: EdgeRoute = {
       sessionId,
       nodeId: node.id,
       publicUrl: node.publicUrl,
       reason:
-        preferredRegion && node.region === preferredRegion
-          ? 'preferred-region'
-          : 'healthy-capacity',
+        viewerRegion && node.region === viewerRegion
+          ? 'viewer-region'
+          : preferredRegion && node.region === preferredRegion
+            ? 'preferred-region'
+            : 'healthy-capacity',
       expiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     };
     this.events.publish({
@@ -666,6 +711,8 @@ export class ClusterService {
     const compatible = nodes.filter(
       (node) =>
         node.capabilities.encoders.includes(input.profile.video.encoder) &&
+        (input.profile.delivery.method !== 'hls' ||
+          (node.capabilities.vodProducerVersion ?? 0) >= 1) &&
         (!input.providerId || node.capabilities.providerIds.includes(input.providerId))
     );
     if (input.preferredNodeId) {

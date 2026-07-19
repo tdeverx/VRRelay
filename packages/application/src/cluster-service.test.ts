@@ -35,7 +35,8 @@ const capabilities = {
   cacheBytes: 0,
   cacheLimitBytes: null,
   egressMbps: 0,
-  providerIds: ['provider-1']
+  providerIds: ['provider-1'],
+  vodProducerVersion: 1
 };
 
 function edgeNode(
@@ -141,6 +142,31 @@ describe('cluster service', () => {
     ]);
 
     expect(selected?.id).toBe('available');
+  });
+
+  it('uses viewer region first, then preferred region, with stable session affinity', async () => {
+    const director = new BuiltinTrafficDirector();
+    const nodes = [
+      edgeNode('london-a', 'london'),
+      edgeNode('london-b', 'london'),
+      edgeNode('sydney-a', 'sydney')
+    ];
+    const context = {
+      sessionId: 'session-regional',
+      affinityKey: 'session-regional',
+      viewerRegion: 'london',
+      preferredRegion: 'sydney'
+    };
+    const first = await director.selectEdge(context, nodes);
+    const second = await director.selectEdge(context, nodes);
+    expect(first?.region).toBe('london');
+    expect(second?.id).toBe(first?.id);
+    await expect(
+      director.selectEdge(
+        { ...context, viewerRegion: 'unavailable', affinityKey: 'fallback-affinity' },
+        nodes
+      )
+    ).resolves.toMatchObject({ region: 'sydney' });
   });
 
   it('routes through a static edge or region without falling through to ineligible nodes', async () => {

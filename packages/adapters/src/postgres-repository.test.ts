@@ -106,7 +106,8 @@ class FakeMigrationClient {
     'node_certificates',
     'agent_logs',
     'job_logs',
-    'audit_events'
+    'audit_events',
+    'vod_producers'
   ];
   requiredColumns: FakePostgresColumn[] = [
     column('schema_migrations', 'version', 'int4'),
@@ -185,7 +186,13 @@ class FakeMigrationClient {
     column('audit_events', 'actor_id', 'text', 'YES'),
     column('audit_events', 'target_id', 'text', 'YES'),
     column('audit_events', 'document', 'jsonb'),
-    column('audit_events', 'occurred_at', 'timestamptz')
+    column('audit_events', 'occurred_at', 'timestamptz'),
+    column('vod_producers', 'session_id', 'text'),
+    column('vod_producers', 'state', 'text'),
+    column('vod_producers', 'owner_node_id', 'text', 'YES'),
+    column('vod_producers', 'document', 'jsonb'),
+    column('vod_producers', 'updated_at', 'timestamptz'),
+    column('vod_producers', 'revision', 'int4', 'NO', '1')
   ];
   constraints = [
     ['schema_migrations', 'PRIMARY KEY', ['version']],
@@ -206,7 +213,8 @@ class FakeMigrationClient {
     ['node_certificates', 'PRIMARY KEY', ['serial_number']],
     ['agent_logs', 'PRIMARY KEY', ['id']],
     ['job_logs', 'PRIMARY KEY', ['id']],
-    ['audit_events', 'PRIMARY KEY', ['id']]
+    ['audit_events', 'PRIMARY KEY', ['id']],
+    ['vod_producers', 'PRIMARY KEY', ['session_id']]
   ] as Array<[string, string, string[]]>;
   indexes = [
     ['playback_grants', 'playback_grants_session', ['session_id']],
@@ -219,7 +227,9 @@ class FakeMigrationClient {
     ['audit_events', 'audit_events_time', ['occurred_at']],
     ['audit_events', 'audit_events_category_time', ['category', 'occurred_at']],
     ['audit_events', 'audit_events_actor_time', ['actor_id', 'occurred_at']],
-    ['audit_events', 'audit_events_target_time', ['target_id', 'occurred_at']]
+    ['audit_events', 'audit_events_target_time', ['target_id', 'occurred_at']],
+    ['vod_producers', 'vod_producers_state_time', ['state', 'updated_at']],
+    ['vod_producers', 'vod_producers_owner', ['owner_node_id']]
   ] as Array<[string, string, string[]]>;
   failWhenSqlIncludes: string | undefined;
 
@@ -319,7 +329,8 @@ describe('PostgreSQL repository migrations', () => {
       { version: 5, name: 'atomic providers and guarded deletion' },
       { version: 6, name: 'crash-safe provider binding deletion' },
       { version: 7, name: 'bounded job logs' },
-      { version: 8, name: 'unified user identities' }
+      { version: 8, name: 'unified user identities' },
+      { version: 9, name: 'durable vod producers' }
     ]);
     expect(POSTGRES_MIGRATIONS[2]?.statements.join('\n')).toContain(
       'ALTER TABLE sessions ADD COLUMN revision'
@@ -345,7 +356,7 @@ describe('PostgreSQL repository migrations', () => {
         expect(context).toEqual({
           driver: 'postgres',
           currentVersion: 2,
-          targetVersion: 8,
+          targetVersion: 9,
           existingSchema: true
         });
         events.push('BACKUP HOOK');
@@ -401,7 +412,7 @@ describe('PostgreSQL repository migrations', () => {
 
   it('rejects migration history from a newer build before backup or mutation', async () => {
     const client = new FakeMigrationClient();
-    client.applied = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    client.applied = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let backupCalled = false;
     await expect(
       runPostgresMigrations(client, {
@@ -428,7 +439,7 @@ describe('PostgreSQL repository migrations', () => {
 
     const incomplete = new FakeMigrationClient();
     await expect(assertPostgresSchemaCurrent(incomplete)).rejects.toThrow(
-      'version 2; version 8 is required'
+      'version 2; version 9 is required'
     );
     expect(incomplete.events.every((event) => event.startsWith('SELECT'))).toBe(true);
 

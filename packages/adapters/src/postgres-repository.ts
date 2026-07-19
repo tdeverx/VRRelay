@@ -16,7 +16,8 @@ import type {
   ProviderConnection,
   RelaySession,
   SegmentJob,
-  UserIdentity
+  UserIdentity,
+  VodProducer
 } from '@vrrelay/domain';
 import type {
   AtomicDeleteResult,
@@ -164,6 +165,16 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
        ON CONFLICT(key) DO NOTHING`,
       `DELETE FROM settings WHERE key='portal.configuration'`
     ]
+  },
+  {
+    version: 9,
+    name: 'durable vod producers',
+    checksum: '9fec89ef2f5f3852c9645d65158ef181d33168f40f57456c700c97125b2f2851',
+    statements: [
+      'CREATE TABLE vod_producers(session_id TEXT PRIMARY KEY, state TEXT NOT NULL, owner_node_id TEXT, document JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL, revision INTEGER NOT NULL DEFAULT 1)',
+      'CREATE INDEX vod_producers_state_time ON vod_producers(state, updated_at DESC)',
+      'CREATE INDEX vod_producers_owner ON vod_producers(owner_node_id)'
+    ]
   }
 ] as const;
 
@@ -178,6 +189,7 @@ const POSTGRES_APPLICATION_TABLES = [
   'settings',
   'cluster_nodes',
   'segment_jobs',
+  'vod_producers',
   'provider_bindings',
   'node_certificates',
   'agent_logs',
@@ -278,6 +290,14 @@ const POSTGRES_REQUIRED_COLUMNS: Readonly<
     updated_at: requiredPostgresColumn('timestamptz'),
     revision: requiredPostgresColumn('int4', false, '1')
   },
+  vod_producers: {
+    session_id: requiredPostgresColumn('text'),
+    state: requiredPostgresColumn('text'),
+    owner_node_id: requiredPostgresColumn('text', true),
+    document: requiredPostgresColumn('jsonb'),
+    updated_at: requiredPostgresColumn('timestamptz'),
+    revision: requiredPostgresColumn('int4', false, '1')
+  },
   provider_bindings: {
     id: requiredPostgresColumn('text'),
     provider_id: requiredPostgresColumn('text'),
@@ -332,6 +352,7 @@ const POSTGRES_REQUIRED_CONSTRAINTS = [
   { table: 'settings', type: 'PRIMARY KEY', columns: ['key'] },
   { table: 'cluster_nodes', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'segment_jobs', type: 'PRIMARY KEY', columns: ['id'] },
+  { table: 'vod_producers', type: 'PRIMARY KEY', columns: ['session_id'] },
   { table: 'provider_bindings', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'node_certificates', type: 'PRIMARY KEY', columns: ['serial_number'] },
   { table: 'agent_logs', type: 'PRIMARY KEY', columns: ['id'] },
@@ -348,6 +369,11 @@ const POSTGRES_REQUIRED_INDEXES: Readonly<
   node_certificates_node: { table: 'node_certificates', columns: ['node_id'] },
   agent_logs_node_time: { table: 'agent_logs', columns: ['node_id', 'timestamp'] },
   job_logs_job_time: { table: 'job_logs', columns: ['job_id', 'timestamp'] },
+  vod_producers_state_time: {
+    table: 'vod_producers',
+    columns: ['state', 'updated_at']
+  },
+  vod_producers_owner: { table: 'vod_producers', columns: ['owner_node_id'] },
   user_identities_last_seen: { table: 'user_identities', columns: ['updated_at'] },
   audit_events_time: { table: 'audit_events', columns: ['occurred_at'] },
   audit_events_category_time: {
@@ -1611,6 +1637,75 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
         [limit]
       )
     ).rows.map((row) => row.document as SegmentJob);
+  }
+  async createVodProducer(
+    producer: VodProducer
+  ): Promise<{ created: boolean; record: VersionedRecord<VodProducer> }> {
+    const inserted = await this.#pool.query(
+      `INSERT INTO vod_producers(session_id,state,owner_node_id,document,updated_at,revision)
+       VALUES($1,$2,$3,$4,$5,1) ON CONFLICT(session_id) DO NOTHING RETURNING document,revision`,
+      [
+        producer.sessionId,
+        producer.state,
+        producer.ownerNodeId ?? null,
+        producer,
+        producer.updatedAt
+      ]
+    );
+    const row = inserted.rows[0] as { document: VodProducer; revision: number } | undefined;
+    if (row) return { created: true, record: { value: row.document, revision: row.revision } };
+    const record = await this.#getVersioned<VodProducer>(
+      'vod_producers',
+      'session_id',
+      producer.sessionId
+    );
+    if (!record) throw new Error('VOD producer creation did not produce a readable record');
+    return { created: false, record };
+  }
+  async getVodProducer(sessionId: string): Promise<VodProducer | undefined> {
+    return this.#get<VodProducer>('vod_producers', 'session_id', sessionId);
+  }
+  async getVersionedVodProducer(
+    sessionId: string
+  ): Promise<VersionedRecord<VodProducer> | undefined> {
+    return this.#getVersioned<VodProducer>('vod_producers', 'session_id', sessionId);
+  }
+  async listVodProducers(limit = 100): Promise<VodProducer[]> {
+    return (
+      await this.#pool.query(
+        'SELECT document FROM vod_producers ORDER BY updated_at DESC LIMIT $1',
+        [limit]
+      )
+    ).rows.map((row) => row.document as VodProducer);
+  }
+  async compareAndSetVodProducer(
+    producer: VodProducer,
+    expectedRevision: number,
+    allowedCurrentStates: readonly VodProducer['state'][]
+  ): Promise<AtomicWriteResult<VodProducer>> {
+    if (!allowedCurrentStates.length)
+      throw new Error('A VOD producer transition must declare its allowed current states');
+    const result = await this.#pool.query(
+      `UPDATE vod_producers
+       SET state=$1,owner_node_id=$2,document=$3,updated_at=$4,revision=revision+1
+       WHERE session_id=$5 AND revision=$6 AND state=ANY($7::text[]) RETURNING revision`,
+      [
+        producer.state,
+        producer.ownerNodeId ?? null,
+        producer,
+        producer.updatedAt,
+        producer.sessionId,
+        expectedRevision,
+        [...allowedCurrentStates]
+      ]
+    );
+    const revision = result.rows[0]?.revision as number | undefined;
+    if (revision !== undefined) return { applied: true, record: { value: producer, revision } };
+    const current = await this.getVersionedVodProducer(producer.sessionId);
+    if (!current) return { applied: false, reason: 'not-found' };
+    if (current.revision !== expectedRevision)
+      return { applied: false, reason: 'revision-conflict', current };
+    return { applied: false, reason: 'invalid-state', current };
   }
   async createProviderBinding(
     provider: ProviderConnection,

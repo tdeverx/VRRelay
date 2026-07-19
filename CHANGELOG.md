@@ -6,6 +6,16 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Replaced per-segment HLS transcoding with one durable, fenced VOD producer per session. The
+  assigned source worker now keeps one playback-rate Jellyfin connection, publishes completed
+  segments to shared object storage, survives controller recovery through schema v9 state, and
+  switches playback windows only for dominant seeks or quiet demand. Added explicit producer agent
+  commands/capabilities, in-memory signed-in-user credential transfer, idle shutdown, drain/failover
+  fencing, redacted producer APIs, and dashboard status.
+- Added trusted-proxy regional edge selection with stable session affinity, viewer-region → session
+  preferred-region → any-edge fallback, edge-scoped grants per manifest, runtime/UI/deployment
+  settings for the region header and producer idle timeout, and spoofed-header fallback metrics.
+
 - Reworked loading states across the dashboard with responsive, content-shaped skeletons for
   discovery media, sessions, live tables, people and access, settings forms, profiles, nodes,
   infrastructure, jobs, diagnostics, relay creation, and first-run setup. Loading layouts now hold

@@ -159,6 +159,10 @@ interface Lease {
   expiresAt: number;
 }
 type ViewerSet = Map<string, number>;
+interface SegmentDemand {
+  segmentIndex: number;
+  observedAtMs: number;
+}
 
 export class MemoryCoordinationStore implements CoordinationStore {
   readonly kind = 'local';
@@ -166,6 +170,7 @@ export class MemoryCoordinationStore implements CoordinationStore {
   readonly #values = new Map<string, StoredValue>();
   readonly #listeners = new Map<string, Set<(payload: string) => void>>();
   readonly #viewers = new Map<string, ViewerSet>();
+  readonly #segmentDemands = new Map<string, Map<string, SegmentDemand>>();
 
   async acquire(key: string, owner: string, ttlMs: number): Promise<boolean> {
     const existing = this.#leases.get(key);
@@ -232,6 +237,42 @@ export class MemoryCoordinationStore implements CoordinationStore {
     if (!total) return { totalViewers: 0 };
     this.#pruneViewers(totalKey, total, input.observedAtMs - input.windowMs);
     return { totalViewers: total.size };
+  }
+
+  async recordSegmentDemand(input: {
+    sessionId: string;
+    viewerHash: string;
+    segmentIndex: number;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<void> {
+    const demands = this.#segmentDemands.get(input.sessionId) ?? new Map<string, SegmentDemand>();
+    demands.set(input.viewerHash, {
+      segmentIndex: input.segmentIndex,
+      observedAtMs: input.observedAtMs
+    });
+    const cutoff = input.observedAtMs - input.windowMs;
+    for (const [viewerHash, demand] of demands)
+      if (demand.observedAtMs < cutoff) demands.delete(viewerHash);
+    if (demands.size) this.#segmentDemands.set(input.sessionId, demands);
+    else this.#segmentDemands.delete(input.sessionId);
+  }
+
+  async listSegmentDemands(input: {
+    sessionId: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<Array<{ viewerHash: string; segmentIndex: number; observedAtMs: number }>> {
+    const demands = this.#segmentDemands.get(input.sessionId);
+    if (!demands) return [];
+    const cutoff = input.observedAtMs - input.windowMs;
+    const recent = [];
+    for (const [viewerHash, demand] of demands) {
+      if (demand.observedAtMs < cutoff) demands.delete(viewerHash);
+      else recent.push({ viewerHash, ...demand });
+    }
+    if (!demands.size) this.#segmentDemands.delete(input.sessionId);
+    return recent;
   }
 
   async publish(channel: string, payload: string): Promise<void> {

@@ -85,6 +85,79 @@ export class RedisCoordinationStore implements CoordinationStore {
     if (totalViewers === 0) await this.#client.del(totalKey);
     return { totalViewers };
   }
+  async recordSegmentDemand(input: {
+    sessionId: string;
+    viewerHash: string;
+    segmentIndex: number;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<void> {
+    const timeKey = `segment-demands:${input.sessionId}:time`;
+    const valueKey = `segment-demands:${input.sessionId}:value`;
+    const retentionMs = input.windowMs * 2;
+    await this.#client.eval(
+      `local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[4])
+       if #expired > 0 then
+         for _, member in ipairs(expired) do
+           redis.call('ZREM', KEYS[1], member)
+           redis.call('HDEL', KEYS[2], member)
+         end
+       end
+       redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+       redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
+       redis.call('PEXPIRE', KEYS[1], ARGV[5])
+       redis.call('PEXPIRE', KEYS[2], ARGV[5])
+       return 1`,
+      2,
+      timeKey,
+      valueKey,
+      input.viewerHash,
+      input.observedAtMs,
+      input.segmentIndex,
+      input.observedAtMs - input.windowMs,
+      retentionMs
+    );
+  }
+  async listSegmentDemands(input: {
+    sessionId: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<Array<{ viewerHash: string; segmentIndex: number; observedAtMs: number }>> {
+    const timeKey = `segment-demands:${input.sessionId}:time`;
+    const valueKey = `segment-demands:${input.sessionId}:value`;
+    const cutoff = input.observedAtMs - input.windowMs;
+    const expired = await this.#client.zrangebyscore(timeKey, '-inf', cutoff);
+    if (expired.length)
+      await this.#client
+        .multi()
+        .zrem(timeKey, ...expired)
+        .hdel(valueKey, ...expired)
+        .exec();
+    const rows = await this.#client.zrangebyscore(
+      timeKey,
+      cutoff,
+      '+inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      10_000
+    );
+    const viewers: string[] = [];
+    const observed = new Map<string, number>();
+    for (let index = 0; index < rows.length; index += 2) {
+      const viewerHash = rows[index]!;
+      viewers.push(viewerHash);
+      observed.set(viewerHash, Number(rows[index + 1]));
+    }
+    if (!viewers.length) return [];
+    const values = await this.#client.hmget(valueKey, ...viewers);
+    return viewers.flatMap((viewerHash, index) => {
+      const segmentIndex = Number(values[index]);
+      return Number.isInteger(segmentIndex) && segmentIndex >= 0
+        ? [{ viewerHash, segmentIndex, observedAtMs: observed.get(viewerHash)! }]
+        : [];
+    });
+  }
   async publish(channel: string, payload: string): Promise<void> {
     await this.#client.publish(channel, payload);
   }

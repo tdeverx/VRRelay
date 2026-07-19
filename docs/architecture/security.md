@@ -19,6 +19,12 @@ registered connection until its certificate-bound node ID completes hello proof.
 Correlated request listeners and abort handlers are scoped to the connection and
 removed on success, error, timeout, abort, disconnect, or shutdown.
 
+Persistent VOD production uses explicit `producer.start` and `producer.stop` commands and requires
+the `vodProducerVersion: 1` capability. A signed-in user's session-owned token is carried only in
+the typed mTLS start payload, held only in source-worker memory, excluded from FFmpeg arguments and
+logs, and discarded when ownership ends. FFmpeg continues to read only an opaque loopback source
+grant while Node performs the authenticated provider request.
+
 Node certificates rotate continuously 48 hours before expiry. The node durably
 records the replacement key and CSR before requesting a signature; the controller
 stages one exact certificate, and only a reconnect proving possession activates it.
@@ -55,6 +61,12 @@ accepts only raw-socket loopback or private-network peers and does not trust
 forwarded client addresses. Credential-free MediaMTX reads are limited to the
 private RTSP normalizer path; HLS and other playback protocols require the
 configured read identity.
+
+Regional routing accepts the configured viewer-region header only from the raw socket peer when it
+matches `VRRELAY_TRUSTED_PROXY_CIDRS`. The request must contain exactly one syntactically valid
+value that exactly matches a configured node-region label. Untrusted, duplicate, malformed, and
+unknown values are ignored and counted with a bounded fallback metric. Raw client IP addresses are
+not passed to the application routing contract or webhook.
 
 Upgrades may temporarily retain a false-like `VRRELAY_TRUST_PROXY` value from
 the previous sample environment; it is treated as a no-op so existing

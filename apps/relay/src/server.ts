@@ -2,7 +2,7 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { Readable, Transform } from 'node:stream';
 import Fastify, { LogController, type FastifyInstance, type FastifyRequest } from 'fastify';
@@ -11,6 +11,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import websocket from '@fastify/websocket';
+import { compile as compileProxyTrust } from '@fastify/proxy-addr';
 import { z, type ZodType } from 'zod';
 import {
   ApplicationError,
@@ -313,8 +314,32 @@ function tokenFromPath(request: FastifyRequest): string {
   return (request.params as { token: string }).token;
 }
 
-function viewerIdentity(request: FastifyRequest): string {
-  return `${request.ip}|${String(request.headers['user-agent'] ?? 'unknown').slice(0, 256)}`;
+function viewerIdentity(request: FastifyRequest, key: Buffer): string {
+  return createHmac('sha256', key)
+    .update(request.ip)
+    .update('\0')
+    .update(String(request.headers['user-agent'] ?? 'unknown').slice(0, 256))
+    .digest('hex');
+}
+
+export function trustedViewerRegion(
+  request: Pick<FastifyRequest, 'headers' | 'raw'>,
+  headerName: string,
+  isTrustedPeer: (address: string, hop: number) => boolean,
+  configuredRegions?: readonly string[]
+): string | undefined {
+  const remoteAddress = request.raw.socket.remoteAddress;
+  if (!remoteAddress || !isTrustedPeer(remoteAddress, 0)) return undefined;
+  const occurrences = request.raw.rawHeaders.filter(
+    (value, index) => index % 2 === 0 && value.toLowerCase() === headerName.toLowerCase()
+  ).length;
+  if (occurrences !== 1) return undefined;
+  const value = request.headers[headerName];
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!/^[a-z0-9][a-z0-9._-]{0,79}$/.test(normalized)) return undefined;
+  if (configuredRegions && !configuredRegions.includes(normalized)) return undefined;
+  return normalized;
 }
 
 export function payloadMeter(record: (bytes: number) => void): Transform {
@@ -473,6 +498,22 @@ export async function createServer(
       ? (nodeId) => Boolean(services.agentController?.connected(nodeId))
       : undefined
   );
+  const isTrustedRegionPeer = compileProxyTrust(config.trustedProxyCidrs);
+  const viewerIdentityKey = randomBytes(32);
+  const viewerAffinity = (request: FastifyRequest) => viewerIdentity(request, viewerIdentityKey);
+  const viewerRegion = async (request: FastifyRequest) => {
+    if (request.headers[config.viewerRegionHeader] === undefined) return undefined;
+    const regions = [...new Set((await services.cluster.list()).map((node) => node.region))];
+    const region = trustedViewerRegion(
+      request,
+      config.viewerRegionHeader,
+      isTrustedRegionPeer,
+      regions
+    );
+    if (request.headers[config.viewerRegionHeader] !== undefined && !region)
+      services.metrics.increment('viewer_region_fallback_total', { reason: 'rejected' });
+    return region;
+  };
   let runtimeRestartRequired = false;
 
   const configuredLivePaths = new Map<string, Promise<void>>();
@@ -1294,6 +1335,23 @@ export async function createServer(
       throw new ApplicationError('not_found', 'Session was not found', 404);
     return session;
   });
+  app.get('/api/v1/vod-producers', async (request) => {
+    await authenticate(request, ['admin']);
+    return { items: await services.sessions.listProducers() };
+  });
+  app.get('/api/v1/vod-producers/:sessionId', async (request) => {
+    const principal = await authenticate(request, ['sessions:read']);
+    const sessionId = (request.params as { sessionId: string }).sessionId;
+    const session = await services.sessions.get(sessionId);
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    if (!systemWide && session.ownerId !== principal.id)
+      throw new ApplicationError('not_found', 'Producer was not found', 404);
+    const producer = await services.sessions.producer(sessionId);
+    if (!producer) throw new ApplicationError('not_found', 'Producer was not found', 404);
+    return producer;
+  });
   app.post('/api/v1/sessions', async (request, reply) => {
     const principal = await mutate(request, ['sessions:create']);
     const session = await auditAs(
@@ -1340,8 +1398,42 @@ export async function createServer(
               { ownerId: principal.id! }
             );
           }
+          if (surface === 'standalone')
+            return services.sessions.create(
+              {
+                ...body,
+                placementPolicy: 'local',
+                preferredNodeId: config.nodeId,
+                placementLocked: true
+              },
+              {
+                ownerId: principal.id!,
+                providerAccessToken: await services.auth.credential(principal),
+                providerUserId: principal.providerUserId!
+              }
+            );
+          const profile = await services.repository.getProfile(
+            body.profileId,
+            body.profileRevision
+          );
+          if (!profile)
+            throw new ApplicationError('not_found', 'Profile revision was not found', 404);
+          const placement = await services.cluster.previewPlacement({
+            policy: 'auto',
+            providerId: body.source.providerId,
+            profile,
+            ...(isPlacementNodeConnected ? { isNodeConnected: isPlacementNodeConnected } : {}),
+            ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
+          });
+          if (!placement.node)
+            throw new ApplicationError('placement_unavailable', placement.reason, 409);
           return services.sessions.create(
-            { ...body, placementPolicy: 'local', placementLocked: true },
+            {
+              ...body,
+              placementPolicy: 'auto',
+              preferredNodeId: placement.node.id,
+              placementLocked: false
+            },
             {
               ownerId: principal.id!,
               providerAccessToken: await services.auth.credential(principal),
@@ -1656,8 +1748,12 @@ export async function createServer(
   app.get('/play/:token/index.m3u8', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const token = tokenFromPath(request);
-    const session = await services.sessions.touchViewer(token, viewerIdentity(request));
-    const route = await services.cluster.selectEdge(session.id, session.preferredRegion);
+    const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+    const route = await services.cluster.selectEdge(
+      session.id,
+      session.preferredRegion,
+      await viewerRegion(request)
+    );
     if (surface === 'controller' && (!route || route.nodeId === config.nodeId))
       throw new ApplicationError(
         'edge_unavailable',
@@ -1678,14 +1774,15 @@ export async function createServer(
   if (surface === 'standalone') {
     app.get('/play/:token/segment/:index.ts', async (request, reply) => {
       const params = request.params as { token: string; index: string };
-      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const segmentIndex = Number(params.index);
+      const session = await services.sessions.touchViewer(
+        params.token,
+        viewerAffinity(request),
+        segmentIndex
+      );
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
-      const path = await services.sessions.segment(
-        params.token,
-        Number(params.index),
-        controller.signal
-      );
+      const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'public, max-age=31536000, immutable');
@@ -1699,14 +1796,15 @@ export async function createServer(
     });
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
-      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const segmentIndex = Number(params.index);
+      const session = await services.sessions.touchViewer(
+        params.token,
+        viewerAffinity(request),
+        segmentIndex
+      );
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
-      const path = await services.sessions.segment(
-        params.token,
-        Number(params.index),
-        controller.signal
-      );
+      const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'public, max-age=31536000, immutable');
@@ -1720,7 +1818,7 @@ export async function createServer(
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = tokenFromPath(request);
-      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.initSegment(token, controller.signal);
@@ -1737,7 +1835,7 @@ export async function createServer(
     });
     app.get('/play/:token/stream.mp4', async (request, reply) => {
       const token = tokenFromPath(request);
-      const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       reply.raw.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
@@ -1753,10 +1851,14 @@ export async function createServer(
   }
   app.get('/play/:token/live.m3u8', async (request, reply) => {
     const token = tokenFromPath(request);
-    const session = await services.sessions.touchViewer(token, viewerIdentity(request));
+    const session = await services.sessions.touchViewer(token, viewerAffinity(request));
     const query = request.query as { edge?: string };
     if (surface === 'controller' || query.edge !== '1') {
-      const route = await services.cluster.selectEdge(session.id, session.preferredRegion);
+      const route = await services.cluster.selectEdge(
+        session.id,
+        session.preferredRegion,
+        await viewerRegion(request)
+      );
       if (route && route.nodeId !== config.nodeId) {
         const edgeToken = await services.sessions.createEdgePlaybackGrant(token, route.nodeId);
         const target = `${route.publicUrl.replace(/\/$/, '')}/play/${edgeToken}/live.m3u8?edge=1`;
@@ -1793,7 +1895,7 @@ export async function createServer(
       const params = request.params as { token: string; '*': string };
       if (!params['*'] || params['*'].includes('..') || params['*'].includes('\\'))
         return reply.status(400).send();
-      const session = await services.sessions.touchViewer(params.token, viewerIdentity(request));
+      const session = await services.sessions.touchViewer(params.token, viewerAffinity(request));
       const channel = await services.sessions.resolveLive(params.token);
       const response = await fetchLiveHlsWithPathRecovery(
         channel.path,

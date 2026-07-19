@@ -6,6 +6,8 @@ locals {
       VRRELAY_CACHE_DIR           = "/cache"
       VRRELAY_SECRET_BACKEND      = "encrypted-file"
       VRRELAY_TRUSTED_PROXY_CIDRS = var.trusted_proxy_cidrs
+      VRRELAY_VIEWER_REGION_HEADER = "x-vrrelay-region"
+      VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT = "60s"
       VRRELAY_REPOSITORY_DRIVER   = "postgres"
       VRRELAY_POSTGRES_URL        = var.postgres_url
       VRRELAY_COORDINATION_DRIVER = "valkey"

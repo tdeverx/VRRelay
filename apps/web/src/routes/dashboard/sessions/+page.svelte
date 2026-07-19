@@ -72,8 +72,9 @@
           ><div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <Card.Title class="truncate">{session.name}</Card.Title><Card.Description
-                >{session.kind.toUpperCase()} · {session.assignedNodeId ??
-                  session.placementPolicy}</Card.Description
+                >{session.kind.toUpperCase()} · source worker
+                {session.assignedNodeId ?? session.placementPolicy}{#if session.kind === 'vod'}
+                  · delivery edge selected per viewer region{/if}</Card.Description
               >
             </div>
             <StatusBadge value={session.state} />

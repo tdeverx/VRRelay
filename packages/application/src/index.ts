@@ -23,7 +23,8 @@ import type {
   AuditCategory,
   AuditEvent,
   NodeCapability,
-  UserIdentity
+  UserIdentity,
+  VodProducer
 } from '@vrrelay/domain';
 import type { CatalogQuery, RelayEvent } from '@vrrelay/contracts';
 
@@ -54,6 +55,8 @@ export interface ResolvedSource {
   defaultAudio?: number;
   defaultSubtitle?: number;
   allowPublicHttp?: boolean;
+  /** The provider has already positioned this stream at this media time. */
+  positionedAtSeconds?: number;
 }
 
 export interface SourceResponse {
@@ -107,6 +110,13 @@ export interface MediaProvider {
     connection: ProviderConnection,
     secret: string,
     source: MediaSourceRef,
+    signal?: AbortSignal
+  ): Promise<ResolvedSource>;
+  resolveSourceAt?(
+    connection: ProviderConnection,
+    secret: string,
+    source: MediaSourceRef,
+    startSeconds: number,
     signal?: AbortSignal
   ): Promise<ResolvedSource>;
   openSource(source: ResolvedSource, range?: string, signal?: AbortSignal): Promise<SourceResponse>;
@@ -165,6 +175,18 @@ export interface CoordinationStore {
     observedAtMs: number;
     windowMs: number;
   }): Promise<{ totalViewers: number }>;
+  recordSegmentDemand(input: {
+    sessionId: string;
+    viewerHash: string;
+    segmentIndex: number;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<void>;
+  listSegmentDemands(input: {
+    sessionId: string;
+    observedAtMs: number;
+    windowMs: number;
+  }): Promise<Array<{ viewerHash: string; segmentIndex: number; observedAtMs: number }>>;
   publish(channel: string, payload: string): Promise<void>;
   subscribe(channel: string, listener: (payload: string) => void): Promise<() => Promise<void>>;
   health(): Promise<BackendStatus>;
@@ -182,6 +204,17 @@ export interface ClusterRepository {
   createSegmentJob(job: SegmentJob): Promise<SegmentJobCreateResult>;
   getSegmentJob(id: string): Promise<SegmentJob | undefined>;
   listSegmentJobs(limit?: number): Promise<SegmentJob[]>;
+  createVodProducer(
+    producer: VodProducer
+  ): Promise<{ created: boolean; record: VersionedRecord<VodProducer> }>;
+  getVodProducer(sessionId: string): Promise<VodProducer | undefined>;
+  getVersionedVodProducer(sessionId: string): Promise<VersionedRecord<VodProducer> | undefined>;
+  listVodProducers(limit?: number): Promise<VodProducer[]>;
+  compareAndSetVodProducer(
+    producer: VodProducer,
+    expectedRevision: number,
+    allowedCurrentStates: readonly VodProducer['state'][]
+  ): Promise<AtomicWriteResult<VodProducer>>;
   createProviderBinding(
     provider: ProviderConnection,
     binding: ProviderBinding,
@@ -360,11 +393,18 @@ export interface AuditRepository {
 export interface TrafficDirector {
   readonly kind: string;
   selectEdge(
-    sessionId: string,
+    context: EdgeSelectionContext | string,
     nodes: readonly ClusterNode[],
-    preferredRegion?: string
+    legacyPreferredRegion?: string
   ): Promise<ClusterNode | undefined>;
   health(): Promise<BackendStatus>;
+}
+
+export interface EdgeSelectionContext {
+  sessionId: string;
+  affinityKey: string;
+  viewerRegion?: string;
+  preferredRegion?: string;
 }
 
 export interface MetricsSink {
@@ -416,11 +456,21 @@ export interface RemoteSegmentCommand {
   sessionId: string;
   contentKey: string;
   segmentIndex: number;
+  sourceCredential?: {
+    accessToken: string;
+    providerUserId: string;
+  };
 }
 
 export interface RemoteSegmentDispatcher {
   connected(nodeId: string): boolean;
   dispatch(nodeId: string, command: RemoteSegmentCommand, signal?: AbortSignal): Promise<void>;
+  dispatchProducer?(
+    nodeId: string,
+    command: RemoteSegmentCommand,
+    signal?: AbortSignal
+  ): Promise<void>;
+  stopProducer?(nodeId: string, sessionId: string): Promise<void>;
   cancel(nodeId: string, jobId: string): Promise<void>;
 }
 
@@ -543,11 +593,33 @@ export interface SegmentRequest {
   subtitleTrack?: number;
 }
 
+export interface VodProducerRequest {
+  source: ResolvedSource;
+  profile: ProfileRevision;
+  startSegmentIndex: number;
+  startSeconds: number;
+  duration: number;
+  audioTrack?: number;
+  subtitleTrack?: number;
+}
+
+export interface ProducedVodSegment {
+  index: number;
+  path: string;
+  initPath?: string;
+}
+
 export interface Transcoder {
   discover(signal?: AbortSignal): Promise<MediaCapabilities>;
   generateSegment(
     request: SegmentRequest,
     destination: string,
+    signal?: AbortSignal
+  ): Promise<void>;
+  produceVod?(
+    request: VodProducerRequest,
+    directory: string,
+    onSegment: (segment: ProducedVodSegment) => Promise<void>,
     signal?: AbortSignal
   ): Promise<void>;
   streamFragmentedMp4(

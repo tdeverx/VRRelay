@@ -13,7 +13,8 @@ import type {
   ProfileRevision,
   ProviderConnection,
   RelaySession,
-  SegmentJob
+  SegmentJob,
+  VodProducer
 } from '@vrrelay/domain';
 import type { CreateSessionRequest } from '@vrrelay/contracts';
 import type {
@@ -38,6 +39,7 @@ import { CapacityError, ConflictError, NotFoundError, UnauthorizedError } from '
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 import { SessionCache } from './session-cache.js';
 import { SessionJobCoordinator } from './session-jobs.js';
+import { VodProducerCoordinator } from './vod-producer-coordinator.js';
 
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
 const VIEWER_WINDOW_MS = 30_000;
@@ -106,6 +108,7 @@ export interface SessionServiceOptions {
   roles?: NodeRole[];
   jobLogRetentionRows?: number;
   jobLogQueryLimit?: number;
+  vodProducerIdleTimeoutMs?: number;
 }
 
 export interface SessionServiceInfrastructure {
@@ -128,7 +131,7 @@ export class SessionService {
   readonly #inflight = new Map<string, Promise<string>>();
   readonly #sourceGrants = new Map<
     string,
-    { source: ResolvedSource; provider: MediaProvider; expiresAt: number }
+    { source: ResolvedSource; provider: MediaProvider; expiresAt: number; sessionId?: string }
   >();
   readonly #waiters: Array<() => void> = [];
   readonly #viewers = new Map<string, Map<string, number>>();
@@ -136,6 +139,11 @@ export class SessionService {
   readonly #egressSamples: Array<{ bytes: number; observedAt: number }> = [];
   readonly #cache: SessionCache;
   readonly #jobs: SessionJobCoordinator;
+  readonly #producers?: VodProducerCoordinator;
+  readonly #ephemeralSourceCredentials = new Map<
+    string,
+    { accessToken: string; providerUserId: string }
+  >();
   #viewerSalt: Promise<string> | undefined;
   #activeWorkers = 0;
 
@@ -163,14 +171,38 @@ export class SessionService {
       {
         getSession: (id) => this.get(id),
         generateSegment: (session, profile, index, destination, signal) =>
-          this.#generateSegment(session, profile, index, destination, signal)
+          this.#generateSegment(session, profile, index, destination, signal),
+        remoteCommand: (jobId, session, contentKey, segmentIndex) =>
+          this.#remoteSegmentCommand(jobId, session, contentKey, segmentIndex)
       }
     );
+    if (infrastructure.clusterRepository && infrastructure.coordination)
+      this.#producers = new VodProducerCoordinator(
+        infrastructure.clusterRepository,
+        infrastructure.coordination,
+        infrastructure.objectStore,
+        transcoder,
+        this.#cache,
+        {
+          acquire: (signal) => this.#acquire(signal),
+          prepare: (session, profile, startSegmentIndex, signal) =>
+            this.#prepareVodProducer(session, profile, startSegmentIndex, signal),
+          released: (sessionId) => {
+            this.#release();
+            this.#ephemeralSourceCredentials.delete(sessionId);
+            this.#deleteSourceGrants(sessionId);
+          }
+        },
+        {
+          cacheDir: options.cacheDir,
+          nodeId: options.nodeId ?? 'standalone',
+          idleTimeoutMs: options.vodProducerIdleTimeoutMs ?? 60_000
+        },
+        infrastructure.metrics
+      );
   }
 
   async create(input: CreateSessionRequest, context?: SessionCreateContext): Promise<RelaySession> {
-    if (context && input.placementPolicy !== 'local')
-      throw new ConflictError('User-owned sessions must use the local worker');
     if (
       context &&
       input.kind === 'vod' &&
@@ -389,16 +421,23 @@ export class SessionService {
       }
     }
     recovered += await this.#jobs.recoverExpiredJobs();
+    recovered += (await this.#producers?.recoverExpired()) ?? 0;
     return recovered;
   }
 
   async delete(id: string): Promise<void> {
     const session = await this.repository.getSession(id);
     if (!session) throw new NotFoundError('Session was not found');
+    if (session.assignedNodeId)
+      await this.infrastructure.dispatcher
+        ?.stopProducer?.(session.assignedNodeId, session.id)
+        .catch(() => undefined);
     await this.#reportActivity(session, session.durationSeconds ?? 0, 'stop').catch(
       () => undefined
     );
     if (session.ownerId) await this.secrets.delete(this.#sessionSourceSecretRef(id));
+    await this.#producers?.stop(id);
+    this.#ephemeralSourceCredentials.delete(id);
     await this.repository.deleteSessionAndRevokePlaybackGrants(id);
     await rm(join(this.options.cacheDir, 'vod', id), { recursive: true, force: true });
     this.events.publish(event('session.deleted', { name: session.name }, id));
@@ -515,6 +554,12 @@ export class SessionService {
       await this.#requestOrigin(token, index, signal);
       if (await this.#cache.restoreObject(contentKey, destination)) return destination;
       throw new Error('Origin completed the segment request but no object was published');
+    }
+    const roles = this.options.roles ?? ['controller', 'source-worker', 'ingest-origin', 'edge'];
+    if (this.#producers && roles.includes('source-worker')) {
+      await this.#producers.ensure(session, profile, index, signal);
+      if (await this.#cache.restoreObject(contentKey, destination)) return destination;
+      throw new Error('Persistent producer completed the segment request without publishing it');
     }
     const key = destination;
     const existing = this.#inflight.get(key);
@@ -633,7 +678,47 @@ export class SessionService {
   }
 
   async executeRemoteSegment(command: RemoteSegmentCommand, signal?: AbortSignal): Promise<void> {
-    return this.#jobs.executeRemoteSegment(command, signal);
+    if (command.sourceCredential)
+      this.#ephemeralSourceCredentials.set(command.sessionId, command.sourceCredential);
+    try {
+      const session = await this.get(command.sessionId);
+      const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
+      if (!profile) throw new NotFoundError('Profile revision was not found');
+      if (profile.delivery.method === 'hls' && this.#producers) {
+        await this.#producers.ensure(session, profile, command.segmentIndex, signal);
+        return;
+      }
+      return this.#jobs.executeRemoteSegment(command, signal);
+    } finally {
+      if (!this.#producers?.isActive(command.sessionId)) {
+        this.#ephemeralSourceCredentials.delete(command.sessionId);
+        this.#deleteSourceGrants(command.sessionId);
+      }
+    }
+  }
+
+  async listProducers(limit = 100): Promise<VodProducer[]> {
+    return (await this.#producers?.list(limit)) ?? [];
+  }
+
+  async producer(sessionId: string): Promise<VodProducer | undefined> {
+    return this.#producers?.get(sessionId);
+  }
+
+  async stopProducer(sessionId: string): Promise<void> {
+    await this.#producers?.stop(sessionId);
+    this.#ephemeralSourceCredentials.delete(sessionId);
+    this.#deleteSourceGrants(sessionId);
+  }
+
+  async close(): Promise<void> {
+    await this.#producers?.close();
+    this.#ephemeralSourceCredentials.clear();
+    this.#sourceGrants.clear();
+  }
+
+  async drainProducers(): Promise<void> {
+    await this.#producers?.drain();
   }
 
   async cleanupExpiredCache(): Promise<number> {
@@ -681,7 +766,11 @@ export class SessionService {
     return this.#cache.evict(filter);
   }
 
-  async touchViewer(token: string, viewerIdentity: string): Promise<RelaySession> {
+  async touchViewer(
+    token: string,
+    viewerIdentity: string,
+    segmentIndex?: number
+  ): Promise<RelaySession> {
     const { session } = await this.#playback(token);
     const viewer = createHmac('sha256', await this.#getViewerSalt())
       .update(viewerIdentity)
@@ -696,6 +785,14 @@ export class SessionService {
         observedAtMs: Date.now(),
         windowMs: VIEWER_WINDOW_MS
       });
+      if (segmentIndex !== undefined)
+        await this.infrastructure.coordination.recordSegmentDemand({
+          sessionId: session.id,
+          viewerHash: viewer,
+          segmentIndex,
+          observedAtMs: Date.now(),
+          windowMs: VIEWER_WINDOW_MS
+        });
       if (session.viewers !== aggregation.totalViewers) {
         await this.#setSessionViewers(session.id, aggregation.totalViewers);
         if (aggregation.totalViewers > session.viewers)
@@ -813,6 +910,70 @@ export class SessionService {
     } finally {
       this.#release();
     }
+  }
+
+  async #prepareVodProducer(
+    session: RelaySession,
+    profile: ProfileRevision,
+    startSegmentIndex: number,
+    signal: AbortSignal
+  ) {
+    if (!session.source || !session.durationSeconds)
+      throw new NotFoundError('VOD source was not found');
+    const connection = await this.repository.getProvider(session.source.providerId);
+    if (!connection) throw new NotFoundError('Provider connection was not found');
+    const credential = await this.#providerCredential(connection, session);
+    const provider = this.providers.get(connection.type);
+    const segmentDuration = profile.delivery.segmentDuration;
+    const startSeconds = startSegmentIndex * segmentDuration;
+    const source = provider.resolveSourceAt
+      ? await provider.resolveSourceAt(
+          credential.connection,
+          credential.secret,
+          session.source,
+          startSeconds,
+          signal
+        )
+      : await provider.resolveSource(
+          credential.connection,
+          credential.secret,
+          session.source,
+          signal
+        );
+    return {
+      source: this.#proxySource(source, provider, session.id),
+      profile,
+      startSegmentIndex,
+      startSeconds,
+      duration: session.durationSeconds - startSeconds,
+      ...(source.defaultAudio !== undefined ? { audioTrack: source.defaultAudio } : {}),
+      ...(source.defaultSubtitle !== undefined ? { subtitleTrack: source.defaultSubtitle } : {})
+    };
+  }
+
+  async #remoteSegmentCommand(
+    jobId: string,
+    session: RelaySession,
+    contentKey: string,
+    segmentIndex: number
+  ): Promise<RemoteSegmentCommand> {
+    const command: RemoteSegmentCommand = {
+      jobId,
+      sessionId: session.id,
+      contentKey,
+      segmentIndex
+    };
+    if (!session.ownerId) return command;
+    const stored = JSON.parse(await this.secrets.get(this.#sessionSourceSecretRef(session.id))) as {
+      accessToken?: unknown;
+      userId?: unknown;
+    };
+    if (typeof stored.accessToken !== 'string' || typeof stored.userId !== 'string')
+      throw new UnauthorizedError('Session source credential is invalid');
+    return {
+      ...command,
+      sourceCredential: { accessToken: stored.accessToken, providerUserId: stored.userId }
+    };
   }
 
   #isEdgeOnly(): boolean {
@@ -943,6 +1104,12 @@ export class SessionService {
     session: RelaySession
   ): Promise<{ connection: ProviderConnection; secret: string }> {
     if (!session.ownerId) return { connection, secret: await this.#providerSecret(connection) };
+    const ephemeral = this.#ephemeralSourceCredentials.get(session.id);
+    if (ephemeral)
+      return {
+        connection: { ...connection, userId: ephemeral.providerUserId },
+        secret: ephemeral.accessToken
+      };
     const stored = JSON.parse(await this.secrets.get(this.#sessionSourceSecretRef(session.id))) as {
       accessToken?: unknown;
       userId?: unknown;
@@ -984,10 +1151,24 @@ export class SessionService {
     )?.nodeId;
   }
 
-  #proxySource(source: ResolvedSource, provider: MediaProvider): ResolvedSource {
+  #proxySource(
+    source: ResolvedSource,
+    provider: MediaProvider,
+    sessionId?: string
+  ): ResolvedSource {
     const token = opaqueToken();
-    this.#sourceGrants.set(token, { source, provider, expiresAt: Date.now() + 15 * 60_000 });
+    this.#sourceGrants.set(token, {
+      source,
+      provider,
+      expiresAt: Date.now() + 15 * 60_000,
+      ...(sessionId ? { sessionId } : {})
+    });
     return { ...source, url: `${this.options.internalUrl}/internal/source/${token}`, headers: {} };
+  }
+
+  #deleteSourceGrants(sessionId: string): void {
+    for (const [token, grant] of this.#sourceGrants)
+      if (grant.sessionId === sessionId) this.#sourceGrants.delete(token);
   }
 
   async #acquire(signal?: AbortSignal): Promise<void> {

@@ -19,7 +19,8 @@ import type {
   ProviderConnection,
   RelaySession,
   SegmentJob,
-  UserIdentity
+  UserIdentity,
+  VodProducer
 } from '@vrrelay/domain';
 import type {
   AtomicDeleteResult,
@@ -260,6 +261,23 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
        FROM settings WHERE key='portal.configuration'`,
       `DELETE FROM settings WHERE key='portal.configuration'`
     ]
+  },
+  {
+    version: 9,
+    name: 'durable vod producers',
+    checksum: 'a325c22f1631f01d551e7988402051e94f1ce295beb88a6b218ae89472df2f0b',
+    statements: [
+      `CREATE TABLE vod_producers (
+        session_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL,
+        owner_node_id TEXT,
+        json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1
+      )`,
+      'CREATE INDEX vod_producers_state_time ON vod_producers(state, updated_at DESC)',
+      'CREATE INDEX vod_producers_owner ON vod_producers(owner_node_id)'
+    ]
   }
 ] as const;
 
@@ -422,6 +440,21 @@ const SQLITE_SCHEMA_SHAPE = {
       revision: SQLITE_REVISION
     },
     primaryKey: ['id']
+  },
+  vod_producers: {
+    columns: {
+      session_id: SQLITE_TEXT_KEY,
+      state: SQLITE_TEXT_REQUIRED,
+      owner_node_id: SQLITE_TEXT_NULLABLE,
+      json: SQLITE_TEXT_REQUIRED,
+      updated_at: SQLITE_TEXT_REQUIRED,
+      revision: SQLITE_REVISION
+    },
+    primaryKey: ['session_id'],
+    indexes: {
+      vod_producers_state_time: ['state', 'updated_at'],
+      vod_producers_owner: ['owner_node_id']
+    }
   },
   provider_bindings: {
     columns: {
@@ -1629,6 +1662,79 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
       .prepare('SELECT json FROM segment_jobs ORDER BY updated_at DESC LIMIT ?')
       .all(limit) as Array<{ json: string }>;
     return rows.map((row) => JSON.parse(row.json) as SegmentJob);
+  }
+
+  async createVodProducer(
+    producer: VodProducer
+  ): Promise<{ created: boolean; record: VersionedRecord<VodProducer> }> {
+    const result = this.#db
+      .prepare(
+        `INSERT INTO vod_producers(session_id,state,owner_node_id,json,updated_at,revision)
+         VALUES(?,?,?,?,?,1) ON CONFLICT(session_id) DO NOTHING`
+      )
+      .run(
+        producer.sessionId,
+        producer.state,
+        producer.ownerNodeId ?? null,
+        JSON.stringify(producer),
+        producer.updatedAt
+      );
+    const record = this.#getVersioned<VodProducer>(
+      'vod_producers',
+      'session_id',
+      producer.sessionId
+    );
+    if (!record) throw new Error('VOD producer creation did not produce a readable record');
+    return { created: result.changes === 1, record };
+  }
+
+  async getVodProducer(sessionId: string): Promise<VodProducer | undefined> {
+    return this.#get<VodProducer>('vod_producers', 'session_id', sessionId);
+  }
+
+  async getVersionedVodProducer(
+    sessionId: string
+  ): Promise<VersionedRecord<VodProducer> | undefined> {
+    return this.#getVersioned<VodProducer>('vod_producers', 'session_id', sessionId);
+  }
+
+  async listVodProducers(limit = 100): Promise<VodProducer[]> {
+    const rows = this.#db
+      .prepare('SELECT json FROM vod_producers ORDER BY updated_at DESC LIMIT ?')
+      .all(limit) as Array<{ json: string }>;
+    return rows.map((row) => JSON.parse(row.json) as VodProducer);
+  }
+
+  async compareAndSetVodProducer(
+    producer: VodProducer,
+    expectedRevision: number,
+    allowedCurrentStates: readonly VodProducer['state'][]
+  ): Promise<AtomicWriteResult<VodProducer>> {
+    if (!allowedCurrentStates.length)
+      throw new Error('A VOD producer transition must declare its allowed current states');
+    const placeholders = allowedCurrentStates.map(() => '?').join(',');
+    const result = this.#db
+      .prepare(
+        `UPDATE vod_producers
+         SET state=?,owner_node_id=?,json=?,updated_at=?,revision=revision+1
+         WHERE session_id=? AND revision=? AND state IN (${placeholders})`
+      )
+      .run(
+        producer.state,
+        producer.ownerNodeId ?? null,
+        JSON.stringify(producer),
+        producer.updatedAt,
+        producer.sessionId,
+        expectedRevision,
+        ...allowedCurrentStates
+      );
+    if (result.changes === 1)
+      return { applied: true, record: { value: producer, revision: expectedRevision + 1 } };
+    const current = await this.getVersionedVodProducer(producer.sessionId);
+    if (!current) return { applied: false, reason: 'not-found' };
+    if (current.revision !== expectedRevision)
+      return { applied: false, reason: 'revision-conflict', current };
+    return { applied: false, reason: 'invalid-state', current };
   }
 
   async createProviderBinding(

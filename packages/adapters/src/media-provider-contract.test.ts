@@ -718,6 +718,21 @@ function mediaProviderContract(harness: MediaProviderContractHarness): void {
       expect(source.url).toContain(encodeURIComponent('version-remux'));
       expect(Object.keys(source.headers).length).toBeGreaterThan(0);
 
+      if (fixture.provider.resolveSourceAt) {
+        const positioned = await fixture.provider.resolveSourceAt(
+          fixture.connection,
+          fixture.secret,
+          {
+            providerId: fixture.connection.id,
+            itemId: item.id,
+            versionId: 'version-remux'
+          },
+          32
+        );
+        expect(positioned.positionedAtSeconds).toBe(32);
+        expect(new URL(positioned.url).searchParams.get('StartTimeTicks')).toBe('320000000');
+      }
+
       const pinned = await fixture.provider.resolveSource(fixture.connection, fixture.secret, {
         providerId: fixture.connection.id,
         itemId: item.id,

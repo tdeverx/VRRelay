@@ -10,6 +10,7 @@ const composeFile = resolve(root, 'deploy/integration/compose.yml');
 const stateDirectory = resolve(root, '.data/acceptance');
 const envFile = resolve(stateDirectory, 'harness.env');
 const controllerUrl = 'http://127.0.0.1:18100';
+const jellyfinFixtureUrl = 'http://127.0.0.1:18096';
 const keep = process.argv.includes('--keep');
 const skipBuild = process.argv.includes('--skip-build');
 const adminPassword = `acceptance-${randomBytes(18).toString('base64url')}`;
@@ -145,20 +146,30 @@ async function createJoinToken(name, roles, region) {
   ).body.token;
 }
 
-async function fetchText(url) {
-  const response = await fetch(url, { headers: { 'user-agent': 'VRRelay acceptance harness' } });
+async function fetchText(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: { 'user-agent': 'VRRelay acceptance harness', ...headers }
+  });
   const text = await response.text();
   if (!response.ok)
     throw new Error(`GET ${url} failed (${response.status}): ${text.slice(0, 300)}`);
   return text;
 }
 
-async function fetchMedia(url) {
-  const response = await fetch(url, { headers: { 'user-agent': 'VRRelay acceptance harness' } });
+async function fetchMedia(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: { 'user-agent': 'VRRelay acceptance harness', ...headers }
+  });
   const body = Buffer.from(await response.arrayBuffer());
   if (!response.ok) throw new Error(`GET ${url} failed (${response.status})`);
   assert(body.length > 1_000, `Media response from ${url} was unexpectedly small`);
   return body;
+}
+
+async function jellyfinStats() {
+  const response = await fetch(`${jellyfinFixtureUrl}/fixture/stats`);
+  if (!response.ok) throw new Error(`Jellyfin fixture stats failed (${response.status})`);
+  return response.json();
 }
 
 function mediaLines(playlist) {
@@ -216,20 +227,20 @@ async function run() {
   environment.SOURCE_A_JOIN_TOKEN = await createJoinToken(
     'Acceptance worker A',
     ['source-worker'],
-    'home'
+    'london'
   );
   environment.SOURCE_B_JOIN_TOKEN = await createJoinToken(
     'Acceptance worker B',
     ['source-worker'],
-    'backup'
+    'new-york'
   );
   environment.INGEST_JOIN_TOKEN = await createJoinToken(
     'Acceptance ingest origin',
     ['ingest-origin'],
-    'home'
+    'london'
   );
-  environment.EDGE_A_JOIN_TOKEN = await createJoinToken('Acceptance edge A', ['edge'], 'home');
-  environment.EDGE_B_JOIN_TOKEN = await createJoinToken('Acceptance edge B', ['edge'], 'backup');
+  environment.EDGE_A_JOIN_TOKEN = await createJoinToken('Acceptance edge A', ['edge'], 'london');
+  environment.EDGE_B_JOIN_TOKEN = await createJoinToken('Acceptance edge B', ['edge'], 'new-york');
   await writeEnvironment();
 
   log('Enrolling two workers, one ingest origin, and two edges over outbound mTLS WSS');
@@ -323,19 +334,34 @@ async function run() {
   ).body;
   const cleanUrl = session.outputUrls.primary;
   const token = cleanUrl.split('/play/')[1].split('/')[0];
-  const manifest = await fetchText(cleanUrl);
-  assert(manifest.includes('#EXT-X-PLAYLIST-TYPE:VOD'), 'VOD manifest is not finite VOD');
-  assert(manifest.includes('#EXT-X-ENDLIST'), 'VOD manifest does not expose completion');
+  const londonManifest = await fetchText(cleanUrl, { 'x-vrrelay-region': 'london' });
+  const newYorkManifest = await fetchText(cleanUrl, { 'x-vrrelay-region': 'new-york' });
+  assert(londonManifest.includes('#EXT-X-PLAYLIST-TYPE:VOD'), 'VOD manifest is not finite VOD');
+  assert(londonManifest.includes('#EXT-X-ENDLIST'), 'VOD manifest does not expose completion');
   assert(
-    mediaLines(manifest).every((line) => line.startsWith('http://127.0.0.1:1820')),
+    mediaLines(londonManifest).every((line) => line.startsWith('http://127.0.0.1:18201')),
+    'London controller manifest did not select the London edge'
+  );
+  assert(
+    mediaLines(newYorkManifest).every((line) => line.startsWith('http://127.0.0.1:18202')),
+    'New York controller manifest did not select the New York edge'
+  );
+  assert(
+    new URL(mediaLines(londonManifest)[0]).origin !==
+      new URL(mediaLines(newYorkManifest)[0]).origin,
+    'Regional viewers received the same delivery edge'
+  );
+  assert(
+    mediaLines(londonManifest).every((line) => line.startsWith('http://127.0.0.1:1820')),
     'Controller manifest did not contain absolute authorized edge URLs'
   );
 
-  log('Requesting the same segment through both edges to prove cluster-wide coalescing');
+  log('Requesting the same segment through both regions to prove one continuous producer');
+  const sourceBefore = await jellyfinStats();
   const segmentPath = `/play/${token}/segment/0.ts`;
   const [segmentA, segmentB] = await Promise.all([
-    fetchMedia(`http://127.0.0.1:18201${segmentPath}`),
-    fetchMedia(`http://127.0.0.1:18202${segmentPath}`)
+    fetchMedia(`http://127.0.0.1:18201${segmentPath}`, { 'user-agent': 'London viewer' }),
+    fetchMedia(`http://127.0.0.1:18202${segmentPath}`, { 'user-agent': 'New York viewer' })
   ]);
   assert(segmentA.equals(segmentB), 'Edges returned different bytes for the same content key');
   assert(segmentA[0] === 0x47, 'Default VOD output is not an MPEG-TS segment');
@@ -355,6 +381,87 @@ async function run() {
       jobs[0].workerHistory[0].completedAt,
     'Completed worker attempt was not recorded in segment-job history'
   );
+  const sourceAfterFirst = await jellyfinStats();
+  assert(
+    sourceAfterFirst.sourceRequests - sourceBefore.sourceRequests === 1,
+    `One session opened ${sourceAfterFirst.sourceRequests - sourceBefore.sourceRequests} Jellyfin source connections`
+  );
+  await fetchMedia(`http://127.0.0.1:18202/play/${token}/segment/1.ts`, {
+    'user-agent': 'New York viewer'
+  });
+  const sourceAfterSequential = await jellyfinStats();
+  assert(
+    sourceAfterSequential.sourceRequests === sourceAfterFirst.sourceRequests,
+    'Sequential segments did not reuse the continuous Jellyfin connection'
+  );
+  await fetchMedia(`http://127.0.0.1:18201${segmentPath}`, { 'user-agent': 'London viewer' });
+  assert(
+    (await jellyfinStats()).sourceRequests === sourceAfterSequential.sourceRequests,
+    'An edge/object-store cache hit opened another Jellyfin request'
+  );
+
+  log('Moving a regional majority to a distant segment and verifying one fenced replacement');
+  await Promise.all([
+    fetchMedia(`http://127.0.0.1:18201/play/${token}/segment/12.ts`, {
+      'user-agent': 'London seek viewer'
+    }),
+    fetchMedia(`http://127.0.0.1:18202/play/${token}/segment/12.ts`, {
+      'user-agent': 'New York seek viewer'
+    }),
+    fetchMedia(`http://127.0.0.1:18201/play/${token}/segment/12.ts`, {
+      'user-agent': 'London seek viewer two'
+    })
+  ]);
+  const producerAfterSeek = (await api(`/api/v1/vod-producers/${session.id}`)).body;
+  assert(
+    producerAfterSeek.generation === 2 && producerAfterSeek.startSegmentIndex === 12,
+    'Dominant seek did not create exactly one replacement producer generation'
+  );
+  const sourceAfterSeek = await jellyfinStats();
+  assert(
+    sourceAfterSeek.sourceRequests === sourceAfterSequential.sourceRequests + 1,
+    `Dominant seek did not replace the Jellyfin source connection exactly once (${JSON.stringify(sourceAfterSeek.sourceRequestRanges)})`
+  );
+  assert(
+    sourceAfterSeek.sourceStartTimeTicks.at(-1) === '480000000',
+    'Replacement producer did not request a provider-positioned Jellyfin stream'
+  );
+  assert(
+    sourceAfterSeek.maximumConcurrentSourceRequests <= 1,
+    'Replacement overlapped an accepted old Jellyfin source connection'
+  );
+
+  log('Creating a distinct session and verifying it may consume an additional source connection');
+  const secondSession = (
+    await api('/api/v1/sessions', {
+      method: 'POST',
+      body: {
+        kind: 'vod',
+        name: 'Acceptance independent VOD',
+        source: {
+          providerId,
+          itemId: item.id,
+          versionId: item.versions[0].id,
+          sourceFingerprint: `${item.versions[0].fingerprint}-independent`
+        },
+        profileId: vodProfile.profileId,
+        profileRevision: vodProfile.revision,
+        platformMode: 'universal',
+        pinned: false,
+        reportActivity: false,
+        placementPolicy: 'hosted',
+        playbackTtlSeconds: 600
+      }
+    })
+  ).body;
+  const secondToken = secondSession.outputUrls.primary.split('/play/')[1].split('/')[0];
+  await fetchMedia(`http://127.0.0.1:18201/play/${secondToken}/segment/0.ts`, {
+    'user-agent': 'Independent session viewer'
+  });
+  assert(
+    (await jellyfinStats()).sourceRequests === sourceAfterSeek.sourceRequests + 1,
+    'A distinct session did not receive its own permitted Jellyfin connection'
+  );
 
   compose([
     'exec',
@@ -366,7 +473,7 @@ async function run() {
   ]);
 
   log('Draining the selected edge and verifying refreshed playlist rerouting');
-  const initialEdgeUrl = new URL(mediaLines(manifest)[0]).origin;
+  const initialEdgeUrl = new URL(mediaLines(londonManifest)[0]).origin;
   const initialEdge = nodes.find((node) => node.publicUrl === initialEdgeUrl);
   assert(initialEdge, 'Could not map the selected manifest route to an enrolled edge');
   await api(`/api/v1/nodes/${initialEdge.id}/drain`, {
@@ -384,9 +491,11 @@ async function run() {
   assert(assignedWorker, 'Hosted session was not assigned to a bound worker');
   await api(`/api/v1/nodes/${assignedWorker.id}/revoke`, { method: 'POST', body: {} });
   const activeEdgeUrl = new URL(mediaLines(reroutedManifest)[0]).origin;
-  await fetchMedia(`${activeEdgeUrl}/play/${token}/segment/1.ts`);
+  await fetchMedia(`${activeEdgeUrl}/play/${token}/segment/19.ts`, {
+    'user-agent': 'Failover viewer'
+  });
   const secondJob = (await api('/api/v1/jobs')).body.items.find(
-    (job) => job.sessionId === session.id && job.segmentIndex === 1
+    (job) => job.sessionId === session.id && job.segmentIndex === 19
   );
   assert(secondJob?.state === 'complete', 'Failover worker did not complete the next segment');
   assert(secondJob.ownerNodeId !== assignedWorker.id, 'Revoked worker retained the segment lease');
@@ -473,7 +582,9 @@ async function run() {
     );
   }
 
-  log('PASS: distributed VOD, coalescing, failover, reroute, recovery, and live fan-out');
+  log(
+    'PASS: regional edge routing, persistent VOD producers, cache reuse, fenced failover, recovery, and live fan-out'
+  );
 }
 
 let cleaning = false;

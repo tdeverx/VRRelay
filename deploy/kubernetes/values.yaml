@@ -2,6 +2,8 @@ image: { repository: ghcr.io/tdeverx/vrrelay, tag: '', digest: '', pullPolicy: I
 disruptionBudget: { enabled: true }
 rollout: { runtimeSecretChecksum: '' }
 migration: { activeDeadlineSeconds: 1800 }
+routing: { viewerRegionHeader: x-vrrelay-region }
+vodProducer: { idleTimeout: 60s }
 networkPolicy:
   enabled: true
   externalEgress:
