@@ -4,7 +4,11 @@
   <key>Label</key><string>org.vrrelay.service</string>
   <key>ProgramArguments</key><array>
     <string>VRRELAY_RUNTIME/bin/node</string>
+    <string>VRRELAY_RUNTIME/service-runner.mjs</string>
     <string>VRRELAY_RUNTIME/apps/relay/dist/main.js</string>
+    <string>VRRELAY_LOG/service.log</string>
+    <string>10485760</string>
+    <string>8</string>
   </array>
   <key>WorkingDirectory</key><string>VRRELAY_RUNTIME</string>
   <key>EnvironmentVariables</key><dict>
@@ -19,7 +23,7 @@
   </dict>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ProcessType</key><string>Background</string>
-  <key>StandardOutPath</key><string>VRRELAY_LOG/service.log</string>
-  <key>StandardErrorPath</key><string>VRRELAY_LOG/service.log</string>
+  <key>StandardOutPath</key><string>VRRELAY_LOG/service-supervisor.log</string>
+  <key>StandardErrorPath</key><string>VRRELAY_LOG/service-supervisor.log</string>
   <key>ThrottleInterval</key><integer>10</integer>
 </dict></plist>

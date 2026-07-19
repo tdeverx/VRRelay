@@ -6,6 +6,13 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed standalone worker recovery and local relay placement. Resuming the local worker now updates
+  it directly instead of attempting delivery through a nonexistent agent connection; local
+  provider credentials are advertised as node capabilities; and the relay wizard validates Local
+  placement before continuing instead of allowing a later error.
+- Made dashboard-requested native restarts supervisor-safe on macOS and Windows, suppressed routine
+  three-second liveness probes from request logs, and added bounded 10 MiB macOS service-log
+  rotation with eight retained files.
 - Fixed the macOS menu app's **Start Relay** and **Open Dashboard** recovery actions after a
   listener change. An unhealthy but already-loaded LaunchAgent is now restarted so pending runtime
   settings take effect instead of leaving the old listener running.

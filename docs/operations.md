@@ -13,6 +13,18 @@ readiness. Readiness returns HTTP 503 when repository, coordination,
 object-store, routing, metrics, or restart-required backend state is not ready,
 but it only exposes redacted dependency category/kind/status fields.
 
+The native menu/tray controller polls liveness without adding each successful probe to the request
+log. macOS service output rolls at 10 MiB and retains eight historical files beside
+`~/Library/Logs/VRRelay/service.log`; Windows uses the equivalent WinSW rolling-log policy.
+
+## Standalone worker state
+
+The standalone node is the local source worker and does not connect back to its own agent listener.
+Draining it prevents new local placement. Use **Cluster → Nodes → Resume local worker** to return a
+draining standalone node to service. The New relay wizard validates Local placement against the
+node's online state, encoder support, and locally available provider credentials before it enables
+the review step.
+
 ## Traffic director
 
 The default director performs capacity-aware, stable session hashing locally. **Cluster → Configure routing** can also validate and activate static routing without restarting the controller. Static routing can pin traffic to one configured edge node or to an online edge in a configured region; a pinned node fails closed if it is offline, no longer has the edge role, or does not match the request's preferred region.

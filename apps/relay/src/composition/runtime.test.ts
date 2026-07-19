@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
-import type { NodeCapability } from '@vrrelay/domain';
+import type { NodeCapability, ProviderBinding, ProviderConnection } from '@vrrelay/domain';
 import type { NodeAgentOptions } from '../agent-transport.js';
 import { loadConfig } from '../config.js';
-import { configuredNodeAgentOptions } from './runtime.js';
+import { configuredNodeAgentOptions, locallyAvailableProviderIds } from './runtime.js';
 
 const capabilities = async (): Promise<NodeCapability> => ({
   encoders: [],
@@ -50,5 +50,35 @@ describe('runtime public routing configuration', () => {
       controllerUrl: 'wss://controller.example.test/agent',
       enrollmentUrl: 'https://controller.example.test/enroll'
     });
+  });
+});
+
+describe('local provider capability discovery', () => {
+  it('includes legacy provider secrets and local bindings while excluding unavailable secrets', async () => {
+    const provider = (id: string, secretRef: string) => ({ id, secretRef }) as ProviderConnection;
+    const binding = (providerId: string, secretRef: string, deletionPending = false) =>
+      ({ providerId, secretRef, deletionPending }) as ProviderBinding;
+    const available = new Set(['provider:legacy', 'binding:local']);
+
+    await expect(
+      locallyAvailableProviderIds(
+        {
+          listProviders: async () => [
+            provider('legacy', 'provider:legacy'),
+            provider('remote', 'provider:remote')
+          ],
+          listProviderBindings: async () => [
+            binding('legacy', 'binding:local'),
+            binding('deleted', 'binding:deleted', true)
+          ]
+        },
+        {
+          get: async (key) => {
+            if (!available.has(key)) throw new Error('unavailable');
+            return 'secret';
+          }
+        }
+      )
+    ).resolves.toEqual(['legacy']);
   });
 });

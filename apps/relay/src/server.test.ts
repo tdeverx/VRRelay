@@ -615,6 +615,36 @@ describe('node drain command delivery', () => {
     expect(directDrainCalls).toBe(1);
   });
 
+  it('updates the standalone node directly instead of sending to a nonexistent local agent', async () => {
+    let directDrainCalls = 0;
+    let agentDrainCalls = 0;
+    const resumed = { ...node, id: 'standalone', state: 'online' } as ClusterNode;
+    const result = await setNodeDrainWithDelivery(
+      {
+        cluster: {
+          drain: async () => {
+            directDrainCalls += 1;
+            return resumed;
+          },
+          get: async () => resumed
+        },
+        agentController: {
+          setDrain: async () => {
+            agentDrainCalls += 1;
+            return { persisted: true, acknowledged: false };
+          }
+        }
+      },
+      'standalone',
+      false,
+      'standalone'
+    );
+
+    expect(result).toEqual({ node: resumed, commandAcknowledged: null });
+    expect(directDrainCalls).toBe(1);
+    expect(agentDrainCalls).toBe(0);
+  });
+
   it('returns a durable result when command acknowledgement is deferred to reconnect', async () => {
     const result = await setNodeDrainWithDelivery(
       {

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { Readable, Transform } from 'node:stream';
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, { LogController, type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -102,6 +102,7 @@ export interface ProviderBindingDeletionOutcome {
 }
 
 export type ControlPlaneHttpSurface = 'controller' | 'standalone';
+export const RUNTIME_RESTART_EXIT_CODE = 75;
 
 export function placementNodeConnectivity(
   surface: ControlPlaneHttpSurface,
@@ -167,9 +168,10 @@ export interface NodeDrainDeliveryOutcome {
 export async function setNodeDrainWithDelivery(
   services: NodeDrainServices,
   nodeId: string,
-  draining: boolean
+  draining: boolean,
+  localNodeId?: string
 ): Promise<NodeDrainDeliveryOutcome> {
-  if (!services.agentController)
+  if (!services.agentController || nodeId === localNodeId)
     return {
       node: await services.cluster.drain(nodeId, draining),
       commandAcknowledged: null
@@ -430,6 +432,9 @@ export async function createServer(
   surface: ControlPlaneHttpSurface = 'standalone'
 ): Promise<FastifyInstance> {
   const app = Fastify({
+    logController: new LogController({
+      disableRequestLogging: (request) => request.url.split('?', 1)[0] === '/api/v1/health'
+    }),
     logger: {
       level: process.env.VRRELAY_LOG_LEVEL ?? 'info',
       redact: {
@@ -1030,7 +1035,7 @@ export async function createServer(
       async () => ({ restarting: true as const })
     );
     void reply.send(result);
-    const timer = setTimeout(() => process.exit(0), 250);
+    const timer = setTimeout(() => process.exit(RUNTIME_RESTART_EXIT_CODE), 250);
     timer.unref();
     return reply;
   });
@@ -1116,7 +1121,13 @@ export async function createServer(
           }
         })
       },
-      () => setNodeDrainWithDelivery(services, nodeId, draining)
+      () =>
+        setNodeDrainWithDelivery(
+          services,
+          nodeId,
+          draining,
+          surface === 'standalone' ? config.nodeId : undefined
+        )
     );
     return result.node;
   });
@@ -1204,7 +1215,11 @@ export async function createServer(
           profile,
           ...(isPlacementNodeConnected ? { isNodeConnected: isPlacementNodeConnected } : {}),
           ...(body.providerId ? { providerId: body.providerId } : {}),
-          ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
+          ...(body.placementPolicy === 'local'
+            ? { preferredNodeId: config.nodeId }
+            : body.preferredNodeId
+              ? { preferredNodeId: body.preferredNodeId }
+              : {}),
           ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
         });
       }
@@ -1337,7 +1352,7 @@ export async function createServer(
       async () => {
         const body = parse(CreateSessionRequestSchema, request.body);
         body.placementLocked = Boolean(body.preferredNodeId);
-        if (body.kind === 'vod' && body.placementPolicy !== 'local') {
+        if (body.kind === 'vod') {
           const profile = await services.repository.getProfile(
             body.profileId,
             body.profileRevision
@@ -1349,12 +1364,16 @@ export async function createServer(
             providerId: body.source.providerId,
             profile,
             ...(isPlacementNodeConnected ? { isNodeConnected: isPlacementNodeConnected } : {}),
-            ...(body.preferredNodeId ? { preferredNodeId: body.preferredNodeId } : {}),
+            ...(body.placementPolicy === 'local'
+              ? { preferredNodeId: config.nodeId }
+              : body.preferredNodeId
+                ? { preferredNodeId: body.preferredNodeId }
+                : {}),
             ...(body.preferredRegion ? { preferredRegion: body.preferredRegion } : {})
           });
           if (!placement.node)
             throw new ApplicationError('placement_unavailable', placement.reason, 409);
-          body.preferredNodeId = placement.node.id;
+          if (body.placementPolicy !== 'local') body.preferredNodeId = placement.node.id;
         }
         return services.sessions.create(body);
       }

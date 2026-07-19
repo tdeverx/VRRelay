@@ -34,7 +34,9 @@ cleanup() { [[ -z "$NEXT_PLIST" ]] || /bin/rm -f "$NEXT_PLIST"; }
 trap cleanup EXIT INT TERM
 /usr/bin/ditto "$RESOURCE_ROOT/org.vrrelay.service.plist" "$NEXT_PLIST"
 /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 $TARGET_RUNTIME/bin/node" "$NEXT_PLIST"
-/usr/libexec/PlistBuddy -c "Set :ProgramArguments:1 $TARGET_RUNTIME/apps/relay/dist/main.js" "$NEXT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :ProgramArguments:1 $TARGET_RUNTIME/service-runner.mjs" "$NEXT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :ProgramArguments:2 $TARGET_RUNTIME/apps/relay/dist/main.js" "$NEXT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :ProgramArguments:3 $TARGET_LOGS/service.log" "$NEXT_PLIST"
 /usr/bin/plutil -replace WorkingDirectory -string "$TARGET_RUNTIME" "$NEXT_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_DATA_DIR -string "$TARGET_ROOT/data" "$NEXT_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_RUNTIME_CONFIG -string "$TARGET_ROOT/data/runtime-config.json" "$NEXT_PLIST"
@@ -42,8 +44,8 @@ trap cleanup EXIT INT TERM
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_FFMPEG -string "$TARGET_RUNTIME/bin/ffmpeg" "$NEXT_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_MEDIAMTX_EXECUTABLE -string "$TARGET_RUNTIME/bin/mediamtx" "$NEXT_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.VRRELAY_MEDIAMTX_CONFIG -string "$TARGET_RUNTIME/mediamtx.yml" "$NEXT_PLIST"
-/usr/bin/plutil -replace StandardOutPath -string "$TARGET_LOGS/service.log" "$NEXT_PLIST"
-/usr/bin/plutil -replace StandardErrorPath -string "$TARGET_LOGS/service.log" "$NEXT_PLIST"
+/usr/bin/plutil -replace StandardOutPath -string "$TARGET_LOGS/service-supervisor.log" "$NEXT_PLIST"
+/usr/bin/plutil -replace StandardErrorPath -string "$TARGET_LOGS/service-supervisor.log" "$NEXT_PLIST"
 
 RUNTIME_CHANGED=1
 if [[ -f "$TARGET_RUNTIME/build-id.txt" ]] && /usr/bin/cmp -s "$RESOURCE_ROOT/runtime/build-id.txt" "$TARGET_RUNTIME/build-id.txt"; then

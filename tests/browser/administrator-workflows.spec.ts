@@ -5,6 +5,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 const administratorPassword = 'VRRelay-browser-test-password';
 let authenticationCookies: Awaited<ReturnType<APIRequestContext['storageState']>>['cookies'] = [];
 let authenticationCsrf = '';
+let administratorProviderId = '';
+let administratorProviderName = '';
 
 async function authenticateNew(page: Page): Promise<void> {
   await page.goto('/dashboard');
@@ -49,6 +51,33 @@ test.beforeAll(async ({ request }) => {
   expect(loginResponse.ok()).toBe(true);
   authenticationCsrf = ((await loginResponse.json()) as { csrfToken: string }).csrfToken;
   authenticationCookies = (await request.storageState()).cookies;
+
+  const providersResponse = await request.get('/api/v1/providers');
+  expect(providersResponse.ok()).toBe(true);
+  const existingProvider = (
+    (await providersResponse.json()) as { items: Array<{ id: string; name: string }> }
+  ).items.find((provider) => provider.name === 'Browser Jellyfin');
+  if (existingProvider) {
+    administratorProviderId = existingProvider.id;
+    administratorProviderName = existingProvider.name;
+    return;
+  }
+
+  administratorProviderName = 'Browser Jellyfin';
+  const providerResponse = await request.post('/api/v1/providers', {
+    headers: { 'X-CSRF-Token': authenticationCsrf },
+    data: {
+      type: 'jellyfin',
+      name: administratorProviderName,
+      baseUrl: 'http://127.0.0.1:18202',
+      authMode: 'user_token',
+      username: 'browser-user',
+      password: 'browser-password',
+      allowPublicHttp: true
+    }
+  });
+  expect(providerResponse.ok()).toBe(true);
+  administratorProviderId = ((await providerResponse.json()) as { id: string }).id;
 });
 
 test.beforeEach(async ({ context, page }) => {
@@ -126,6 +155,39 @@ test('keeps setup redirects inside the dashboard namespace', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
 });
 
+test('validates local placement and keeps the relay wizard on the working route', async ({
+  page
+}) => {
+  test.slow();
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get('/api/v1/nodes');
+        const body = (await response.json()) as {
+          items: Array<{ id: string; capabilities: { providerIds: string[] } }>;
+        };
+        return body.items.find((node) => node.id === 'standalone')?.capabilities.providerIds;
+      },
+      { timeout: 25_000 }
+    )
+    .toContain(administratorProviderId);
+
+  await page.goto('/dashboard/relay/new');
+  await page.getByRole('button', { name: /Browser Jellyfin|Provider/ }).click();
+  await page.getByRole('option', { name: administratorProviderName, exact: true }).click();
+  const movie = page.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
+  await movie.getByRole('button', { name: 'Select source' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('radio', { name: 'Local', exact: true }).click();
+
+  await expect(page).toHaveURL(/\/dashboard\/relay\/new$/);
+  await expect(page.getByText('VRRelay node', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByRole('heading', { name: 'Review' }).last()).toBeVisible();
+});
+
 test('serves the dashboard namespace and a per-user Jellyfin relay portal', async ({
   context,
   page
@@ -135,13 +197,19 @@ test('serves the dashboard namespace and a per-user Jellyfin relay portal', asyn
   await freshSettingsPage.goto('/dashboard/settings');
   await expect(freshSettingsPage).toHaveURL(/\/dashboard\/settings$/);
   await expect(freshSettingsPage.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expect(
+    freshSettingsPage.getByText(administratorProviderName, { exact: true })
+  ).toBeVisible();
   expect(
     await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))
   ).toBeTruthy();
 
-  await freshSettingsPage.getByLabel('Connection name').fill('User Jellyfin');
-  await freshSettingsPage.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
-  await freshSettingsPage.getByRole('button', { name: 'Add endpoint' }).click();
+  if ((await freshSettingsPage.getByText('Per-user login').count()) === 0) {
+    await freshSettingsPage.getByLabel('Connection name').fill('User Jellyfin');
+    await freshSettingsPage.getByLabel('Jellyfin URL').fill('http://127.0.0.1:18202');
+    await freshSettingsPage.getByRole('switch', { name: 'Allow public HTTP' }).click();
+    await freshSettingsPage.getByRole('button', { name: 'Add endpoint' }).click();
+  }
   await expect(freshSettingsPage.getByText('Per-user login')).toBeVisible();
   expect(
     await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))

@@ -24,11 +24,18 @@ export default defineConfig({
   projects: [
     {
       name: 'desktop-chromium',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } }
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 1000 },
+        extraHTTPHeaders: { 'X-Forwarded-For': '198.51.100.10' }
+      }
     },
     {
       name: 'mobile-chromium',
-      use: { ...devices['Pixel 7'] }
+      use: {
+        ...devices['Pixel 7'],
+        extraHTTPHeaders: { 'X-Forwarded-For': '198.51.100.11' }
+      }
     }
   ]
 });

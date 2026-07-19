@@ -474,7 +474,11 @@
                         size="sm"
                         disabled={busyId === node.id}
                         onclick={() => drain(node)}
-                        >{node.state === 'draining' ? 'Cancel drain' : 'Drain'}</Button
+                        >{node.state === 'draining'
+                          ? node.id === 'standalone'
+                            ? 'Resume local worker'
+                            : 'Cancel drain'
+                          : 'Drain'}</Button
                       >
                       {#if !node.roles.includes('controller')}
                         <Button variant="ghost" size="sm" onclick={() => showLogs(node)}>
@@ -509,7 +513,11 @@
                 ><Card.Action><StatusBadge value={node.state} /></Card.Action></Card.Header
               ><Card.Footer class="flex flex-wrap gap-2"
                 ><Button variant="outline" size="sm" onclick={() => drain(node)}
-                  >{node.state === 'draining' ? 'Cancel drain' : 'Drain node'}</Button
+                  >{node.state === 'draining'
+                    ? node.id === 'standalone'
+                      ? 'Resume local worker'
+                      : 'Cancel drain'
+                    : 'Drain node'}</Button
                 >{#if !node.roles.includes('controller')}<Button
                     variant="outline"
                     size="sm"

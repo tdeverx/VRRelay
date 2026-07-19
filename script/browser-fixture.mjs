@@ -168,6 +168,7 @@ const relay = spawn(process.execPath, ['apps/relay/dist/main.js'], {
     VRRELAY_LISTEN_ADDR: '127.0.0.1:18200',
     VRRELAY_AGENT_LISTEN_ADDR: '127.0.0.1:18201',
     VRRELAY_PUBLIC_URL: 'http://127.0.0.1:18200',
+    VRRELAY_TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
     VRRELAY_DATA_DIR: dataDirectory,
     VRRELAY_CACHE_DIR: cacheDirectory,
     VRRELAY_REPOSITORY_DRIVER: 'sqlite',

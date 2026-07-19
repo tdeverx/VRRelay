@@ -77,8 +77,7 @@
   );
   let regions = $derived([...new Set(eligibleNodes.map((node) => node.region))].sort());
   let placementReady = $derived(
-    placementPolicy === 'local' ||
-      (!placementLoading && !placementError && Boolean(placementPreview?.node))
+    !placementLoading && !placementError && Boolean(placementPreview?.node)
   );
 
   onMount(load);
@@ -207,11 +206,6 @@
   async function refreshPlacement() {
     const requestId = ++placementRequest;
     placementError = '';
-    if (placementPolicy === 'local') {
-      placementPreview = { reason: 'local-runtime' };
-      placementLoading = false;
-      return placementPreview;
-    }
     if (!currentProfile || !providerId) return null;
     placementLoading = true;
     placementPreview = null;
@@ -246,8 +240,7 @@
     if (!selected || !currentProfile) return;
     creating = true;
     try {
-      if (placementPolicy !== 'local' && !(await refreshPlacement())?.node)
-        return toast.error('Placement is unavailable.');
+      if (!(await refreshPlacement())?.node) return toast.error('Placement is unavailable.');
       const session = await api.createVodSession({
         name: selected.name,
         source: {
@@ -580,7 +573,7 @@
                   ><Alert.Title>Placement unavailable</Alert.Title><Alert.Description
                     >{placementError}</Alert.Description
                   ></Alert.Root
-                >{:else if placementPolicy !== 'local'}<Alert.Root
+                >{:else}<Alert.Root
                   ><Alert.Title
                     >{placementLoading
                       ? 'Checking placement…'

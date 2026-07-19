@@ -12,6 +12,7 @@ import {
   BuiltinTrafficDirector,
   AuditService,
   ClusterService,
+  type ClusterRepository,
   InMemoryEventBus,
   LiveService,
   ProfileService,
@@ -21,6 +22,8 @@ import {
   SwitchableTrafficDirector,
   type MediaCapabilities,
   type ProviderRegistry,
+  type Repository,
+  type SecretStore,
   type Transcoder
 } from '@vrrelay/application';
 import type { NodeCapability } from '@vrrelay/domain';
@@ -131,6 +134,33 @@ function nodeCapabilities(
     egressMbps: sessions?.egressMbps() ?? 0,
     providerIds: await providerIds()
   });
+}
+
+export async function locallyAvailableProviderIds(
+  repository: Pick<Repository, 'listProviders'> & Pick<ClusterRepository, 'listProviderBindings'>,
+  secrets: Pick<SecretStore, 'get'>
+): Promise<string[]> {
+  const [providers, bindings] = await Promise.all([
+    repository.listProviders(),
+    repository.listProviderBindings()
+  ]);
+  const candidates = [
+    ...providers.map((provider) => ({ providerId: provider.id, secretRef: provider.secretRef })),
+    ...bindings
+      .filter((binding) => !binding.deletionPending)
+      .map((binding) => ({ providerId: binding.providerId, secretRef: binding.secretRef }))
+  ];
+  const available = await Promise.all(
+    candidates.map(async (candidate) => {
+      try {
+        await secrets.get(candidate.secretRef);
+        return candidate.providerId;
+      } catch {
+        return undefined;
+      }
+    })
+  );
+  return [...new Set(available.filter((providerId): providerId is string => Boolean(providerId)))];
 }
 
 function providerAgentHandler(providers: ProviderService): NodeAgentOptions['onProvider'] {
@@ -372,20 +402,8 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     },
     plan.kind === 'controller' ? 'controller' : 'standalone'
   );
-  const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, async () =>
-    (
-      await Promise.all(
-        (await repository.listProviderBindings()).map(async (binding) => {
-          if (binding.deletionPending) return undefined;
-          try {
-            await secrets.get(binding.secretRef);
-            return binding.providerId;
-          } catch {
-            return undefined;
-          }
-        })
-      )
-    ).filter((providerId): providerId is string => Boolean(providerId))
+  const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
+    locallyAvailableProviderIds(repository, secrets)
   );
   if (plan.hostsController) {
     await cluster.registerLocal({
@@ -538,20 +556,8 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     },
     { objectStore, coordination, clusterRepository: repository, metrics }
   );
-  const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, async () =>
-    (
-      await Promise.all(
-        (await repository.listProviderBindings()).map(async (binding) => {
-          if (binding.deletionPending) return undefined;
-          try {
-            await secrets.get(binding.secretRef);
-            return binding.providerId;
-          } catch {
-            return undefined;
-          }
-        })
-      )
-    ).filter((providerId): providerId is string => Boolean(providerId))
+  const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
+    locallyAvailableProviderIds(repository, secrets)
   );
   const app = await createRoleServer(config, {
     kind: 'source-worker',

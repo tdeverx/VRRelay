@@ -19,8 +19,11 @@ current app before restarting; **Stop relay** leaves the runtime and retained da
 menu opens the dashboard in the system browser.
 
 The LaunchAgent supervises both the TypeScript relay and bundled MediaMTX process independently of
-the menu utility and starts at each login. Logging out ends the current user's relay processes;
-logging back in starts them again. Upgrades retain service data. Run `deploy/macos/uninstall.sh`
+the menu utility and starts at each login. A signal-forwarding runner keeps `service.log` plus eight
+10 MiB historical files. Dashboard-requested restarts use a dedicated nonzero exit status so both
+launchd and the Windows service supervisor relaunch the service. Logging out ends the current
+user's relay processes; logging back in starts them again. Upgrades retain service data. Run
+`deploy/macos/uninstall.sh`
 from a trusted checkout to unload the user service and remove its installed runtime while retaining
 data; pass `--purge-data` only when the retained data should also be deleted.
 
