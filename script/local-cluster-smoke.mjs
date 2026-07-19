@@ -253,7 +253,9 @@ async function main() {
     '-i',
     'sine=frequency=880:sample_rate=48000',
     '-t',
-    '12',
+    // Keep the media length aligned with the Jellyfin fixture metadata so
+    // distant producer seeks exercise real content instead of end-of-file.
+    '80',
     '-c:v',
     'libx264',
     '-preset',
@@ -454,9 +456,12 @@ async function main() {
   );
   await api(`/api/v1/nodes/${assignedWorker.id}/revoke`, { method: 'POST', body: {} });
   const activeEdge = new URL(playlistMedia(rerouted)[0]).origin;
-  await fetchMedia(`${activeEdge}/play/${token}/segment/1.ts`);
+  // Use a distant segment so the continuous producer cannot have prefetched it
+  // during the certificate/drain checks above. A nearby segment may already be
+  // in the shared object store and would correctly bypass failover placement.
+  await fetchMedia(`${activeEdge}/play/${token}/segment/12.ts`);
   const failoverJob = (await api('/api/v1/jobs')).items.find(
-    (job) => job.sessionId === session.id && job.segmentIndex === 1
+    (job) => job.sessionId === session.id && job.segmentIndex === 12
   );
   assert(failoverJob?.ownerNodeId !== assignedWorker.id, 'Revoked worker retained segment work');
   assert(
