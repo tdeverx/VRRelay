@@ -14,7 +14,15 @@ export interface AuditWriteFailure {
 }
 
 export interface AuditedOperationOptions<T> {
-  category: 'cluster' | 'provider' | 'backend' | 'session' | 'token';
+  category:
+    | 'authentication'
+    | 'authorization'
+    | 'cluster'
+    | 'provider'
+    | 'backend'
+    | 'session'
+    | 'token'
+    | 'system';
   action: string;
   actor: AuditActor;
   target?: AuditTarget;
@@ -50,7 +58,7 @@ function reportAuditWriteFailure<T>(
 }
 
 export function auditActor(principal: Principal): AuditActor {
-  return principal.kind === 'admin_session'
+  return principal.kind === 'recovery_session'
     ? { type: 'administrator', ...(principal.id ? { id: principal.id } : {}) }
     : { type: 'token', ...(principal.id ? { id: principal.id } : {}) };
 }

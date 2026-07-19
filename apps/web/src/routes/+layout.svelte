@@ -28,10 +28,7 @@
         const loginPath = '/dashboard/login';
         if (!setup.configured && currentPath !== setupPath) await goto(setupPath);
         if (setup.configured && currentPath === setupPath) await goto(loginPath);
-        if (setup.configured && currentPath === '/') {
-          const portal = await api.portalStatus();
-          await goto(portal.configured ? '/portal' : '/dashboard');
-        }
+        if (setup.configured && currentPath === '/') await goto('/dashboard');
       } catch {
         // The route itself will present a useful connection error.
       } finally {

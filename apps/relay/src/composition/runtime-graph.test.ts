@@ -42,6 +42,13 @@ describe('role-scoped runtime dependency graphs', () => {
       for (const component of forbidden) expect(trace(kind)).not.toContain(component);
   });
 
+  it('keeps standalone in-process and independent of the cluster agent listener', () => {
+    expect(trace('standalone')).not.toContain('agent-controller');
+    expect(trace('standalone')).toEqual(
+      expect.arrayContaining(['session-service', 'live-service', 'cluster-service'])
+    );
+  });
+
   it('gives each dedicated data-plane role only its owned service surface', () => {
     expect(trace('source-worker')).toEqual(
       expect.arrayContaining([

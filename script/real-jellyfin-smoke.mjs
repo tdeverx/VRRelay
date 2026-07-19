@@ -70,7 +70,7 @@ async function login() {
   const response = await fetch(`${relayUrl}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password: adminPassword })
+    body: JSON.stringify({ method: 'recovery', password: adminPassword })
   });
   const body = await response.json();
   assert(response.ok, `Login failed (${response.status})`);

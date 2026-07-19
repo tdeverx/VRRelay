@@ -1,109 +1,86 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/state';
-  import { Activity, Cpu, Database, Gauge } from '@lucide/svelte';
-  import { api, isAuthenticatedError } from '#lib/api';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { Activity, Database, HardDrive, Network, ServerCog } from '@lucide/svelte';
+  import { api } from '#lib/api';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
-  import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
   import * as Card from '#lib/new-ui/components/ui/card';
-  import * as Table from '#lib/new-ui/components/ui/table';
-  import { Progress } from '#lib/new-ui/components/ui/progress';
 
-  let health = $state<Awaited<ReturnType<typeof api.health>> | null>(null);
   let readiness = $state<Awaited<ReturnType<typeof api.readiness>> | null>(null);
-  let capabilities = $state<Awaited<ReturnType<typeof api.capabilities>> | null>(null);
-  let loading = $state(true);
-  let error = $state('');
-
+  let workers = $state({ active: 0, limit: 0, queued: 0 });
   onMount(async () => {
-    try {
-      [health, readiness, capabilities] = await Promise.all([
-        api.health(),
-        api.readiness(),
-        api.capabilities()
-      ]);
-    } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
-      error = reason instanceof Error ? reason.message : 'Could not load system details.';
-    } finally {
-      loading = false;
-    }
+    const [ready, health] = await Promise.all([api.readiness(), api.health()]);
+    readiness = ready;
+    workers = health.workers;
   });
+  const sections = [
+    {
+      title: 'Nodes',
+      description: 'Enrollment, drain state, certificates and node logs.',
+      href: '/dashboard/system/nodes',
+      icon: ServerCog
+    },
+    {
+      title: 'Storage & routing',
+      description: 'Object storage, routing and dependency configuration.',
+      href: '/dashboard/system/services',
+      icon: Database
+    },
+    {
+      title: 'Jobs & cache',
+      description: 'Segment work, retries, logs and cached objects.',
+      href: '/dashboard/system/work',
+      icon: HardDrive
+    },
+    {
+      title: 'Diagnostics',
+      description: 'Capacity, versions and FFmpeg capability details.',
+      href: '/dashboard/system/diagnostics',
+      icon: Activity
+    }
+  ];
 </script>
 
 <div class="space-y-6 p-4 md:p-6">
-  <PageHeader
-    title="System"
-    description="Runtime capacity, FFmpeg capabilities, cache and dependency health."
-  />
-  <LoadState {loading} {error} label="system details" />
-  {#if !loading && !error && health && capabilities}
-    <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Runtime summary">
-      {#each [{ title: 'Relay', value: health.status, icon: Activity }, { title: 'Workers', value: `${health.workers.active} / ${health.workers.limit}`, icon: Gauge }, { title: 'Queue', value: String(health.workers.queued), icon: Database }, { title: 'FFmpeg', value: capabilities.ffmpegVersion, icon: Cpu }] as item}
-        <Card.Root
+  <PageHeader title="System" description="Operational health, infrastructure and diagnostics." />
+  <section class="grid gap-3 sm:grid-cols-3" aria-label="System summary">
+    <Card.Root
+      ><Card.Header
+        ><Card.Description>Relay</Card.Description><Card.Title
+          ><StatusBadge value={readiness?.status ?? 'checking'} /></Card.Title
+        ></Card.Header
+      ></Card.Root
+    >
+    <Card.Root
+      ><Card.Header
+        ><Card.Description>Workers</Card.Description><Card.Title
+          >{workers.active} / {workers.limit}</Card.Title
+        ></Card.Header
+      ></Card.Root
+    >
+    <Card.Root
+      ><Card.Header
+        ><Card.Description>Dependencies</Card.Description><Card.Title
+          >{readiness?.dependencies.filter((item) => item.healthy).length ?? 0} / {readiness
+            ?.dependencies.length ?? 0}</Card.Title
+        ></Card.Header
+      ></Card.Root
+    >
+  </section>
+  <div class="grid gap-4 md:grid-cols-2">
+    {#each sections as section}
+      <a
+        href={section.href}
+        class="group rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Card.Root class="h-full transition-colors group-hover:bg-muted/50"
           ><Card.Header
-            ><Card.Description>{item.title}</Card.Description><Card.Title
-              class="flex items-center gap-2"><item.icon class="size-5" />{item.value}</Card.Title
-            ></Card.Header
+            ><section.icon class="text-muted-foreground size-5" /><Card.Title
+              >{section.title}</Card.Title
+            ><Card.Description>{section.description}</Card.Description></Card.Header
           ></Card.Root
         >
-      {/each}
-    </section>
-    <Card.Root>
-      <Card.Header
-        ><Card.Title>Worker capacity</Card.Title><Card.Description
-          >{health.workers.active} active, {health.workers.queued} queued</Card.Description
-        ></Card.Header
-      >
-      <Card.Content
-        ><Progress
-          value={health.workers.limit ? (health.workers.active / health.workers.limit) * 100 : 0}
-          aria-label="Worker capacity"
-        /></Card.Content
-      >
-    </Card.Root>
-    <Card.Root>
-      <Card.Header><Card.Title>Dependency health</Card.Title></Card.Header>
-      <Card.Content class="p-0"
-        ><Table.Root
-          ><Table.Header
-            ><Table.Row
-              ><Table.Head>Dependency</Table.Head><Table.Head>Category</Table.Head><Table.Head
-                >Status</Table.Head
-              ><Table.Head>Restart</Table.Head></Table.Row
-            ></Table.Header
-          ><Table.Body
-            >{#each readiness?.dependencies ?? [] as dependency}<Table.Row
-                ><Table.Cell class="font-medium">{dependency.kind}</Table.Cell><Table.Cell
-                  >{dependency.category}</Table.Cell
-                ><Table.Cell
-                  ><StatusBadge value={dependency.healthy ? 'healthy' : 'unhealthy'} /></Table.Cell
-                ><Table.Cell>{dependency.restartRequired ? 'Required' : 'No'}</Table.Cell
-                ></Table.Row
-              >{/each}</Table.Body
-          ></Table.Root
-        ></Card.Content
-      >
-    </Card.Root>
-    <Card.Root>
-      <Card.Header
-        ><Card.Title>FFmpeg encoders</Card.Title><Card.Description
-          >{capabilities.muxers.length} muxers · {capabilities.filters.length} filters · {capabilities
-            .pixelFormats.length} pixel formats</Card.Description
-        ></Card.Header
-      >
-      <Card.Content class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
-        >{#each capabilities.encoders as encoder}<div
-            class="flex items-center justify-between rounded-lg border p-3 text-sm"
-          >
-            <span>{encoder.name}{encoder.hardware ? ' · hardware' : ''}</span><StatusBadge
-              value={encoder.available ? 'available' : 'unavailable'}
-            />
-          </div>{/each}</Card.Content
-      >
-    </Card.Root>
-  {/if}
+      </a>
+    {/each}
+  </div>
 </div>

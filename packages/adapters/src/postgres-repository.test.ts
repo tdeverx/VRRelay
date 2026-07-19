@@ -98,6 +98,7 @@ class FakeMigrationClient {
     'live_channels',
     'compatibility_results',
     'personal_tokens',
+    'user_identities',
     'settings',
     'cluster_nodes',
     'segment_jobs',
@@ -140,6 +141,12 @@ class FakeMigrationClient {
     column('personal_tokens', 'token_hash', 'text'),
     column('personal_tokens', 'document', 'jsonb'),
     column('personal_tokens', 'created_at', 'timestamptz'),
+    column('user_identities', 'id', 'text'),
+    column('user_identities', 'provider_id', 'text'),
+    column('user_identities', 'provider_user_id', 'text'),
+    column('user_identities', 'document', 'jsonb'),
+    column('user_identities', 'updated_at', 'timestamptz'),
+    column('user_identities', 'revision', 'int4', 'NO', '1'),
     column('settings', 'key', 'text'),
     column('settings', 'value', 'text'),
     column('settings', 'updated_at', 'timestamptz'),
@@ -190,6 +197,8 @@ class FakeMigrationClient {
     ['compatibility_results', 'PRIMARY KEY', ['id']],
     ['personal_tokens', 'PRIMARY KEY', ['id']],
     ['personal_tokens', 'UNIQUE', ['token_hash']],
+    ['user_identities', 'PRIMARY KEY', ['id']],
+    ['user_identities', 'UNIQUE', ['provider_id', 'provider_user_id']],
     ['settings', 'PRIMARY KEY', ['key']],
     ['cluster_nodes', 'PRIMARY KEY', ['id']],
     ['segment_jobs', 'PRIMARY KEY', ['id']],
@@ -206,6 +215,7 @@ class FakeMigrationClient {
     ['node_certificates', 'node_certificates_node', ['node_id']],
     ['agent_logs', 'agent_logs_node_time', ['node_id', 'timestamp']],
     ['job_logs', 'job_logs_job_time', ['job_id', 'timestamp']],
+    ['user_identities', 'user_identities_last_seen', ['updated_at']],
     ['audit_events', 'audit_events_time', ['occurred_at']],
     ['audit_events', 'audit_events_category_time', ['category', 'occurred_at']],
     ['audit_events', 'audit_events_actor_time', ['actor_id', 'occurred_at']],
@@ -308,7 +318,8 @@ describe('PostgreSQL repository migrations', () => {
       { version: 4, name: 'atomic live channels' },
       { version: 5, name: 'atomic providers and guarded deletion' },
       { version: 6, name: 'crash-safe provider binding deletion' },
-      { version: 7, name: 'bounded job logs' }
+      { version: 7, name: 'bounded job logs' },
+      { version: 8, name: 'unified user identities' }
     ]);
     expect(POSTGRES_MIGRATIONS[2]?.statements.join('\n')).toContain(
       'ALTER TABLE sessions ADD COLUMN revision'
@@ -334,7 +345,7 @@ describe('PostgreSQL repository migrations', () => {
         expect(context).toEqual({
           driver: 'postgres',
           currentVersion: 2,
-          targetVersion: 7,
+          targetVersion: 8,
           existingSchema: true
         });
         events.push('BACKUP HOOK');
@@ -390,7 +401,7 @@ describe('PostgreSQL repository migrations', () => {
 
   it('rejects migration history from a newer build before backup or mutation', async () => {
     const client = new FakeMigrationClient();
-    client.applied = [1, 2, 3, 4, 5, 6, 7, 8];
+    client.applied = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     let backupCalled = false;
     await expect(
       runPostgresMigrations(client, {
@@ -417,7 +428,7 @@ describe('PostgreSQL repository migrations', () => {
 
     const incomplete = new FakeMigrationClient();
     await expect(assertPostgresSchemaCurrent(incomplete)).rejects.toThrow(
-      'version 2; version 7 is required'
+      'version 2; version 8 is required'
     );
     expect(incomplete.events.every((event) => event.startsWith('SELECT'))).toBe(true);
 

@@ -10,6 +10,7 @@ import {
   ClusterService,
   DefaultProviderRegistry,
   InMemoryEventBus,
+  LiveService,
   ProfileService,
   ProviderService,
   SessionService,
@@ -24,7 +25,6 @@ import {
   SqliteRepository
 } from '@vrrelay/adapters';
 import { AuthService } from './auth.js';
-import { PortalAuthService } from './portal-auth.js';
 import { loadConfig } from './config.js';
 import { createServer, type ServerServices } from './server.js';
 
@@ -137,7 +137,8 @@ async function securityFixture(environment: NodeJS.ProcessEnv = {}): Promise<Sec
     },
     { objectStore, coordination, clusterRepository: repository, metrics }
   );
-  const auth = new AuthService(repository);
+  const providerService = new ProviderService(repository, secrets, registry);
+  const auth = new AuthService(repository, secrets, providerService);
   const cluster = new ClusterService(
     repository,
     coordination,
@@ -147,26 +148,29 @@ async function securityFixture(environment: NodeJS.ProcessEnv = {}): Promise<Sec
     { metrics }
   );
   const liveCreates: unknown[] = [];
-  const live = {
-    list: async () => [],
-    create: async (input: unknown) => {
-      liveCreates.push(input);
-      return {
-        channel: { id: `live-${liveCreates.length}`, name: 'Fixture live channel' },
-        publisher: {}
-      };
+  const live = new LiveService(
+    repository,
+    {
+      publicUrl: 'https://play.example.test',
+      rtmpUrl: 'rtmp://live.example.test/live',
+      srtUrl: 'srt://live.example.test:8890',
+      whipUrl: 'https://live.example.test',
+      hlsUrl: 'https://live.example.test',
+      internalRtspUrl: 'rtsp://127.0.0.1:8554'
     },
-    replacePublisher: async () => {
-      throw new Error('Not used by this fixture');
-    },
-    delete: async () => {},
-    authorizeMediaMtx: async () => false
-  };
-  const providerService = new ProviderService(repository, secrets, registry);
+    undefined,
+    events,
+    repository,
+    metrics
+  );
+  const createLive = live.create.bind(live);
+  vi.spyOn(live, 'create').mockImplementation(async (input, context) => {
+    liveCreates.push({ input, context });
+    return createLive(input, context);
+  });
   const services = {
     repository,
     auth,
-    portal: new PortalAuthService(repository, secrets, providerService),
     providers: providerService,
     profiles,
     sessions,
@@ -219,20 +223,20 @@ async function login(app: FastifyInstance): Promise<{ cookie: string; csrfToken:
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/login',
-    payload: { password: adminPassword }
+    payload: { method: 'recovery', password: adminPassword }
   });
   expect(response.statusCode).toBe(200);
   return { cookie: cookieFrom(response), csrfToken: response.json().csrfToken as string };
 }
 
-async function portalLogin(
+async function jellyfinLogin(
   app: FastifyInstance,
   username: string
 ): Promise<{ cookie: string; csrfToken: string }> {
   const response = await app.inject({
     method: 'POST',
-    url: '/api/v1/portal/auth/login',
-    payload: { username, password: 'provider-password' }
+    url: '/api/v1/auth/login',
+    payload: { method: 'jellyfin', username, password: 'provider-password' }
   });
   expect(response.statusCode).toBe(200);
   return { cookie: cookieFrom(response), csrfToken: response.json().csrfToken as string };
@@ -311,7 +315,7 @@ describe('HTTP authentication boundary', () => {
     const missingToken = await app.inject({
       method: 'POST',
       url: '/api/v1/setup',
-      payload: { password: passwordSentinel }
+      payload: { method: 'recovery', password: passwordSentinel }
     });
     expect(missingToken.statusCode).toBe(401);
     expect(missingToken.body).not.toContain(passwordSentinel);
@@ -340,7 +344,7 @@ describe('HTTP authentication boundary', () => {
     const wrongPassword = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
-      payload: { password: passwordSentinel }
+      payload: { method: 'recovery', password: passwordSentinel }
     });
     expect(wrongPassword.statusCode).toBe(401);
     expect(wrongPassword.body).not.toContain(passwordSentinel);
@@ -348,7 +352,7 @@ describe('HTTP authentication boundary', () => {
     const authenticated = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
-      payload: { password: adminPassword }
+      payload: { method: 'recovery', password: adminPassword }
     });
     expect(authenticated.statusCode).toBe(200);
     expect(authenticated.json()).toMatchObject({
@@ -375,7 +379,7 @@ describe('HTTP authentication boundary', () => {
       method: 'POST',
       url: '/api/v1/auth/login',
       headers: { 'x-forwarded-proto': 'https' },
-      payload: { password: adminPassword }
+      payload: { method: 'recovery', password: adminPassword }
     });
     expect(proxiedHttps.statusCode).toBe(200);
     expect(String(proxiedHttps.headers['set-cookie'])).toMatch(/Secure/i);
@@ -489,7 +493,7 @@ describe('HTTP authentication boundary', () => {
   });
 });
 
-describe('delegated provider user portal', () => {
+describe('unified Jellyfin user experience', () => {
   it('isolates user sessions, enforces CSRF, and keeps created playback links valid after logout', async () => {
     const { app, auth } = await securityFixture();
     await auth.initialize(adminPassword);
@@ -514,35 +518,43 @@ describe('delegated provider user portal', () => {
     const configuration = {
       providerId,
       defaultProfileId: 'universal-h264-hls-vod',
-      allowedProfileIds: ['universal-h264-hls-vod']
+      allowedProfileIds: ['universal-h264-hls-vod', 'h264-live-hls']
     };
     expect(
       (
         await app.inject({
           method: 'PUT',
-          url: '/api/v1/portal/configuration',
+          url: '/api/v1/auth/configuration',
           headers: adminHeaders,
           payload: configuration
         })
       ).statusCode
     ).toBe(200);
     expect(
-      (await app.inject({ method: 'GET', url: '/api/v1/portal/status' })).json()
+      (await app.inject({ method: 'GET', url: '/api/v1/auth/configuration/status' })).json()
     ).toMatchObject({
       configured: true,
       providerName: 'User Jellyfin'
     });
 
-    const alice = await portalLogin(app, 'alice');
+    const alice = await jellyfinLogin(app, 'alice');
     const createPayload = {
+      kind: 'vod',
       source: { providerId, itemId: 'movie-alice' },
-      profileId: 'universal-h264-hls-vod'
+      profileId: 'universal-h264-hls-vod',
+      profileRevision: 1,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: true,
+      placementPolicy: 'local',
+      placementLocked: true,
+      playbackTtlSeconds: null
     };
     expect(
       (
         await app.inject({
           method: 'POST',
-          url: '/api/v1/portal/sessions',
+          url: '/api/v1/sessions',
           headers: { cookie: alice.cookie },
           payload: createPayload
         })
@@ -550,17 +562,17 @@ describe('delegated provider user portal', () => {
     ).toBe(401);
     const createdSession = await app.inject({
       method: 'POST',
-      url: '/api/v1/portal/sessions',
+      url: '/api/v1/sessions',
       headers: { cookie: alice.cookie, 'x-csrf-token': alice.csrfToken },
       payload: createPayload
     });
     expect(createdSession.statusCode).toBe(201);
     const session = createdSession.json();
 
-    const bob = await portalLogin(app, 'bob');
+    const bob = await jellyfinLogin(app, 'bob');
     const bobSessions = await app.inject({
       method: 'GET',
-      url: '/api/v1/portal/sessions',
+      url: '/api/v1/sessions',
       headers: { cookie: bob.cookie }
     });
     expect(bobSessions.json()).toEqual({ items: [] });
@@ -568,17 +580,77 @@ describe('delegated provider user portal', () => {
       (
         await app.inject({
           method: 'DELETE',
-          url: `/api/v1/portal/sessions/${session.id}`,
+          url: `/api/v1/sessions/${session.id}`,
           headers: { cookie: bob.cookie, 'x-csrf-token': bob.csrfToken }
         })
       ).statusCode
     ).toBe(404);
 
+    const aliceChannel = await app.inject({
+      method: 'POST',
+      url: '/api/v1/live-channels',
+      headers: { cookie: alice.cookie, 'x-csrf-token': alice.csrfToken },
+      payload: { name: 'Alice OBS' }
+    });
+    expect(aliceChannel.statusCode).toBe(201);
+    expect(aliceChannel.json().channel).not.toHaveProperty('ownerId');
+    const channelId = aliceChannel.json().channel.id as string;
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/v1/live-channels',
+          headers: { cookie: bob.cookie }
+        })
+      ).json()
+    ).toEqual({ items: [] });
     expect(
       (
         await app.inject({
           method: 'POST',
-          url: '/api/v1/portal/auth/logout',
+          url: `/api/v1/live-channels/${channelId}/publisher/replacement`,
+          headers: { cookie: bob.cookie, 'x-csrf-token': bob.csrfToken }
+        })
+      ).statusCode
+    ).toBe(404);
+    const livePlayback = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sessions',
+      headers: { cookie: alice.cookie, 'x-csrf-token': alice.csrfToken },
+      payload: {
+        kind: 'live',
+        name: 'Alice live playback',
+        liveChannelId: channelId,
+        profileId: 'h264-live-hls',
+        profileRevision: 1,
+        platformMode: 'universal',
+        pinned: true,
+        reportActivity: false,
+        placementPolicy: 'local',
+        placementLocked: true,
+        playbackTtlSeconds: null
+      }
+    });
+    expect(livePlayback.statusCode).toBe(201);
+    expect(livePlayback.json()).toMatchObject({
+      ownerId: expect.any(String),
+      liveChannelId: channelId
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/v1/live-channels',
+          headers: { cookie: admin.cookie }
+        })
+      ).json().items
+    ).toHaveLength(1);
+
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/auth/logout',
           headers: { cookie: alice.cookie, 'x-csrf-token': alice.csrfToken }
         })
       ).statusCode

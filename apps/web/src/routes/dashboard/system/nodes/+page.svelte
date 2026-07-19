@@ -401,7 +401,7 @@
 
 <div class="space-y-6 p-4 md:p-6">
   <PageHeader
-    title="Cluster"
+    title="Infrastructure"
     description="Nodes, platform backends, segment work, provider bindings and cache inventory."
   >
     {#snippet actions()}

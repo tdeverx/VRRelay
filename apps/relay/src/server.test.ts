@@ -1042,7 +1042,7 @@ describe('administrative operation auditing', () => {
         {
           category: 'backend',
           action: 'backend.activate',
-          actor: auditActor({ kind: 'personal_token', id: 'pat-2', scopes: ['admin'] })
+          actor: auditActor({ kind: 'personal_token', id: 'pat-2', roles: [], scopes: ['admin'] })
         },
         async () => {
           throw original;

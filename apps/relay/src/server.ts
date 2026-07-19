@@ -14,6 +14,7 @@ import websocket from '@fastify/websocket';
 import { z, type ZodType } from 'zod';
 import {
   ApplicationError,
+  UnauthorizedError,
   type EventBus,
   type MediaCapabilities,
   type Repository,
@@ -37,9 +38,8 @@ import {
   CreateSessionRequestSchema,
   FirstRunRequestSchema,
   LoginRequestSchema,
-  PortalConfigurationRequestSchema,
-  PortalCreateSessionRequestSchema,
-  PortalLoginRequestSchema,
+  SignInConfigurationRequestSchema,
+  UpdateUserRequestSchema,
   CreateNodeJoinTokenRequestSchema,
   EnrollNodeRequestSchema,
   NodeDrainRequestSchema,
@@ -60,7 +60,6 @@ import { isPrivateAddress, validateProviderUrl } from '@vrrelay/adapters';
 import { requiresSetupToken, validateRuntimeConfiguration, type RelayConfig } from './config.js';
 import { publicProviderBinding, type ClusterNode } from '@vrrelay/domain';
 import { AuthService, type Principal } from './auth.js';
-import { PortalAuthService } from './portal-auth.js';
 import type { AgentController } from './agent-transport.js';
 import type { BackendService } from './backend-service.js';
 import {
@@ -79,7 +78,6 @@ export { auditActor, auditedOperation } from './audited-operation.js';
 export interface ServerServices {
   repository: Repository;
   auth: AuthService;
-  portal: PortalAuthService;
   providers: ProviderService;
   profiles: ProfileService;
   sessions: SessionService;
@@ -688,7 +686,7 @@ export async function createServer(
     { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } },
     async (request, reply) => {
       const body = parse(LoginRequestSchema, request.body);
-      const session = await services.auth.login(body.password);
+      const session = await services.auth.login(body);
       reply.setCookie('vrrelay_session', session.token, {
         httpOnly: true,
         sameSite: 'strict',
@@ -703,19 +701,22 @@ export async function createServer(
         path: '/',
         expires: new Date(session.expiresAt)
       });
-      return { csrfToken: session.csrfToken, expiresAt: session.expiresAt };
+      return { csrfToken: session.csrfToken, expiresAt: session.expiresAt, user: session.user };
     }
+  );
+  app.get('/api/v1/auth/me', async (request) =>
+    services.auth.publicPrincipal(await authenticate(request))
   );
   app.post('/api/v1/auth/logout', async (request, reply) => {
     await mutate(request);
-    services.auth.logout(request.cookies.vrrelay_session);
+    await services.auth.logout(request.cookies.vrrelay_session);
     reply.clearCookie('vrrelay_session', { path: '/' });
     reply.clearCookie('vrrelay_csrf', { path: '/' });
     return reply.status(204).send();
   });
 
-  app.get('/api/v1/portal/status', async () => {
-    const configuration = await services.portal.configuration();
+  app.get('/api/v1/auth/configuration/status', async () => {
+    const configuration = await services.auth.configuration();
     if (!configuration) return { configured: false };
     const provider = (await services.providers.list()).find(
       (candidate) => candidate.id === configuration.providerId
@@ -724,14 +725,14 @@ export async function createServer(
     return { configured: true, providerName: provider.serverName ?? provider.name };
   });
 
-  app.get('/api/v1/portal/configuration', async (request) => {
+  app.get('/api/v1/auth/configuration', async (request) => {
     await authenticate(request, ['admin']);
-    return { configuration: (await services.portal.configuration()) ?? null };
+    return { configuration: (await services.auth.configuration()) ?? null };
   });
 
-  app.put('/api/v1/portal/configuration', async (request) => {
+  app.put('/api/v1/auth/configuration', async (request) => {
     await mutate(request, ['admin']);
-    const configuration = parse(PortalConfigurationRequestSchema, request.body);
+    const configuration = parse(SignInConfigurationRequestSchema, request.body);
     const provider = (await services.providers.list()).find(
       (candidate) => candidate.id === configuration.providerId
     );
@@ -740,100 +741,72 @@ export async function createServer(
     if (provider.authMode !== 'delegated')
       throw new ApplicationError(
         'invalid_provider_authentication',
-        'The user portal requires a delegated provider connection',
+        'Interactive sign-in requires a delegated provider connection',
         409
       );
     const profiles = await services.profiles.list();
     const profileIds = new Set(profiles.map((profile) => profile.profileId));
     if (configuration.allowedProfileIds.some((id) => !profileIds.has(id)))
       throw new ApplicationError('not_found', 'An allowed profile was not found', 404);
-    await services.portal.configure(configuration);
+    await services.auth.configure(configuration);
     return configuration;
   });
 
-  app.post(
-    '/api/v1/portal/auth/login',
-    { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } },
-    async (request, reply) => {
-      const body = parse(PortalLoginRequestSchema, request.body);
-      const session = await services.portal.login(body.username, body.password);
-      reply.setCookie('vrrelay_user_session', session.token, {
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: request.protocol === 'https',
-        path: '/',
-        expires: new Date(session.expiresAt)
-      });
-      reply.setCookie('vrrelay_portal_csrf', session.csrfToken, {
-        httpOnly: false,
-        sameSite: 'strict',
-        secure: request.protocol === 'https',
-        path: '/',
-        expires: new Date(session.expiresAt)
-      });
-      return {
-        csrfToken: session.csrfToken,
-        expiresAt: session.expiresAt,
-        user: session.user
-      };
-    }
-  );
-
-  app.get('/api/v1/portal/me', async (request) => {
-    const principal = await services.portal.authenticate(request);
-    return {
-      id: principal.id,
-      username: principal.username,
-      providerId: principal.providerId
-    };
-  });
-
-  app.post('/api/v1/portal/auth/logout', async (request, reply) => {
-    const principal = await services.portal.authenticate(request);
-    services.portal.requireCsrf(request, principal);
-    await services.portal.logout(request.cookies.vrrelay_user_session);
-    reply.clearCookie('vrrelay_user_session', { path: '/' });
-    reply.clearCookie('vrrelay_portal_csrf', { path: '/' });
-    return reply.status(204).send();
-  });
-
-  app.get('/api/v1/portal/catalog', async (request) => {
-    const principal = await services.portal.authenticate(request);
+  app.get('/api/v1/catalog', async (request) => {
+    const principal = await authenticate(request, ['catalog:read']);
+    if (!principal.providerId || !principal.providerUserId)
+      throw new ApplicationError(
+        'catalog_unavailable',
+        'Sign in with Jellyfin to browse media',
+        403
+      );
     const result = await services.providers.browseAs(
       principal.providerId,
-      await services.portal.credential(principal),
-      principal.userId,
+      await services.auth.credential(principal),
+      principal.providerUserId,
       parse(CatalogQuerySchema, request.query)
     );
     return {
       ...result,
       items: result.items.map((item) => ({
         ...item,
-        imageUrl: `/api/v1/portal/items/${encodeURIComponent(item.id)}/image`
+        imageUrl: `/api/v1/catalog/items/${encodeURIComponent(item.id)}/image`
       }))
     };
   });
 
-  app.get('/api/v1/portal/items/:itemId', async (request) => {
-    const principal = await services.portal.authenticate(request);
+  app.get('/api/v1/catalog/items/:itemId', async (request) => {
+    const principal = await authenticate(request, ['catalog:read']);
+    if (!principal.providerId || !principal.providerUserId)
+      throw new ApplicationError(
+        'catalog_unavailable',
+        'Sign in with Jellyfin to browse media',
+        403
+      );
     const item = await services.providers.itemAs(
       principal.providerId,
-      await services.portal.credential(principal),
-      principal.userId,
+      await services.auth.credential(principal),
+      principal.providerUserId,
       (request.params as { itemId: string }).itemId
     );
     return {
       ...item,
-      imageUrl: `/api/v1/portal/items/${encodeURIComponent(item.id)}/image`
+      imageUrl: `/api/v1/catalog/items/${encodeURIComponent(item.id)}/image`
     };
   });
 
-  app.get('/api/v1/portal/items/:itemId/image', async (request, reply) => {
-    const principal = await services.portal.authenticate(request);
+  app.get('/api/v1/catalog/items/:itemId/image', async (request, reply) => {
+    const principal = await authenticate(request, ['catalog:read']);
+    if (!principal.providerId || !principal.providerUserId)
+      throw new ApplicationError(
+        'catalog_unavailable',
+        'Sign in with Jellyfin to browse media',
+        403
+      );
     const artwork = await services.providers.artworkAs(
       principal.providerId,
-      await services.portal.credential(principal),
-      principal.userId,
+      await services.auth.credential(principal),
+      principal.providerUserId,
       (request.params as { itemId: string }).itemId
     );
     return reply
@@ -842,80 +815,56 @@ export async function createServer(
       .send(Buffer.from(artwork.data));
   });
 
-  app.get('/api/v1/portal/profiles', async (request) => {
-    await services.portal.authenticate(request);
-    const configuration = await services.portal.configuration();
-    if (!configuration)
-      throw new ApplicationError('not_found', 'The user portal is not configured', 404);
+  app.get('/api/v1/catalog/profiles', async (request) => {
+    const principal = await authenticate(request, ['sessions:read']);
+    if (!principal.id) throw new UnauthorizedError();
+    const identity = await services.repository.getUserIdentity(principal.id);
+    if (!identity)
+      throw new ApplicationError(
+        'catalog_unavailable',
+        'Sign in with Jellyfin to view profiles',
+        403
+      );
     return {
-      defaultProfileId: configuration.defaultProfileId,
+      defaultProfileId: identity.value.defaultProfileId,
       items: (await services.profiles.list()).filter((profile) =>
-        configuration.allowedProfileIds.includes(profile.profileId)
+        identity.value.allowedProfileIds.includes(profile.profileId)
       )
     };
   });
 
-  app.get('/api/v1/portal/sessions', async (request) => {
-    const principal = await services.portal.authenticate(request);
-    return {
-      items: (await services.sessions.list()).filter((session) => session.ownerId === principal.id)
-    };
+  app.get('/api/v1/users', async (request) => {
+    const principal = await authenticate(request, ['admin']);
+    if (!principal.roles.includes('owner') && principal.kind !== 'recovery_session')
+      throw new UnauthorizedError('Owner access is required');
+    return { items: await services.auth.listUsers() };
   });
 
-  app.post('/api/v1/portal/sessions', async (request, reply) => {
-    const principal = await services.portal.authenticate(request);
-    services.portal.requireCsrf(request, principal);
-    const body = parse(PortalCreateSessionRequestSchema, request.body);
-    if (body.source.providerId !== principal.providerId)
-      throw new ApplicationError(
-        'invalid_provider',
-        'Source does not belong to the signed-in provider',
-        409
-      );
-    const configuration = await services.portal.configuration();
-    if (!configuration)
-      throw new ApplicationError('not_found', 'The user portal is not configured', 404);
-    const profileId = body.profileId ?? configuration.defaultProfileId;
-    if (!configuration.allowedProfileIds.includes(profileId))
-      throw new ApplicationError(
-        'profile_not_allowed',
-        'Profile is not available in the user portal',
-        403
-      );
-    const profile = await services.repository.getProfile(profileId);
-    if (!profile) throw new ApplicationError('not_found', 'Profile revision was not found', 404);
-    const session = await services.sessions.create(
+  app.patch('/api/v1/users/:userId', async (request) => {
+    const principal = await mutate(request, ['admin']);
+    if (!principal.roles.includes('owner') && principal.kind !== 'recovery_session')
+      throw new UnauthorizedError('Owner access is required');
+    const body = parse(UpdateUserRequestSchema, request.body);
+    const userId = (request.params as { userId: string }).userId;
+    return auditAs(
+      request,
+      principal,
       {
-        kind: 'vod',
-        ...(body.name ? { name: body.name } : {}),
-        source: body.source,
-        profileId: profile.profileId,
-        profileRevision: profile.revision,
-        platformMode: profile.platform,
-        pinned: false,
-        reportActivity: true,
-        placementPolicy: 'local',
-        placementLocked: true,
-        playbackTtlSeconds: null
+        category: 'authorization',
+        action: 'user.access.update',
+        target: { type: 'user', id: userId },
+        context: {
+          roleCount: body.roles.length,
+          profileEntitlementCount: body.allowedProfileIds.length
+        }
       },
-      {
-        ownerId: principal.id,
-        providerAccessToken: await services.portal.credential(principal),
-        providerUserId: principal.userId
-      }
+      () =>
+        services.auth.updateUser(userId, body.expectedRevision, {
+          roles: body.roles,
+          allowedProfileIds: body.allowedProfileIds,
+          ...(body.defaultProfileId ? { defaultProfileId: body.defaultProfileId } : {})
+        })
     );
-    return reply.status(201).send(session);
-  });
-
-  app.delete('/api/v1/portal/sessions/:sessionId', async (request, reply) => {
-    const principal = await services.portal.authenticate(request);
-    services.portal.requireCsrf(request, principal);
-    const sessionId = (request.params as { sessionId: string }).sessionId;
-    const session = await services.sessions.get(sessionId);
-    if (session.ownerId !== principal.id)
-      throw new ApplicationError('not_found', 'Session was not found', 404);
-    await services.sessions.delete(sessionId);
-    return reply.status(204).send();
   });
 
   app.get('/api/v1/providers', async (request) => {
@@ -1324,12 +1273,26 @@ export async function createServer(
   });
 
   app.get('/api/v1/sessions', async (request) => {
-    await authenticate(request, ['sessions:read']);
-    return { items: await services.sessions.list() };
+    const principal = await authenticate(request, ['sessions:read']);
+    const items = await services.sessions.list();
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    return {
+      items: systemWide ? items : items.filter((session) => session.ownerId === principal.id)
+    };
   });
   app.get('/api/v1/sessions/:sessionId', async (request) => {
-    await authenticate(request, ['sessions:read']);
-    return services.sessions.get((request.params as { sessionId: string }).sessionId);
+    const principal = await authenticate(request, ['sessions:read']);
+    const session = await services.sessions.get(
+      (request.params as { sessionId: string }).sessionId
+    );
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    if (!systemWide && session.ownerId !== principal.id)
+      throw new ApplicationError('not_found', 'Session was not found', 404);
+    return session;
   });
   app.post('/api/v1/sessions', async (request, reply) => {
     const principal = await mutate(request, ['sessions:create']);
@@ -1352,6 +1315,40 @@ export async function createServer(
       async () => {
         const body = parse(CreateSessionRequestSchema, request.body);
         body.placementLocked = Boolean(body.preferredNodeId);
+        if (principal.kind === 'jellyfin_session') {
+          if (body.kind === 'vod' && body.source.providerId !== principal.providerId)
+            throw new ApplicationError(
+              'invalid_provider',
+              'Source does not belong to the signed-in provider',
+              409
+            );
+          const identity = principal.id
+            ? await services.repository.getUserIdentity(principal.id)
+            : undefined;
+          if (!identity?.value.allowedProfileIds.includes(body.profileId))
+            throw new ApplicationError(
+              'profile_not_allowed',
+              'Profile is not available to this user',
+              403
+            );
+          if (body.kind === 'live') {
+            const channel = await services.repository.getLiveChannel(body.liveChannelId);
+            if (!channel || channel.ownerId !== principal.id)
+              throw new ApplicationError('not_found', 'Live channel was not found', 404);
+            return services.sessions.create(
+              { ...body, placementPolicy: 'local', placementLocked: true },
+              { ownerId: principal.id! }
+            );
+          }
+          return services.sessions.create(
+            { ...body, placementPolicy: 'local', placementLocked: true },
+            {
+              ownerId: principal.id!,
+              providerAccessToken: await services.auth.credential(principal),
+              providerUserId: principal.providerUserId!
+            }
+          );
+        }
         if (body.kind === 'vod') {
           const profile = await services.repository.getProfile(
             body.profileId,
@@ -1383,6 +1380,12 @@ export async function createServer(
   app.delete('/api/v1/sessions/:sessionId', async (request, reply) => {
     const principal = await mutate(request, ['sessions:control']);
     const sessionId = (request.params as { sessionId: string }).sessionId;
+    const current = await services.sessions.get(sessionId);
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    if (!systemWide && current.ownerId !== principal.id)
+      throw new ApplicationError('not_found', 'Session was not found', 404);
     await auditAs(
       request,
       principal,
@@ -1398,6 +1401,12 @@ export async function createServer(
   app.patch('/api/v1/sessions/:sessionId', async (request) => {
     const principal = await mutate(request, ['sessions:control']);
     const sessionId = (request.params as { sessionId: string }).sessionId;
+    const current = await services.sessions.get(sessionId);
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    if (!systemWide && current.ownerId !== principal.id)
+      throw new ApplicationError('not_found', 'Session was not found', 404);
     return auditAs(
       request,
       principal,
@@ -1420,26 +1429,45 @@ export async function createServer(
   });
 
   app.get('/api/v1/live-channels', async (request) => {
-    await authenticate(request, ['sessions:read']);
-    return { items: await services.live.list() };
+    const principal = await authenticate(request, ['sessions:read']);
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    return {
+      items: await services.live.list(
+        systemWide ? undefined : { ownerId: principal.id ?? '__no_identity__' }
+      )
+    };
   });
   app.post('/api/v1/live-channels', async (request, reply) => {
-    await mutate(request, ['sessions:create']);
-    return reply
-      .status(201)
-      .send(await services.live.create(parse(CreateLiveChannelRequestSchema, request.body)));
+    const principal = await mutate(request, ['sessions:create']);
+    return reply.status(201).send(
+      await services.live.create(parse(CreateLiveChannelRequestSchema, request.body), {
+        ...(principal.kind === 'jellyfin_session' && principal.id ? { ownerId: principal.id } : {})
+      })
+    );
   });
   app.post('/api/v1/live-channels/:channelId/publisher/replacement', async (request, reply) => {
-    await mutate(request, ['sessions:control']);
-    return reply
-      .status(201)
-      .send(
-        await services.live.replacePublisher((request.params as { channelId: string }).channelId)
-      );
+    const principal = await mutate(request, ['sessions:control']);
+    const channelId = (request.params as { channelId: string }).channelId;
+    const channel = await services.repository.getLiveChannel(channelId);
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    if (!channel || (!systemWide && channel.ownerId !== principal.id))
+      throw new ApplicationError('not_found', 'Live channel was not found', 404);
+    return reply.status(201).send(await services.live.replacePublisher(channelId));
   });
   app.delete('/api/v1/live-channels/:channelId', async (request, reply) => {
-    await mutate(request, ['sessions:control']);
-    await services.live.delete((request.params as { channelId: string }).channelId);
+    const principal = await mutate(request, ['sessions:control']);
+    const channelId = (request.params as { channelId: string }).channelId;
+    const channel = await services.repository.getLiveChannel(channelId);
+    const systemWide =
+      principal.kind === 'personal_token' ||
+      principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
+    if (!channel || (!systemWide && channel.ownerId !== principal.id))
+      throw new ApplicationError('not_found', 'Live channel was not found', 404);
+    await services.live.delete(channelId);
     return reply.status(204).send();
   });
 

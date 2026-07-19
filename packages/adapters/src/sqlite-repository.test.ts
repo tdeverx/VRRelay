@@ -172,7 +172,8 @@ describe('SQLite repository migrations', () => {
       { version: 4, name: 'atomic live channels' },
       { version: 5, name: 'atomic provider lifecycle' },
       { version: 6, name: 'crash-safe provider binding deletion' },
-      { version: 7, name: 'bounded job logs' }
+      { version: 7, name: 'bounded job logs' },
+      { version: 8, name: 'unified user identities' }
     ]);
     expect(SQLITE_MIGRATIONS[2]?.statements.join('\n')).toContain(
       'ALTER TABLE sessions ADD COLUMN revision'
@@ -382,7 +383,7 @@ describe('SQLite repository migrations', () => {
     runSqliteMigrations(legacy, SQLITE_MIGRATIONS.slice(0, 2));
     legacy.close();
     const worker = new SqliteRepository(path);
-    await expect(worker.assertSchemaCurrent()).rejects.toThrow('version 2; version 7 is required');
+    await expect(worker.assertSchemaCurrent()).rejects.toThrow('version 2; version 8 is required');
     expect(worker.lastMigrationBackupPath).toBeUndefined();
     const unchanged = new Database(path, { readonly: true, fileMustExist: true });
     expect(
@@ -420,7 +421,7 @@ describe('SQLite repository migrations', () => {
     const future = new Database(path);
     future
       .prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)')
-      .run(8, new Date().toISOString());
+      .run(9, new Date().toISOString());
     future.close();
 
     const reopened = new SqliteRepository(path);

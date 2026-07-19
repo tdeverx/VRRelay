@@ -19,11 +19,12 @@ log. macOS service output rolls at 10 MiB and retains eight historical files bes
 
 ## Standalone worker state
 
-The standalone node is the local source worker and does not connect back to its own agent listener.
-Draining it prevents new local placement. Use **Cluster → Nodes → Resume local worker** to return a
-draining standalone node to service. The New relay wizard validates Local placement against the
-node's online state, encoder support, and locally available provider credentials before it enables
-the review step.
+The standalone node is the local source worker and does not start or connect back to a cluster
+agent listener. It registers and begins heartbeating during ordinary application startup without
+certificate enrollment or platform secret-store setup. Draining it prevents new local placement.
+Use **System → Nodes → Resume local worker** to return a draining standalone node to service. The
+New relay wizard validates Local placement against the node's online state, encoder support, and
+locally available provider credentials before it enables the review step.
 
 ## Traffic director
 

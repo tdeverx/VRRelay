@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { Copy, Film, Link2, LogOut, Search, Trash2, Tv } from '@lucide/svelte';
+  import { Link2, Search, Tv } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import type { MediaItem, ProfileRevision, RelaySession } from '@vrrelay/domain';
-  import { isAuthenticatedError, portalApi } from '#lib/api';
-  import PortalArtwork from '#lib/new-ui/components/PortalArtwork.svelte';
+  import type { MediaItem, ProfileRevision } from '@vrrelay/domain';
+  import { api, isAuthenticatedError } from '#lib/api';
+  import ProviderArtwork from '#lib/new-ui/components/ProviderArtwork.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
   import * as Dialog from '#lib/new-ui/components/ui/dialog';
@@ -13,7 +13,6 @@
   import * as Field from '#lib/new-ui/components/ui/field';
   import { Input } from '#lib/new-ui/components/ui/input';
   import * as Select from '#lib/new-ui/components/ui/select';
-  import { Separator } from '#lib/new-ui/components/ui/separator';
   import { Skeleton } from '#lib/new-ui/components/ui/skeleton';
 
   let username = $state('');
@@ -21,7 +20,6 @@
   let items = $state<MediaItem[]>([]);
   let profiles = $state<ProfileRevision[]>([]);
   let profileId = $state('');
-  let sessions = $state<RelaySession[]>([]);
   let loading = $state(true);
   let searching = $state(false);
   let hasSearched = $state(false);
@@ -33,24 +31,23 @@
   let episodes = $state<MediaItem[]>([]);
   let loadingSeasons = $state(false);
   let loadingEpisodes = $state(false);
+  let recovery = $state(false);
   let selectedSeason = $derived(seasons.find((season) => season.id === selectedSeasonId) ?? null);
 
   onMount(load);
 
   async function load() {
     try {
-      const [user, profileResult, sessionResult] = await Promise.all([
-        portalApi.me(),
-        portalApi.profiles(),
-        portalApi.sessions()
-      ]);
-      username = user.username;
+      const user = await api.me();
+      username = user.displayName;
+      recovery = user.authMethod === 'recovery';
+      if (recovery) return;
+      const profileResult = await api.catalogProfiles();
       profiles = profileResult.items;
-      profileId = profileResult.defaultProfileId;
-      sessions = sessionResult.items;
+      profileId = profileResult.defaultProfileId ?? profiles[0]?.profileId ?? '';
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto('/portal/login');
-      toast.error(reason instanceof Error ? reason.message : 'Could not load the portal.');
+      if (isAuthenticatedError(reason)) return goto('/dashboard/login');
+      toast.error(reason instanceof Error ? reason.message : 'Could not load your home page.');
     } finally {
       loading = false;
     }
@@ -70,7 +67,7 @@
     seasons = [];
     episodes = [];
     try {
-      items = (await portalApi.catalog({ search: query, kinds: ['Movie', 'Series'], limit: 48 }))
+      items = (await api.userCatalog({ search: query, kinds: ['Movie', 'Series'], limit: 48 }))
         .items;
     } catch (reason) {
       items = [];
@@ -88,8 +85,7 @@
     selectionOpen = true;
     loadingSeasons = true;
     try {
-      seasons = (await portalApi.catalog({ parentId: show.id, kinds: ['Season'], limit: 100 }))
-        .items;
+      seasons = (await api.userCatalog({ parentId: show.id, kinds: ['Season'], limit: 100 })).items;
       if (seasons[0]) await chooseSeason(seasons[0].id);
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not load seasons.');
@@ -104,7 +100,7 @@
     if (!seasonId) return;
     loadingEpisodes = true;
     try {
-      episodes = (await portalApi.catalog({ parentId: seasonId, kinds: ['Episode'], limit: 200 }))
+      episodes = (await api.userCatalog({ parentId: seasonId, kinds: ['Episode'], limit: 200 }))
         .items;
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not load episodes.');
@@ -116,11 +112,17 @@
   async function createLink(item: MediaItem) {
     creatingItemId = item.id;
     try {
-      const session = await portalApi.createSession({
+      const profile = profiles.find((candidate) => candidate.profileId === profileId);
+      if (!profile) throw new Error('Choose an available relay profile.');
+      const session = await api.createVodSession({
         source: { providerId: item.providerId, itemId: item.id },
-        ...(profileId ? { profileId } : {})
+        profileId: profile.profileId,
+        profileRevision: profile.revision,
+        platformMode: profile.platform,
+        pinned: false,
+        reportActivity: true,
+        placementPolicy: 'local'
       });
-      sessions = [session, ...sessions];
       selectionOpen = false;
       await copy(session.outputUrls.primary);
       toast.success('Relay link created and copied.');
@@ -131,106 +133,38 @@
     }
   }
 
-  async function deleteLink(sessionId: string) {
-    try {
-      await portalApi.deleteSession(sessionId);
-      sessions = sessions.filter((session) => session.id !== sessionId);
-      toast.success('Relay link removed.');
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : 'Could not remove the relay link.');
-    }
-  }
-
   async function copy(value: string) {
     await navigator.clipboard.writeText(value);
   }
-
-  async function logout() {
-    await portalApi.logout();
-    await goto('/portal/login');
-  }
 </script>
 
-<div class="min-h-svh">
-  <header class="border-b">
-    <div class="mx-auto flex max-w-7xl items-center gap-3 p-4 md:px-6">
-      <Film class="size-5" />
-      <strong class="flex-1">VRRelay</strong>
-      <span class="text-muted-foreground hidden text-sm sm:inline">{username}</span>
-      <Button variant="ghost" size="icon" aria-label="Sign out" onclick={logout}><LogOut /></Button>
-    </div>
-  </header>
-
-  <main class="mx-auto max-w-7xl space-y-8 p-4 md:p-6">
+<div class="mx-auto max-w-7xl space-y-8 p-4 md:p-6">
+  {#if recovery}
+    <Card.Root class="max-w-2xl">
+      <Card.Header>
+        <h1 class="text-lg leading-none font-semibold">Recovery administration</h1>
+        <Card.Description>
+          This account can configure VRRelay, but it has no personal Jellyfin catalog. Sign out and
+          use a Jellyfin account to create personal relay links.
+        </Card.Description>
+      </Card.Header>
+      <Card.Footer class="gap-2">
+        <Button href="/dashboard/settings">Open settings</Button>
+        <Button href="/dashboard/system" variant="outline">View system health</Button>
+      </Card.Footer>
+    </Card.Root>
+  {:else}
     <section class="space-y-4">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight">Your relay links</h1>
-        <p class="text-muted-foreground text-sm">
-          Anyone with a link can play it until you remove it.
-        </p>
-      </div>
-      {#if loading}
-        <div class="grid gap-3 md:grid-cols-2">
-          {#each Array(2) as _}<Skeleton class="h-36" />{/each}
-        </div>
-      {:else if sessions.length === 0}
-        <Empty.Root>
-          <Empty.Header
-            ><Empty.Media variant="icon"><Link2 /></Empty.Media><Empty.Title
-              >No links yet</Empty.Title
-            ></Empty.Header
-          >
-          <Empty.Content
-            ><Empty.Description>Search below to create your first link.</Empty.Description
-            ></Empty.Content
-          >
-        </Empty.Root>
-      {:else}
-        <div class="grid gap-3 md:grid-cols-2">
-          {#each sessions as session}
-            <Card.Root>
-              <Card.Header
-                ><Card.Title>{session.name}</Card.Title><Card.Description
-                  >{session.state}</Card.Description
-                ></Card.Header
-              >
-              <Card.Content
-                ><p class="text-muted-foreground truncate text-sm">
-                  {session.outputUrls.primary}
-                </p></Card.Content
-              >
-              <Card.Footer class="gap-2">
-                <Button
-                  variant="outline"
-                  class="flex-1"
-                  onclick={() => copy(session.outputUrls.primary)}><Copy />Copy</Button
-                >
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  aria-label={`Remove ${session.name}`}
-                  onclick={() => deleteLink(session.id)}><Trash2 /></Button
-                >
-              </Card.Footer>
-            </Card.Root>
-          {/each}
-        </div>
-      {/if}
-    </section>
-
-    <Separator />
-
-    <section class="space-y-4">
-      <div>
-        <h2 class="text-xl font-semibold tracking-tight">Choose something to relay</h2>
+        <h1 class="text-2xl font-semibold tracking-tight">Choose something to relay</h1>
         <p class="text-muted-foreground text-sm">
           Search for a movie or show available to your Jellyfin account.
         </p>
       </div>
       <form class="flex flex-col gap-3 sm:flex-row" onsubmit={runSearch}>
         <Field.Field class="flex-1">
-          <Field.Label class="sr-only" for="portal-search">Search movies and shows</Field.Label>
-          <Input id="portal-search" bind:value={search} placeholder="Search movies and shows" />
+          <Field.Label class="sr-only" for="catalog-search">Search movies and shows</Field.Label>
+          <Input id="catalog-search" bind:value={search} placeholder="Search movies and shows" />
         </Field.Field>
         {#if profiles.length > 1}
           <Select.Root type="single" bind:value={profileId}>
@@ -270,7 +204,7 @@
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {#each items as item}
             <Card.Root class="overflow-hidden">
-              <PortalArtwork {item} />
+              <ProviderArtwork {item} />
               <Card.Header>
                 <Card.Title>{item.name}</Card.Title>
                 <Card.Description>
@@ -305,7 +239,7 @@
         </div>
       {/if}
     </section>
-  </main>
+  {/if}
 </div>
 
 <Dialog.Root bind:open={selectionOpen}>
@@ -349,7 +283,7 @@
       {#if selectedSeason}
         <div class="grid gap-4 sm:grid-cols-[12rem_1fr]">
           <div class="space-y-2">
-            <PortalArtwork item={selectedSeason} />
+            <ProviderArtwork item={selectedSeason} />
             <p class="text-sm font-medium">{selectedSeason.name}</p>
           </div>
           {#if loadingEpisodes}
@@ -364,7 +298,7 @@
             <div class="grid content-start gap-3">
               {#each episodes as episode}
                 <Card.Root class="overflow-hidden sm:grid sm:grid-cols-[10rem_1fr]">
-                  <PortalArtwork item={episode} shape="episode" />
+                  <ProviderArtwork item={episode} shape="episode" />
                   <div>
                     <Card.Header>
                       <Card.Title class="text-base">

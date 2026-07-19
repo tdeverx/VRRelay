@@ -3,25 +3,20 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import {
-    Activity,
     Antenna,
-    Boxes,
     CircleGauge,
     Film,
+    House,
+    LogOut,
     Moon,
-    MoonStar,
-    Network,
     Settings,
-    SlidersHorizontal,
     Sun,
     SunMoon,
-    TestTubeDiagonal,
     UserRound
   } from '@lucide/svelte';
   import { api } from '#lib/api';
   import * as DropdownMenu from '#lib/new-ui/components/ui/dropdown-menu';
   import * as Sidebar from '#lib/new-ui/components/ui/sidebar';
-  import * as Select from '#lib/new-ui/components/ui/select';
   import { Separator } from '#lib/new-ui/components/ui/separator';
   import {
     readThemePreference,
@@ -33,34 +28,42 @@
   let health = $state<Awaited<ReturnType<typeof api.health>> | null>(null);
   let theme = $state<ThemePreference>('system');
   let sidebarOpen = $state(false);
+  let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
+
+  let isOperator = $derived(
+    Boolean(currentUser?.roles.some((role) => ['operator', 'admin', 'owner'].includes(role)))
+  );
+  let isAdmin = $derived(
+    Boolean(currentUser?.roles.some((role) => role === 'admin' || role === 'owner'))
+  );
 
   const routePrefix = '/dashboard';
-  let groups = $derived([
-    {
-      label: 'Operate',
-      items: [
-        { label: 'Sessions', href: routePrefix, icon: Film },
-        { label: 'Library', href: `${routePrefix}/library`, icon: Boxes },
-        { label: 'Live', href: `${routePrefix}/live`, icon: Antenna }
-      ]
-    },
-    {
-      label: 'Infrastructure',
-      items: [
-        { label: 'Cluster', href: `${routePrefix}/cluster`, icon: Network },
-        { label: 'System', href: `${routePrefix}/system`, icon: CircleGauge }
-      ]
-    },
-    {
-      label: 'Configure',
-      items: [
-        { label: 'Profiles', href: `${routePrefix}/profiles`, icon: SlidersHorizontal },
-        { label: 'Compatibility', href: `${routePrefix}/compatibility`, icon: TestTubeDiagonal },
-        { label: 'Settings', href: `${routePrefix}/settings`, icon: Settings },
-        { label: 'User portal', href: '/portal', icon: UserRound }
-      ]
-    }
-  ]);
+  let groups = $derived(
+    [
+      {
+        label: 'Use',
+        items: [
+          { label: 'Home', href: routePrefix, icon: House, visible: true },
+          { label: 'Live', href: `${routePrefix}/live`, icon: Antenna, visible: true }
+        ]
+      },
+      {
+        label: 'Manage',
+        items: [
+          { label: 'Sessions', href: `${routePrefix}/sessions`, icon: Film, visible: true },
+          {
+            label: 'System',
+            href: `${routePrefix}/system`,
+            icon: CircleGauge,
+            visible: isOperator
+          },
+          { label: 'Settings', href: `${routePrefix}/settings`, icon: Settings, visible: isAdmin }
+        ]
+      }
+    ]
+      .map((group) => ({ ...group, items: group.items.filter((item) => item.visible) }))
+      .filter((group) => group.items.length > 0)
+  );
 
   onMount(() => {
     const fullSidebar = matchMedia('(min-width: 1536px)');
@@ -73,6 +76,10 @@
       .health()
       .then((value) => (health = value))
       .catch(() => (health = null));
+    void api
+      .me()
+      .then((value) => (currentUser = value))
+      .catch(() => (location.href = '/dashboard/login'));
 
     return () => fullSidebar.removeEventListener('change', syncSidebar);
   });
@@ -82,6 +89,11 @@
       theme = value;
       setThemePreference(value);
     }
+  }
+
+  async function signOut() {
+    await api.logout();
+    location.href = '/dashboard/login';
   }
 </script>
 
@@ -97,18 +109,32 @@
     <Sidebar.Header>
       <Sidebar.Menu>
         <Sidebar.MenuItem>
-          <Sidebar.MenuButton
-            size="lg"
-            tooltipContent="VRRelay"
-            aria-label="VRRelay administrator dashboard"
-            class="group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
-          >
-            <Activity />
-            <span class="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
-              <strong>VRRelay</strong>
-              <small class="text-muted-foreground">Administrator</small>
-            </span>
-          </Sidebar.MenuButton>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              {#snippet child({ props })}
+                <Sidebar.MenuButton
+                  {...props}
+                  size="lg"
+                  tooltipContent={currentUser?.displayName ?? 'Account'}
+                >
+                  <UserRound />
+                  <span class="min-w-0">
+                    <strong class="block truncate">{currentUser?.displayName ?? 'Account'}</strong>
+                    <small class="text-muted-foreground block truncate">
+                      {currentUser?.authMethod === 'recovery'
+                        ? 'Recovery access'
+                        : currentUser?.roles.join(' · ')}
+                    </small>
+                  </span>
+                </Sidebar.MenuButton>
+              {/snippet}
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content side="right" align="start" class="w-56">
+              <DropdownMenu.Label>{currentUser?.displayName ?? 'Account'}</DropdownMenu.Label>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onclick={signOut}><LogOut />Sign out</DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </Sidebar.MenuItem>
       </Sidebar.Menu>
     </Sidebar.Header>
@@ -121,7 +147,8 @@
               {#each group.items as item}
                 <Sidebar.MenuItem>
                   <Sidebar.MenuButton
-                    isActive={page.url.pathname === item.href}
+                    isActive={page.url.pathname === item.href ||
+                      (item.href !== routePrefix && page.url.pathname.startsWith(`${item.href}/`))}
                     tooltipContent={item.label}
                   >
                     {#snippet child({ props })}
@@ -161,75 +188,43 @@
           </div>
         </Sidebar.MenuItem>
       </Sidebar.Menu>
-      <Separator />
-      <div class="space-y-2 group-data-[collapsible=icon]:hidden">
-        <label class="text-muted-foreground flex items-center gap-2 text-xs" for="theme-choice">
-          <MoonStar class="size-4" /> Theme
-        </label>
-        <Select.Root type="single" value={theme} onValueChange={updateTheme}>
-          <Select.Trigger id="theme-choice" class="w-full">
-            {theme === 'system' ? 'System' : theme === 'light' ? 'Light' : 'Dark'}
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value="system">System</Select.Item>
-            <Select.Item value="light">Light</Select.Item>
-            <Select.Item value="dark">Dark</Select.Item>
-          </Select.Content>
-        </Select.Root>
-      </div>
-      <Sidebar.Menu class="hidden group-data-[collapsible=icon]:flex">
-        <Sidebar.MenuItem>
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              {#snippet child({ props })}
-                <Sidebar.MenuButton {...props} tooltipContent="Theme" aria-label="Choose theme">
-                  {#if theme === 'light'}
-                    <Sun />
-                  {:else if theme === 'dark'}
-                    <Moon />
-                  {:else}
-                    <SunMoon />
-                  {/if}
-                  <span>Theme</span>
-                </Sidebar.MenuButton>
-              {/snippet}
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content side="right" align="end">
-              <DropdownMenu.Group>
-                <DropdownMenu.Label>Theme</DropdownMenu.Label>
-                <DropdownMenu.RadioGroup value={theme} onValueChange={updateTheme}>
-                  <DropdownMenu.RadioItem value="system">
-                    <SunMoon />
-                    System
-                  </DropdownMenu.RadioItem>
-                  <DropdownMenu.RadioItem value="light">
-                    <Sun />
-                    Light
-                  </DropdownMenu.RadioItem>
-                  <DropdownMenu.RadioItem value="dark">
-                    <Moon />
-                    Dark
-                  </DropdownMenu.RadioItem>
-                </DropdownMenu.RadioGroup>
-              </DropdownMenu.Group>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-        </Sidebar.MenuItem>
-      </Sidebar.Menu>
     </Sidebar.Footer>
     <Sidebar.Rail />
   </Sidebar.Root>
 
   <Sidebar.Inset class="min-w-0">
-    <header
-      class="bg-background sticky top-0 z-20 flex h-14 items-center gap-3 border-b px-4 2xl:hidden"
-    >
+    <header class="bg-background sticky top-0 z-20 flex h-14 items-center gap-3 border-b px-4">
       <Sidebar.Trigger class="md:hidden" aria-label="Open navigation" />
       <Sidebar.Trigger
         class="hidden md:inline-flex"
         aria-label={sidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
       />
       <strong>VRRelay</strong>
+      <div class="flex-1"></div>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              class="hover:bg-accent inline-flex size-9 items-center justify-center rounded-md"
+              aria-label="Choose theme"
+            >
+              {#if theme === 'light'}<Sun class="size-4" />{:else if theme === 'dark'}<Moon
+                  class="size-4"
+                />{:else}<SunMoon class="size-4" />{/if}
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Label>Theme</DropdownMenu.Label>
+          <DropdownMenu.RadioGroup value={theme} onValueChange={updateTheme}>
+            <DropdownMenu.RadioItem value="system"><SunMoon />System</DropdownMenu.RadioItem>
+            <DropdownMenu.RadioItem value="light"><Sun />Light</DropdownMenu.RadioItem>
+            <DropdownMenu.RadioItem value="dark"><Moon />Dark</DropdownMenu.RadioItem>
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
     </header>
     <main id="new-main-content" tabindex="-1" class="min-w-0 flex-1">
       {@render children()}

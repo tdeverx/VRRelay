@@ -11,7 +11,7 @@ let administratorProviderName = '';
 async function authenticateNew(page: Page): Promise<void> {
   await page.goto('/dashboard');
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole('heading', { name: 'Sessions', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recovery administration' })).toBeVisible();
 }
 
 async function expectAccessible(page: Page): Promise<void> {
@@ -24,12 +24,6 @@ async function expectAccessible(page: Page): Promise<void> {
       (violation) => violation.impact === 'serious' || violation.impact === 'critical'
     )
   ).toEqual([]);
-}
-
-async function openNewNavigation(page: Page, isMobile: boolean): Promise<void> {
-  await page
-    .getByRole('button', { name: isMobile ? 'Open navigation' : 'Expand navigation' })
-    .click();
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -46,7 +40,7 @@ test.beforeAll(async ({ request }) => {
   }
 
   const loginResponse = await request.post('/api/v1/auth/login', {
-    data: { password: administratorPassword }
+    data: { method: 'recovery', password: administratorPassword }
   });
   expect(loginResponse.ok()).toBe(true);
   authenticationCsrf = ((await loginResponse.json()) as { csrfToken: string }).csrfToken;
@@ -88,23 +82,21 @@ test.beforeEach(async ({ context, page }) => {
   );
 });
 
-test('persists theme preference and follows system changes', async ({ page, isMobile }) => {
+test('persists theme preference and follows system changes', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
   await authenticateNew(page);
   await expect(page.locator('html')).toHaveAttribute('data-ui', 'new');
   await expect(page.locator('html')).not.toHaveClass(/dark/);
 
-  await openNewNavigation(page, isMobile);
-  await page.locator('#theme-choice').click();
-  await page.getByRole('option', { name: 'Dark' }).click();
+  await page.getByRole('button', { name: 'Choose theme' }).click();
+  await page.getByRole('menuitemradio', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
   expect(await page.evaluate(() => localStorage.getItem('vrrelay.theme'))).toBe('dark');
 
   await page.reload();
   await expect(page.locator('html')).toHaveClass(/dark/);
-  await openNewNavigation(page, isMobile);
-  await page.locator('#theme-choice').click();
-  await page.getByRole('option', { name: 'System' }).click();
+  await page.getByRole('button', { name: 'Choose theme' }).click();
+  await page.getByRole('menuitemradio', { name: 'System' }).click();
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('html')).toHaveClass(/dark/);
   await page.emulateMedia({ colorScheme: 'light' });
@@ -118,15 +110,22 @@ test('renders every administrator route accessibly at review breakpoints', async
   await authenticateNew(page);
   const routes = [
     '/dashboard',
-    '/dashboard/library',
     '/dashboard/live',
     '/dashboard/relay/new',
-    '/dashboard/cluster',
-    '/dashboard/profiles',
-    '/dashboard/profiles/new',
-    '/dashboard/compatibility',
+    '/dashboard/sessions',
     '/dashboard/system',
-    '/dashboard/settings'
+    '/dashboard/system/nodes',
+    '/dashboard/system/services',
+    '/dashboard/system/work',
+    '/dashboard/system/diagnostics',
+    '/dashboard/settings',
+    '/dashboard/settings/people',
+    '/dashboard/settings/connections',
+    '/dashboard/settings/profiles',
+    '/dashboard/settings/profiles/new',
+    '/dashboard/settings/network',
+    '/dashboard/settings/runtime',
+    '/dashboard/settings/api'
   ];
 
   for (const route of routes) {
@@ -151,8 +150,8 @@ test('renders every administrator route accessibly at review breakpoints', async
 test('keeps setup redirects inside the dashboard namespace', async ({ page }) => {
   await authenticateNew(page);
   await page.goto('/dashboard/setup');
-  await expect(page).toHaveURL(/\/dashboard\/login$/);
-  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole('heading', { name: 'Recovery administration' })).toBeVisible();
 });
 
 test('validates local placement and keeps the relay wizard on the working route', async ({
@@ -188,14 +187,14 @@ test('validates local placement and keeps the relay wizard on the working route'
   await expect(page.getByRole('heading', { name: 'Review' }).last()).toBeVisible();
 });
 
-test('serves the dashboard namespace and a per-user Jellyfin relay portal', async ({
+test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   context,
   page
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const freshSettingsPage = await context.newPage();
-  await freshSettingsPage.goto('/dashboard/settings');
-  await expect(freshSettingsPage).toHaveURL(/\/dashboard\/settings$/);
+  await freshSettingsPage.goto('/dashboard/settings/connections');
+  await expect(freshSettingsPage).toHaveURL(/\/dashboard\/settings\/connections$/);
   await expect(freshSettingsPage.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await expect(
     freshSettingsPage.getByText(administratorProviderName, { exact: true })
@@ -216,38 +215,41 @@ test('serves the dashboard namespace and a per-user Jellyfin relay portal', asyn
   ).toBeTruthy();
   await freshSettingsPage.close();
 
-  const portalStatusResponse = await page.request.get('/api/v1/portal/status');
-  expect(portalStatusResponse.ok()).toBe(true);
-  expect(await portalStatusResponse.json()).toMatchObject({ configured: true });
+  const signInStatusResponse = await page.request.get('/api/v1/auth/configuration/status');
+  expect(signInStatusResponse.ok()).toBe(true);
+  expect(await signInStatusResponse.json()).toMatchObject({ configured: true });
 
-  await page.goto('/portal/login');
+  const logoutResponse = await page.request.post('/api/v1/auth/logout', {
+    headers: { 'X-CSRF-Token': authenticationCsrf }
+  });
+  expect(logoutResponse.ok()).toBe(true);
+  await page.goto('/dashboard/login');
+  await page.getByRole('button', { name: /Jellyfin/ }).click();
   await page.getByLabel('Username').fill('browser-user');
-  await page.getByLabel('Password').fill('browser-password');
+  await page.getByLabel(/password/i).fill('browser-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page).toHaveURL(/\/portal$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
 
-  const freshPortalPage = await context.newPage();
-  await freshPortalPage.goto('/portal');
-  expect(
-    await freshPortalPage.evaluate(() => sessionStorage.getItem('vrrelay.portal-csrf'))
-  ).toBeTruthy();
-  await expect(freshPortalPage.getByRole('heading', { name: 'Your relay links' })).toBeVisible();
-  const discovery = freshPortalPage.locator('main section').nth(1);
+  const freshUserPage = await context.newPage();
+  await freshUserPage.goto('/dashboard');
+  expect(await freshUserPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))).toBeTruthy();
+  await expect(
+    freshUserPage.getByRole('heading', { name: 'Choose something to relay' })
+  ).toBeVisible();
+  const discovery = freshUserPage.locator('main section').first();
   await expect(discovery.locator('[data-slot="card"]')).toHaveCount(0);
-  await freshPortalPage.getByLabel('Search movies and shows').fill('Browser');
-  await freshPortalPage.getByRole('button', { name: 'Search', exact: true }).click();
-  const movie = freshPortalPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
-  const series = freshPortalPage
-    .locator('[data-slot="card"]')
-    .filter({ hasText: 'Browser Series' });
+  await freshUserPage.getByLabel('Search movies and shows').fill('Browser');
+  await freshUserPage.getByRole('button', { name: 'Search', exact: true }).click();
+  const movie = freshUserPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
+  const series = freshUserPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Series' });
   await expect(movie).toBeVisible();
   await expect(series).toBeVisible();
   await expect(discovery.getByText('The Browser Episode')).toHaveCount(0);
   await expect(movie.getByRole('img', { name: 'Browser Movie poster' })).toBeVisible();
   await series.getByRole('button', { name: 'Choose episode' }).click();
-  const episodeDialog = freshPortalPage.getByRole('dialog');
+  const episodeDialog = freshUserPage.getByRole('dialog');
   await expect(episodeDialog).toBeVisible();
-  await expect(freshPortalPage.getByText('Season 1', { exact: true }).first()).toBeVisible();
+  await expect(freshUserPage.getByText('Season 1', { exact: true }).first()).toBeVisible();
   const episode = episodeDialog
     .locator('[data-slot="card"]')
     .filter({ hasText: 'The Browser Episode' });
@@ -257,16 +259,13 @@ test('serves the dashboard namespace and a per-user Jellyfin relay portal', asyn
   ).toBeVisible();
   await episode.getByRole('button', { name: 'Create link' }).click();
   await expect(episodeDialog).toBeHidden();
-  await expect(freshPortalPage.getByText('Relay link created and copied.')).toBeVisible();
-  await expect(freshPortalPage.getByText('The Browser Episode').last()).toBeVisible();
-  expect(
-    await freshPortalPage.locator('main section h1, main section h2').allTextContents()
-  ).toEqual(['Your relay links', 'Choose something to relay']);
-  expect(
-    await freshPortalPage.evaluate(() => sessionStorage.getItem('vrrelay.portal-csrf'))
-  ).toBeTruthy();
-  await expectAccessible(freshPortalPage);
+  await expect(freshUserPage.getByText('Relay link created and copied.')).toBeVisible();
+  await freshUserPage.goto('/dashboard/sessions');
+  await expect(freshUserPage.getByRole('heading', { name: 'Your sessions' })).toBeVisible();
+  await expect(freshUserPage.getByText('The Browser Episode').last()).toBeVisible();
+  expect(await freshUserPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))).toBeTruthy();
+  await expectAccessible(freshUserPage);
 
-  await freshPortalPage.goto('/');
-  await expect(freshPortalPage).toHaveURL(/\/portal$/);
+  await freshUserPage.goto('/');
+  await expect(freshUserPage).toHaveURL(/\/dashboard$/);
 });

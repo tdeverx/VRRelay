@@ -48,6 +48,8 @@
   let burnSubtitles = $state(false);
   let passthrough = $state<ProfileRevision['processing']['passthrough']>('never');
   let saving = $state(false);
+  let step = $state(0);
+  const steps = ['Basics', 'Video', 'Audio & delivery', 'Processing & review'];
   const deliveryMethods: Array<ProfileRevision['delivery']['method']> = ['hls', 'fragmented_mp4'];
   let base = $derived(
     profiles.find((profile) => `${profile.profileId}:${profile.revision}` === baseKey)
@@ -175,7 +177,7 @@
         processing: { ...base.processing, toneMap, burnSubtitles, passthrough }
       });
       toast.success(`Created revision ${revision.revision}.`);
-      await goto(adminRoute(page.url.pathname, '/profiles'));
+      await goto('/dashboard/settings/profiles');
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not create profile.');
     } finally {
@@ -188,7 +190,7 @@
   <PageHeader
     title="New profile revision"
     description="Clone a known profile, tune its structured pipeline, then test it in VRChat."
-    >{#snippet actions()}<Button variant="outline" href={adminRoute(page.url.pathname, '/profiles')}
+    >{#snippet actions()}<Button variant="outline" href="/dashboard/settings/profiles"
         ><ArrowLeft data-icon="inline-start" />Profiles</Button
       >{/snippet}</PageHeader
   >
@@ -197,8 +199,15 @@
       >Every setting is validated and immutable. VRRelay never accepts raw FFmpeg arguments.</Alert.Description
     ></Alert.Root
   >
-  <div class="grid gap-4 xl:grid-cols-2">
-    <Card.Root
+  <nav class="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Profile creation steps">
+    {#each steps as label, index}
+      <Button variant={step === index ? 'default' : 'outline'} onclick={() => (step = index)}>
+        {index + 1}. {label}
+      </Button>
+    {/each}
+  </nav>
+  <div class="grid gap-4">
+    <Card.Root class={step !== 0 ? 'hidden' : ''}
       ><Card.Header
         ><Card.Title>Identity</Card.Title><Card.Description
           >Start from an existing immutable profile.</Card.Description
@@ -259,7 +268,7 @@
         ></Card.Content
       ></Card.Root
     >
-    <Card.Root
+    <Card.Root class={step !== 1 ? 'hidden' : ''}
       ><Card.Header
         ><Card.Title>Video</Card.Title><Card.Description
           >Structured encoder, rate-control and output geometry settings.</Card.Description
@@ -357,7 +366,7 @@
         ></Card.Content
       ></Card.Root
     >
-    <Card.Root
+    <Card.Root class={step !== 2 ? 'hidden' : ''}
       ><Card.Header
         ><Card.Title>Audio and delivery</Card.Title><Card.Description
           >Audio layout and the implemented HLS or fragmented MP4 delivery shape.</Card.Description
@@ -452,7 +461,7 @@
         ></Card.Content
       ></Card.Root
     >
-    <Card.Root
+    <Card.Root class={step !== 3 ? 'hidden' : ''}
       ><Card.Header><Card.Title>Processing</Card.Title></Card.Header><Card.Content
         ><Field.Group
           ><Field.Field orientation="horizontal"
@@ -485,9 +494,14 @@
       ></Card.Root
     >
   </div>
-  <div class="flex justify-end">
-    <Button disabled={!base || !name.trim() || saving} onclick={save}
-      >{saving ? 'Creating…' : 'Create profile revision'}</Button
-    >
+  <div class="flex justify-between gap-2">
+    <Button variant="outline" disabled={step === 0} onclick={() => (step -= 1)}>Back</Button>
+    {#if step < steps.length - 1}
+      <Button disabled={!base || !name.trim()} onclick={() => (step += 1)}>Continue</Button>
+    {:else}
+      <Button disabled={!base || !name.trim() || saving} onclick={save}
+        >{saving ? 'Creating…' : 'Create profile revision'}</Button
+      >
+    {/if}
   </div>
 </div>

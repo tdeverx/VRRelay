@@ -22,7 +22,8 @@ import type {
   AgentLogEntry,
   AuditCategory,
   AuditEvent,
-  NodeCapability
+  NodeCapability,
+  UserIdentity
 } from '@vrrelay/domain';
 import type { CatalogQuery, RelayEvent } from '@vrrelay/contracts';
 
@@ -507,6 +508,13 @@ export interface Repository {
     value: string,
     expectedRevision: number
   ): Promise<AtomicWriteResult<string>>;
+  createUserIdentity(identity: UserIdentity): Promise<VersionedRecord<UserIdentity>>;
+  listUserIdentities(): Promise<Array<VersionedRecord<UserIdentity>>>;
+  getUserIdentity(id: string): Promise<VersionedRecord<UserIdentity> | undefined>;
+  compareAndSetUserIdentity(
+    identity: UserIdentity,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<UserIdentity>>;
 }
 
 export interface EncoderCapability {

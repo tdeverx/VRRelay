@@ -18,7 +18,8 @@ import type {
   ProfileRevision,
   ProviderConnection,
   RelaySession,
-  SegmentJob
+  SegmentJob,
+  UserIdentity
 } from '@vrrelay/domain';
 import type {
   AtomicDeleteResult,
@@ -47,7 +48,8 @@ type StoredEntity =
   | PlaybackGrant
   | LiveChannel
   | CompatibilityResult
-  | PersonalAccessToken;
+  | PersonalAccessToken
+  | UserIdentity;
 
 interface StoredProviderRecord extends VersionedRecord<ProviderConnection> {
   deletionPending: boolean;
@@ -237,6 +239,27 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
       )`,
       'CREATE INDEX IF NOT EXISTS job_logs_job_time ON job_logs(job_id, timestamp DESC)'
     ]
+  },
+  {
+    version: 8,
+    name: 'unified user identities',
+    checksum: 'dc63a28381d241a52ea538aa43c8dcffaea5e6b34e6f8718128c44e75ba3cb25',
+    statements: [
+      `CREATE TABLE user_identities (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL,
+        provider_user_id TEXT NOT NULL,
+        json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(provider_id, provider_user_id)
+      )`,
+      'CREATE INDEX user_identities_last_seen ON user_identities(updated_at DESC)',
+      `INSERT OR IGNORE INTO settings(key,value,updated_at,revision)
+       SELECT 'auth.signInConfiguration',value,updated_at,revision
+       FROM settings WHERE key='portal.configuration'`,
+      `DELETE FROM settings WHERE key='portal.configuration'`
+    ]
   }
 ] as const;
 
@@ -359,6 +382,19 @@ const SQLITE_SCHEMA_SHAPE = {
     },
     primaryKey: ['id'],
     unique: [['token_hash']]
+  },
+  user_identities: {
+    columns: {
+      id: SQLITE_TEXT_KEY,
+      provider_id: SQLITE_TEXT_REQUIRED,
+      provider_user_id: SQLITE_TEXT_REQUIRED,
+      json: SQLITE_TEXT_REQUIRED,
+      updated_at: SQLITE_TEXT_REQUIRED,
+      revision: SQLITE_REVISION
+    },
+    primaryKey: ['id'],
+    unique: [['provider_id', 'provider_user_id']],
+    indexes: { user_identities_last_seen: ['updated_at'] }
   },
   settings: {
     columns: {
@@ -1238,6 +1274,52 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
          WHERE id = ? AND json_extract(json, '$.revokedAt') IS NULL`
       )
       .run(revokedAt, id);
+  }
+
+  async createUserIdentity(identity: UserIdentity): Promise<VersionedRecord<UserIdentity>> {
+    this.#db
+      .prepare(
+        `INSERT INTO user_identities
+         (id, provider_id, provider_user_id, json, updated_at, revision)
+         VALUES (?, ?, ?, ?, ?, 1)`
+      )
+      .run(
+        identity.id,
+        identity.providerId,
+        identity.providerUserId,
+        JSON.stringify(identity),
+        identity.lastSeenAt
+      );
+    return { value: identity, revision: 1 };
+  }
+
+  async listUserIdentities(): Promise<Array<VersionedRecord<UserIdentity>>> {
+    const rows = this.#db
+      .prepare('SELECT json, revision FROM user_identities ORDER BY updated_at DESC')
+      .all() as Array<{ json: string; revision: number }>;
+    return rows.map(({ json, revision }) => ({
+      value: JSON.parse(json) as UserIdentity,
+      revision
+    }));
+  }
+
+  async getUserIdentity(id: string): Promise<VersionedRecord<UserIdentity> | undefined> {
+    return this.#getVersioned<UserIdentity>('user_identities', 'id', id);
+  }
+
+  async compareAndSetUserIdentity(
+    identity: UserIdentity,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<UserIdentity>> {
+    return this.#compareAndSetVersioned(
+      'user_identities',
+      'id',
+      identity.id,
+      identity,
+      'updated_at',
+      identity.lastSeenAt,
+      expectedRevision
+    );
   }
 
   async putSetting(key: string, value: string): Promise<void> {

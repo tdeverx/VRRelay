@@ -246,6 +246,7 @@ export type PlaybackGrant = z.infer<typeof PlaybackGrantSchema>;
 
 export const LiveChannelSchema = z.object({
   id: z.string(),
+  ownerId: z.string().optional(),
   name: z.string(),
   path: z.string(),
   ingestPath: z.string().optional(),
@@ -268,13 +269,19 @@ export const LiveChannelSchema = z.object({
 });
 export type LiveChannel = z.infer<typeof LiveChannelSchema>;
 export const PublicLiveChannelSchema = LiveChannelSchema.omit({
+  ownerId: true,
   publishTokenHash: true,
   replacementPublishTokenHash: true
 });
 export type PublicLiveChannel = z.infer<typeof PublicLiveChannelSchema>;
 
 export function publicLiveChannel(channel: LiveChannel): PublicLiveChannel {
-  const { publishTokenHash: _publishTokenHash, ...safe } = channel;
+  const {
+    ownerId: _ownerId,
+    publishTokenHash: _publishTokenHash,
+    replacementPublishTokenHash: _replacementPublishTokenHash,
+    ...safe
+  } = channel;
   return safe;
 }
 
@@ -537,6 +544,22 @@ export const ScopeSchema = z.enum([
   'admin'
 ]);
 export type Scope = z.infer<typeof ScopeSchema>;
+
+export const UserRoleSchema = z.enum(['user', 'operator', 'admin', 'owner']);
+export type UserRole = z.infer<typeof UserRoleSchema>;
+
+export const UserIdentitySchema = z.object({
+  id: z.string().min(1),
+  providerId: z.string().min(1),
+  providerUserId: z.string().min(1),
+  displayName: z.string().min(1).max(256),
+  roles: z.array(UserRoleSchema).min(1),
+  defaultProfileId: z.string().min(1).optional(),
+  allowedProfileIds: z.array(z.string().min(1)).default([]),
+  firstSeenAt: z.iso.datetime(),
+  lastSeenAt: z.iso.datetime()
+});
+export type UserIdentity = z.infer<typeof UserIdentitySchema>;
 
 export const PersonalAccessTokenSchema = z.object({
   id: z.string(),

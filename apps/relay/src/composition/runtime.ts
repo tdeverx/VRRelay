@@ -30,7 +30,6 @@ import type { NodeCapability } from '@vrrelay/domain';
 import type { CatalogQuery, CreateProviderRequest } from '@vrrelay/contracts';
 import { AgentController, NodeAgent, type NodeAgentOptions } from '../agent-transport.js';
 import { AuthService } from '../auth.js';
-import { PortalAuthService } from '../portal-auth.js';
 import { BackendService, resolveConfiguredObjectStore } from '../backend-service.js';
 import type { RelayConfig } from '../config.js';
 import { parseListenAddress } from '../config.js';
@@ -328,9 +327,12 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       metrics
     }
   );
-  const agentController = plan.hostsController
-    ? new AgentController(cluster, certificateAuthority, coordination)
-    : undefined;
+  // Standalone dispatches work in-process. Starting the cluster agent listener here would make a
+  // default desktop install depend on certificate provisioning even though it has no remote nodes.
+  const agentController =
+    plan.kind === 'controller'
+      ? new AgentController(cluster, certificateAuthority, coordination)
+      : undefined;
   const providers = new ProviderService(repository, secrets, registry, {
     nodeId: config.nodeId,
     ...(agentController ? { remote: agentController } : {})
@@ -377,15 +379,13 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
   await live.scrubPersistedPublisherCredentials();
   await sessions.recover();
 
-  const auth = new AuthService(repository);
-  const portal = new PortalAuthService(repository, secrets, providers);
+  const auth = new AuthService(repository, secrets, providers);
   const audit = new AuditService(repository);
   const app = await createServer(
     config,
     {
       repository,
       auth,
-      portal,
       audit,
       providers,
       profiles,
@@ -447,7 +447,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
   }
 
   const cleanup = setInterval(() => {
-    auth.cleanup();
+    void auth.cleanup().catch((error) => app.log.error({ err: error }, 'auth cleanup failed'));
     void sessions
       .cleanupExpiredCache()
       .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));

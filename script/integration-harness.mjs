@@ -126,7 +126,7 @@ async function login() {
   const response = await fetch(`${controllerUrl}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password: adminPassword })
+    body: JSON.stringify({ method: 'recovery', password: adminPassword })
   });
   const body = await response.json();
   if (!response.ok) throw new Error(`Administrator login failed (${response.status})`);

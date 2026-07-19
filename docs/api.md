@@ -4,7 +4,7 @@ The external administrative API is versioned under `/api/v1`. Its OpenAPI descri
 
 ## Authentication
 
-- Browser administrators use the HTTP-only `vrrelay_session` cookie and send the returned CSRF token on mutations.
+- Jellyfin users and recovery owners use the HTTP-only `vrrelay_session` cookie and send the returned CSRF token on mutations. Effective roles are returned by `/auth/me` and enforced on every request.
 - Personal access tokens use `Authorization: Bearer …` and are limited to their recorded scopes.
 - Node agents do not use either mechanism. They enroll once, then connect to the dedicated agent listener using a controller-issued mTLS identity.
 - Playback uses opaque, session-scoped grants. A playback URL is not an administrator credential.
@@ -32,7 +32,10 @@ Node capability responses report cache usage in bytes, the configured cache limi
 
 Live channel responses include selected ingest-origin metadata when available
 and include `normalizationProfileId`/`normalizationProfileRevision` after a
-normalized channel is pinned to the first live-session profile.
+normalized channel is pinned to the first live-session profile. Jellyfin browser sessions create
+user-owned channels: list and mutation routes filter by the current stable identity, while
+operators, administrators, owners, and appropriately scoped personal tokens use the system-wide
+view. Ownership is assigned server-side and is not part of the public channel response.
 
 ## Changing the API
 

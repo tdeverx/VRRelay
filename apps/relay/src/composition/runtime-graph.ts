@@ -107,7 +107,6 @@ export const ROLE_RUNTIME_COMPONENTS = {
     'live-normalizer',
     'certificate-authority',
     'cluster-service',
-    'agent-controller',
     'backend-service',
     'auth-service',
     'audit-service',

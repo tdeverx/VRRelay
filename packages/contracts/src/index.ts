@@ -13,7 +13,8 @@ import {
   NodeRoleSchema,
   NodeCapabilitySchema,
   HttpUrlSchema,
-  PlacementPolicySchema
+  PlacementPolicySchema,
+  UserRoleSchema
 } from '@vrrelay/domain';
 import { AgentEnvelopeSchema } from './agent-protocol.js';
 
@@ -129,12 +130,25 @@ export const FirstRunRequestSchema = z.object({
   setupToken: z.string().min(32).optional()
 });
 export type FirstRunRequest = z.infer<typeof FirstRunRequestSchema>;
-export const LoginRequestSchema = z.object({
-  password: z.string().min(1).max(256)
-});
+export const LoginRequestSchema = z.discriminatedUnion('method', [
+  z.object({ method: z.literal('recovery'), password: z.string().min(1).max(256) }),
+  z.object({
+    method: z.literal('jellyfin'),
+    username: z.string().min(1).max(256),
+    password: z.string().min(1).max(256)
+  })
+]);
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
-export const PortalConfigurationRequestSchema = z
+export const UpdateUserRequestSchema = z.object({
+  expectedRevision: z.number().int().positive(),
+  roles: z.array(UserRoleSchema).min(1),
+  allowedProfileIds: z.array(z.string().min(1)),
+  defaultProfileId: z.string().min(1).optional()
+});
+export type UpdateUserRequest = z.infer<typeof UpdateUserRequestSchema>;
+
+export const SignInConfigurationRequestSchema = z
   .object({
     providerId: z.string().min(1),
     defaultProfileId: z.string().min(1),
@@ -148,20 +162,7 @@ export const PortalConfigurationRequestSchema = z
         message: 'The default profile must be included in the allowed profiles'
       });
   });
-export type PortalConfigurationRequest = z.infer<typeof PortalConfigurationRequestSchema>;
-
-export const PortalLoginRequestSchema = z.object({
-  username: z.string().min(1).max(256),
-  password: z.string().min(1).max(256)
-});
-export type PortalLoginRequest = z.infer<typeof PortalLoginRequestSchema>;
-
-export const PortalCreateSessionRequestSchema = z.object({
-  source: MediaSourceRefSchema,
-  name: z.string().min(1).max(160).optional(),
-  profileId: z.string().min(1).optional()
-});
-export type PortalCreateSessionRequest = z.infer<typeof PortalCreateSessionRequestSchema>;
+export type SignInConfigurationRequest = z.infer<typeof SignInConfigurationRequestSchema>;
 
 export const CreatePersonalTokenRequestSchema = z.object({
   name: z.string().min(1).max(100),
@@ -212,7 +213,7 @@ export const CreateProviderBindingRequestSchema = z
       context.addIssue({
         code: 'custom',
         path: ['authMode'],
-        message: 'Delegated user authentication is only available for the portal connection'
+        message: 'Delegated user authentication is only available for interactive sign-in'
       });
     if (value.authMode === 'user_token' && (!value.username || !value.password))
       context.addIssue({ code: 'custom', message: 'Username and password are required' });

@@ -120,8 +120,8 @@ export interface SessionServiceInfrastructure {
 
 export interface SessionCreateContext {
   ownerId: string;
-  providerAccessToken: string;
-  providerUserId: string;
+  providerAccessToken?: string;
+  providerUserId?: string;
 }
 
 export class SessionService {
@@ -169,8 +169,14 @@ export class SessionService {
   }
 
   async create(input: CreateSessionRequest, context?: SessionCreateContext): Promise<RelaySession> {
-    if (context && (input.kind !== 'vod' || input.placementPolicy !== 'local'))
-      throw new ConflictError('User portal sessions must be local VOD sessions');
+    if (context && input.placementPolicy !== 'local')
+      throw new ConflictError('User-owned sessions must use the local worker');
+    if (
+      context &&
+      input.kind === 'vod' &&
+      (!context.providerAccessToken || !context.providerUserId)
+    )
+      throw new ConflictError('User-owned VOD sessions require provider credentials');
     const profile = await this.repository.getProfile(input.profileId, input.profileRevision);
     if (!profile) throw new NotFoundError('Profile revision was not found');
     const id = randomUUID();
@@ -183,7 +189,7 @@ export class SessionService {
       const connection = await this.repository.getProvider(input.source.providerId);
       if (!connection) throw new NotFoundError('Provider connection was not found');
       const sourceConnection = context
-        ? { ...connection, userId: context.providerUserId }
+        ? { ...connection, userId: context.providerUserId! }
         : connection;
       const remoteNode = context ? undefined : await this.#remoteProviderNode(connection.id);
       const item = remoteNode
@@ -239,10 +245,13 @@ export class SessionService {
     const expiresAt = input.playbackTtlSeconds
       ? new Date(Date.now() + input.playbackTtlSeconds * 1_000).toISOString()
       : null;
-    if (context)
+    if (context && input.kind === 'vod')
       await this.secrets.put(
         this.#sessionSourceSecretRef(id),
-        JSON.stringify({ accessToken: context.providerAccessToken, userId: context.providerUserId })
+        JSON.stringify({
+          accessToken: context.providerAccessToken!,
+          userId: context.providerUserId!
+        })
       );
     let created;
     try {

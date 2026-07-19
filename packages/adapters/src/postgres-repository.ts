@@ -15,7 +15,8 @@ import type {
   ProfileRevision,
   ProviderConnection,
   RelaySession,
-  SegmentJob
+  SegmentJob,
+  UserIdentity
 } from '@vrrelay/domain';
 import type {
   AtomicDeleteResult,
@@ -149,6 +150,20 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
       'CREATE TABLE IF NOT EXISTS job_logs(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, node_id TEXT, document JSONB NOT NULL, timestamp TIMESTAMPTZ NOT NULL)',
       'CREATE INDEX IF NOT EXISTS job_logs_job_time ON job_logs(job_id, timestamp DESC)'
     ]
+  },
+  {
+    version: 8,
+    name: 'unified user identities',
+    checksum: 'f6cf2edc208e6003911bb79da98080f6d0f55125fd1179fe5dbe7c5d80884ae9',
+    statements: [
+      'CREATE TABLE user_identities(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, provider_user_id TEXT NOT NULL, document JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL, revision INTEGER NOT NULL DEFAULT 1, UNIQUE(provider_id, provider_user_id))',
+      'CREATE INDEX user_identities_last_seen ON user_identities(updated_at DESC)',
+      `INSERT INTO settings(key,value,updated_at,revision)
+       SELECT 'auth.signInConfiguration',value,updated_at,revision
+       FROM settings WHERE key='portal.configuration'
+       ON CONFLICT(key) DO NOTHING`,
+      `DELETE FROM settings WHERE key='portal.configuration'`
+    ]
   }
 ] as const;
 
@@ -237,6 +252,14 @@ const POSTGRES_REQUIRED_COLUMNS: Readonly<
     document: requiredPostgresColumn('jsonb'),
     created_at: requiredPostgresColumn('timestamptz')
   },
+  user_identities: {
+    id: requiredPostgresColumn('text'),
+    provider_id: requiredPostgresColumn('text'),
+    provider_user_id: requiredPostgresColumn('text'),
+    document: requiredPostgresColumn('jsonb'),
+    updated_at: requiredPostgresColumn('timestamptz'),
+    revision: requiredPostgresColumn('int4', false, '1')
+  },
   settings: {
     key: requiredPostgresColumn('text'),
     value: requiredPostgresColumn('text'),
@@ -304,6 +327,8 @@ const POSTGRES_REQUIRED_CONSTRAINTS = [
   { table: 'compatibility_results', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'personal_tokens', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'personal_tokens', type: 'UNIQUE', columns: ['token_hash'] },
+  { table: 'user_identities', type: 'PRIMARY KEY', columns: ['id'] },
+  { table: 'user_identities', type: 'UNIQUE', columns: ['provider_id', 'provider_user_id'] },
   { table: 'settings', type: 'PRIMARY KEY', columns: ['key'] },
   { table: 'cluster_nodes', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'segment_jobs', type: 'PRIMARY KEY', columns: ['id'] },
@@ -323,6 +348,7 @@ const POSTGRES_REQUIRED_INDEXES: Readonly<
   node_certificates_node: { table: 'node_certificates', columns: ['node_id'] },
   agent_logs_node_time: { table: 'agent_logs', columns: ['node_id', 'timestamp'] },
   job_logs_job_time: { table: 'job_logs', columns: ['job_id', 'timestamp'] },
+  user_identities_last_seen: { table: 'user_identities', columns: ['updated_at'] },
   audit_events_time: { table: 'audit_events', columns: ['occurred_at'] },
   audit_events_category_time: {
     table: 'audit_events',
@@ -1180,6 +1206,48 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
        WHERE id=$1 AND document->>'revokedAt' IS NULL`,
       [id, revokedAt]
     );
+  }
+
+  async createUserIdentity(value: UserIdentity): Promise<VersionedRecord<UserIdentity>> {
+    const result = await this.#pool.query(
+      `INSERT INTO user_identities
+       (id,provider_id,provider_user_id,document,updated_at,revision)
+       VALUES($1,$2,$3,$4,$5,1) RETURNING revision`,
+      [value.id, value.providerId, value.providerUserId, value, value.lastSeenAt]
+    );
+    return { value, revision: Number(result.rows[0]?.revision) };
+  }
+
+  async listUserIdentities(): Promise<Array<VersionedRecord<UserIdentity>>> {
+    return (
+      await this.#pool.query(
+        'SELECT document,revision FROM user_identities ORDER BY updated_at DESC'
+      )
+    ).rows.map((row) => ({ value: row.document as UserIdentity, revision: Number(row.revision) }));
+  }
+
+  async getUserIdentity(id: string): Promise<VersionedRecord<UserIdentity> | undefined> {
+    const row = (
+      await this.#pool.query('SELECT document,revision FROM user_identities WHERE id=$1', [id])
+    ).rows[0] as { document: UserIdentity; revision: number } | undefined;
+    return row ? { value: row.document, revision: row.revision } : undefined;
+  }
+
+  async compareAndSetUserIdentity(
+    value: UserIdentity,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<UserIdentity>> {
+    const result = await this.#pool.query(
+      `UPDATE user_identities SET document=$1,updated_at=$2,revision=revision+1
+       WHERE id=$3 AND revision=$4 RETURNING revision`,
+      [value, value.lastSeenAt, value.id, expectedRevision]
+    );
+    const revision = result.rows[0]?.revision as number | undefined;
+    if (revision !== undefined) return { applied: true, record: { value, revision } };
+    const current = await this.getUserIdentity(value.id);
+    return current
+      ? { applied: false, reason: 'revision-conflict', current }
+      : { applied: false, reason: 'not-found' };
   }
 
   async putSetting(key: string, value: string): Promise<void> {

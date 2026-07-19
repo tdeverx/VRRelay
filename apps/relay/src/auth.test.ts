@@ -115,8 +115,51 @@ describe('first-run administrator initialization', () => {
     await expect(first.login(passwords[winner]!)).resolves.toMatchObject({
       token: expect.any(String)
     });
-    await expect(first.login(passwords[loser]!)).rejects.toThrow('Invalid administrator password');
+    await expect(first.login(passwords[loser]!)).rejects.toThrow('Invalid recovery password');
     secondRepository.close();
     firstRepository.close();
+  });
+});
+
+describe('unified user grants', () => {
+  it('updates roles with revision protection and preserves the last assigned owner', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'vrrelay-auth-users-'));
+    directories.push(directory);
+    const repository = new SqliteRepository(join(directory, 'state.sqlite3'));
+    await repository.migrate();
+    const now = new Date().toISOString();
+    const created = await repository.createUserIdentity({
+      id: 'identity-1',
+      providerId: 'provider-1',
+      providerUserId: 'jellyfin-1',
+      displayName: 'Alice',
+      roles: ['user'],
+      allowedProfileIds: ['profile-1'],
+      defaultProfileId: 'profile-1',
+      firstSeenAt: now,
+      lastSeenAt: now
+    });
+    const auth = new AuthService(repository);
+    const promoted = await auth.updateUser(created.value.id, created.revision, {
+      roles: ['owner'],
+      allowedProfileIds: ['profile-1'],
+      defaultProfileId: 'profile-1'
+    });
+    expect(promoted.value.roles).toEqual(['owner']);
+    await expect(
+      auth.updateUser(promoted.value.id, promoted.revision, {
+        roles: ['admin'],
+        allowedProfileIds: ['profile-1'],
+        defaultProfileId: 'profile-1'
+      })
+    ).rejects.toThrow('last assigned owner');
+    await expect(
+      auth.updateUser(promoted.value.id, created.revision, {
+        roles: ['owner'],
+        allowedProfileIds: ['profile-1'],
+        defaultProfileId: 'profile-1'
+      })
+    ).rejects.toThrow('changed by another request');
+    repository.close();
   });
 });

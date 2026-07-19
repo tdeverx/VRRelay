@@ -53,6 +53,7 @@ export type SetupStatus = {
 export type AuthSession = {
     csrfToken: string;
     expiresAt: string;
+    user: CurrentUser;
 };
 
 export type FirstRunRequest = {
@@ -61,42 +62,64 @@ export type FirstRunRequest = {
 };
 
 export type LoginRequest = {
-    password: string;
-};
-
-export type PortalLoginRequest = {
+    method: 'recovery';
+} | {
+    method: 'jellyfin';
     username: string;
 };
 
-export type PortalUser = {
+export type UserRole = 'user' | 'operator' | 'admin' | 'owner';
+
+export type CurrentUser = {
     id: string;
-    username: string;
-    providerId: string;
+    displayName: string;
+    authMethod: 'jellyfin' | 'recovery' | 'personal_token';
+    roles: Array<UserRole>;
+    permissions: Array<Scope>;
+    providerId?: string;
 };
 
-export type PortalAuthSession = AuthSession & {
-    user: PortalUser;
-};
-
-export type PortalStatus = {
+export type SignInStatus = {
     configured: boolean;
     providerName?: string;
 };
 
-export type PortalConfiguration = {
+export type SignInConfiguration = {
     providerId: string;
     defaultProfileId: string;
     allowedProfileIds: Array<string>;
 };
 
-export type PortalConfigurationState = {
-    configuration: PortalConfiguration | null;
+export type SignInConfigurationState = {
+    configuration: SignInConfiguration | null;
 };
 
-export type PortalCreateSessionRequest = {
-    source: MediaSourceRef;
-    name?: string;
-    profileId?: string;
+export type UserIdentity = {
+    id: string;
+    providerId: string;
+    providerUserId: string;
+    displayName: string;
+    roles: Array<UserRole>;
+    defaultProfileId?: string;
+    allowedProfileIds: Array<string>;
+    firstSeenAt: string;
+    lastSeenAt: string;
+};
+
+export type UserRecord = {
+    value: UserIdentity;
+    revision: number;
+};
+
+export type UserList = {
+    items: Array<UserRecord>;
+};
+
+export type UpdateUserRequest = {
+    expectedRevision: number;
+    roles: Array<UserRole>;
+    defaultProfileId?: string;
+    allowedProfileIds: Array<string>;
 };
 
 export type AuthenticationMode = 'user_token' | 'api_key' | 'delegated';
@@ -256,7 +279,7 @@ export type ProfileList = {
     items: Array<ProfileRevision>;
 };
 
-export type PortalProfileList = {
+export type CatalogProfileList = {
     defaultProfileId: string;
     items: Array<ProfileRevision>;
 };
@@ -706,7 +729,11 @@ export type LogList = {
     items: Array<AgentLogEntry>;
 };
 
-export type PortalLoginRequestWritable = {
+export type LoginRequestWritable = {
+    method: 'recovery';
+    password: string;
+} | {
+    method: 'jellyfin';
     username: string;
     password: string;
 };
@@ -803,15 +830,15 @@ export type BindingId = string;
 
 export type JobId = string;
 
+export type UserId = string;
+
 export type FirstRun = FirstRunRequest;
 
-export type Login = LoginRequest;
+export type Login = LoginRequestWritable;
 
-export type PortalLogin = PortalLoginRequestWritable;
+export type SignInConfiguration2 = SignInConfiguration;
 
-export type PortalConfiguration2 = PortalConfiguration;
-
-export type CreatePortalSession = PortalCreateSessionRequest;
+export type UpdateUser = UpdateUserRequest;
 
 export type CreateProvider = CreateProviderRequestWritable;
 
@@ -1079,121 +1106,80 @@ export type LogoutResponses = {
 
 export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
 
-export type GetPortalStatusData = {
+export type GetCurrentUserData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/portal/status';
+    url: '/auth/me';
 };
 
-export type GetPortalStatusResponses = {
+export type GetCurrentUserResponses = {
     /**
-     * Public user portal availability
+     * Current browser identity and effective permissions
      */
-    200: PortalStatus;
+    200: CurrentUser;
 };
 
-export type GetPortalStatusResponse = GetPortalStatusResponses[keyof GetPortalStatusResponses];
+export type GetCurrentUserResponse = GetCurrentUserResponses[keyof GetCurrentUserResponses];
 
-export type GetPortalConfigurationData = {
+export type GetSignInStatusData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/portal/configuration';
+    url: '/auth/configuration/status';
 };
 
-export type GetPortalConfigurationResponses = {
+export type GetSignInStatusResponses = {
     /**
-     * Current user portal policy
+     * Interactive Jellyfin sign-in availability
      */
-    200: PortalConfigurationState;
+    200: SignInStatus;
 };
 
-export type GetPortalConfigurationResponse = GetPortalConfigurationResponses[keyof GetPortalConfigurationResponses];
+export type GetSignInStatusResponse = GetSignInStatusResponses[keyof GetSignInStatusResponses];
 
-export type UpdatePortalConfigurationData = {
-    body: PortalConfiguration2;
+export type GetSignInConfigurationData = {
+    body?: never;
     path?: never;
     query?: never;
-    url: '/portal/configuration';
+    url: '/auth/configuration';
 };
 
-export type UpdatePortalConfigurationErrors = {
+export type GetSignInConfigurationResponses = {
+    /**
+     * Current interactive sign-in policy
+     */
+    200: SignInConfigurationState;
+};
+
+export type GetSignInConfigurationResponse = GetSignInConfigurationResponses[keyof GetSignInConfigurationResponses];
+
+export type UpdateSignInConfigurationData = {
+    body: SignInConfiguration2;
+    path?: never;
+    query?: never;
+    url: '/auth/configuration';
+};
+
+export type UpdateSignInConfigurationErrors = {
     /**
      * Request failed
      */
     409: ApiError;
 };
 
-export type UpdatePortalConfigurationError = UpdatePortalConfigurationErrors[keyof UpdatePortalConfigurationErrors];
+export type UpdateSignInConfigurationError = UpdateSignInConfigurationErrors[keyof UpdateSignInConfigurationErrors];
 
-export type UpdatePortalConfigurationResponses = {
+export type UpdateSignInConfigurationResponses = {
     /**
-     * User portal provider and profile policy
+     * Interactive sign-in provider and default profile policy
      */
-    200: PortalConfiguration;
+    200: SignInConfiguration;
 };
 
-export type UpdatePortalConfigurationResponse = UpdatePortalConfigurationResponses[keyof UpdatePortalConfigurationResponses];
+export type UpdateSignInConfigurationResponse = UpdateSignInConfigurationResponses[keyof UpdateSignInConfigurationResponses];
 
-export type LoginPortalUserData = {
-    body: PortalLogin;
-    path?: never;
-    query?: never;
-    url: '/portal/auth/login';
-};
-
-export type LoginPortalUserErrors = {
-    /**
-     * Request failed
-     */
-    401: ApiError;
-};
-
-export type LoginPortalUserError = LoginPortalUserErrors[keyof LoginPortalUserErrors];
-
-export type LoginPortalUserResponses = {
-    /**
-     * Authenticated provider user browser session
-     */
-    200: PortalAuthSession;
-};
-
-export type LoginPortalUserResponse = LoginPortalUserResponses[keyof LoginPortalUserResponses];
-
-export type LogoutPortalUserData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/portal/auth/logout';
-};
-
-export type LogoutPortalUserResponses = {
-    /**
-     * Logged out
-     */
-    204: void;
-};
-
-export type LogoutPortalUserResponse = LogoutPortalUserResponses[keyof LogoutPortalUserResponses];
-
-export type GetPortalUserData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/portal/me';
-};
-
-export type GetPortalUserResponses = {
-    /**
-     * Authenticated provider user
-     */
-    200: PortalUser;
-};
-
-export type GetPortalUserResponse = GetPortalUserResponses[keyof GetPortalUserResponses];
-
-export type BrowsePortalCatalogData = {
+export type BrowseUserCatalogData = {
     body?: never;
     path?: never;
     query?: {
@@ -1203,137 +1189,121 @@ export type BrowsePortalCatalogData = {
         limit?: number;
         offset?: number;
     };
-    url: '/portal/catalog';
+    url: '/catalog';
 };
 
-export type BrowsePortalCatalogResponses = {
+export type BrowseUserCatalogResponses = {
     /**
      * Provider-neutral media page
      */
     200: CatalogPage;
 };
 
-export type BrowsePortalCatalogResponse = BrowsePortalCatalogResponses[keyof BrowsePortalCatalogResponses];
+export type BrowseUserCatalogResponse = BrowseUserCatalogResponses[keyof BrowseUserCatalogResponses];
 
-export type GetPortalItemData = {
+export type GetCatalogItemData = {
     body?: never;
     path: {
         itemId: string;
     };
     query?: never;
-    url: '/portal/items/{itemId}';
+    url: '/catalog/items/{itemId}';
 };
 
-export type GetPortalItemResponses = {
+export type GetCatalogItemResponses = {
     /**
      * Provider-neutral media item
      */
     200: MediaItem;
 };
 
-export type GetPortalItemResponse = GetPortalItemResponses[keyof GetPortalItemResponses];
+export type GetCatalogItemResponse = GetCatalogItemResponses[keyof GetCatalogItemResponses];
 
-export type GetPortalItemImageData = {
+export type GetCatalogItemImageData = {
     body?: never;
     path: {
         itemId: string;
     };
     query?: never;
-    url: '/portal/items/{itemId}/image';
+    url: '/catalog/items/{itemId}/image';
 };
 
-export type GetPortalItemImageErrors = {
+export type GetCatalogItemImageErrors = {
     /**
      * Request failed
      */
     404: ApiError;
 };
 
-export type GetPortalItemImageError = GetPortalItemImageErrors[keyof GetPortalItemImageErrors];
+export type GetCatalogItemImageError = GetCatalogItemImageErrors[keyof GetCatalogItemImageErrors];
 
-export type GetPortalItemImageResponses = {
+export type GetCatalogItemImageResponses = {
     /**
      * Provider artwork for a media item
      */
     200: Blob | File;
 };
 
-export type GetPortalItemImageResponse = GetPortalItemImageResponses[keyof GetPortalItemImageResponses];
+export type GetCatalogItemImageResponse = GetCatalogItemImageResponses[keyof GetCatalogItemImageResponses];
 
-export type ListPortalProfilesData = {
+export type ListCatalogProfilesData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/portal/profiles';
+    url: '/catalog/profiles';
 };
 
-export type ListPortalProfilesResponses = {
+export type ListCatalogProfilesResponses = {
     /**
-     * Profiles available to the authenticated provider user
+     * Profiles available to the authenticated user
      */
-    200: PortalProfileList;
+    200: CatalogProfileList;
 };
 
-export type ListPortalProfilesResponse = ListPortalProfilesResponses[keyof ListPortalProfilesResponses];
+export type ListCatalogProfilesResponse = ListCatalogProfilesResponses[keyof ListCatalogProfilesResponses];
 
-export type ListPortalSessionsData = {
+export type ListUsersData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/portal/sessions';
+    url: '/users';
 };
 
-export type ListPortalSessionsResponses = {
+export type ListUsersResponses = {
     /**
-     * Relay sessions
+     * Persisted Jellyfin identities and grants
      */
-    200: SessionList;
+    200: UserList;
 };
 
-export type ListPortalSessionsResponse = ListPortalSessionsResponses[keyof ListPortalSessionsResponses];
+export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses];
 
-export type CreatePortalSessionData = {
-    body: CreatePortalSession;
-    path?: never;
+export type UpdateUserData = {
+    body: UpdateUser;
+    path: {
+        userId: string;
+    };
     query?: never;
-    url: '/portal/sessions';
+    url: '/users/{userId}';
 };
 
-export type CreatePortalSessionErrors = {
+export type UpdateUserErrors = {
     /**
      * Request failed
      */
     409: ApiError;
 };
 
-export type CreatePortalSessionError = CreatePortalSessionErrors[keyof CreatePortalSessionErrors];
+export type UpdateUserError = UpdateUserErrors[keyof UpdateUserErrors];
 
-export type CreatePortalSessionResponses = {
+export type UpdateUserResponses = {
     /**
-     * Relay session and opaque playback URLs
+     * Persisted Jellyfin identity and revision
      */
-    201: RelaySession;
+    200: UserRecord;
 };
 
-export type CreatePortalSessionResponse = CreatePortalSessionResponses[keyof CreatePortalSessionResponses];
-
-export type DeletePortalSessionData = {
-    body?: never;
-    path: {
-        sessionId: string;
-    };
-    query?: never;
-    url: '/portal/sessions/{sessionId}';
-};
-
-export type DeletePortalSessionResponses = {
-    /**
-     * Session deleted
-     */
-    204: void;
-};
-
-export type DeletePortalSessionResponse = DeletePortalSessionResponses[keyof DeletePortalSessionResponses];
+export type UpdateUserResponse = UpdateUserResponses[keyof UpdateUserResponses];
 
 export type ListProvidersData = {
     body?: never;

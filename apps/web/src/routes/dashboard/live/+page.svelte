@@ -21,6 +21,7 @@
 
   let channels = $state<PublicLiveChannel[]>([]);
   let profiles = $state<ProfileRevision[]>([]);
+  let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
   let loading = $state(true);
   let error = $state('');
   let createOpen = $state(false);
@@ -38,9 +39,12 @@
 
   async function load() {
     try {
+      currentUser = await api.me();
+      const availableProfiles =
+        currentUser.authMethod === 'jellyfin' ? await api.catalogProfiles() : await api.profiles();
       [channels, profiles] = [
         (await api.liveChannels()).items,
-        (await api.profiles()).items.filter((profile) => profile.delivery.playlistType === 'live')
+        availableProfiles.items.filter((profile) => profile.delivery.playlistType === 'live')
       ];
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
@@ -83,7 +87,7 @@
         platformMode: profile.platform
       });
       toast.success('Live playback URL created.');
-      await goto(adminRoute(page.url.pathname));
+      await goto('/dashboard/sessions');
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not create playback URL.');
     }
@@ -129,8 +133,10 @@
 
 <div class="space-y-6 p-4 md:p-6">
   <PageHeader
-    title="Live ingest"
-    description="One authenticated OBS publisher, centrally fanned out to every viewer."
+    title={currentUser?.roles.some((role) => ['operator', 'admin', 'owner'].includes(role))
+      ? 'Live ingest'
+      : 'Stream with OBS'}
+    description="Create a private OBS publisher connection, then share its playback URL."
   >
     {#snippet actions()}<Button onclick={() => (createOpen = true)}
         ><Plus data-icon="inline-start" />New channel</Button

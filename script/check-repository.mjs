@@ -332,7 +332,7 @@ const versionedSources = await Promise.all(
   [
     'apps/relay/src/server.ts',
     'apps/web/src/lib/new-ui/components/AdminShell.svelte',
-    'apps/web/src/routes/dashboard/compatibility/+page.svelte'
+    'apps/web/src/routes/dashboard/settings/profiles/+page.svelte'
   ].map((path) => readFile(resolve(root, path), 'utf8'))
 );
 for (const source of versionedSources) {

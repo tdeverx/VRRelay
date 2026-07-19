@@ -29,7 +29,9 @@ One session/profile/window shares the same encoder jobs and segment cache. A sim
 - The source-worker root owns the provider registry, node-local provider secrets, FFmpeg VOD processing, source proxy, and outbound node agent. It does not construct controller administration, certificate-authority, or live-ingest services.
 - The ingest-origin root owns live ingest, optional normalization, MediaMTX, publisher reconciliation, and its outbound node agent. It does not construct provider or VOD-session services.
 - The edge root owns playback, object restoration, local cache, metrics, and its outbound node agent. It uses a deliberately unavailable provider registry/transcoder boundary and cannot perform provider operations or local transcoding.
-- Standalone intentionally composes all four responsibilities in one process while retaining the same application ports.
+- Standalone intentionally composes all four responsibilities in one process while retaining the
+  same application ports. Local work dispatch stays in-process, so the default install does not
+  start the cluster agent listener or provision cluster certificates.
 
 Standalone mode implements the same ports with SQLite, memory coordination, and the local filesystem. Cluster mode substitutes PostgreSQL, Valkey, and any configured object-store adapter without changing domain models.
 
@@ -61,12 +63,18 @@ Provider deletion is an insert/CAS-backed, resumable two-phase flow. The reposit
 
 Provider setup is a transient credential exchange, not a claim that the controller never sees a password. For a remote binding, the controller may receive the setup request and forward its username/password or API key over the authenticated node channel. It never stores those setup credentials. The selected source worker authenticates with Jellyfin, immediately stages the returned token in its node-local secret backend, then atomically creates provider metadata and the binding.
 
-The user portal uses a delegated provider connection that contains endpoint metadata but no shared
-administrator credential. Each user authenticates through the provider adapter and sees only that
-provider account's catalog. Portal-created VOD sessions are intentionally local in this first
-implementation: the session copies the user's provider token into a session-owned secret, records a
-hashed owner identity in provider-neutral session metadata, and removes the secret with the session.
-Remote per-user credential staging is not inferred from administrator bindings.
+Interactive sign-in uses one selected delegated provider connection that contains endpoint metadata
+but no shared administrator credential. Each Jellyfin user authenticates through the provider
+adapter and sees only that account's catalog. The provider/user identity hash is persisted with
+explicit local roles and profile entitlements. User-created VOD sessions remain local: the session
+copies the user's provider token into a session-owned secret, records the stable owner identity in
+provider-neutral metadata, and removes the secret with the session. Remote per-user credential
+staging is not inferred from administrator bindings.
+
+Jellyfin users may also create OBS channels and live playback sessions. Live-channel ownership is
+assigned from the authenticated principal on the server: users can list, rotate, and delete only
+their own channels, while operators and higher roles receive the system-wide view. The owner field
+is not exposed in public live-channel summaries.
 
 Portal discovery searches only top-level movies and shows. Selecting a show performs account-scoped
 season and episode browsing before a playable source can be selected. Provider artwork is streamed

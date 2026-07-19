@@ -6,6 +6,19 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Made the default standalone install fully in-process: its bundled worker registers and
+  heartbeats without starting the cluster mTLS agent controller or provisioning cluster
+  certificates. Cluster transport remains available to dedicated controller deployments.
+- Refined the unified shell with the account menu at the top of the sidebar, the theme control in
+  the header, grouped per-page Settings navigation, and a role-aware Sessions page for personal or
+  system-wide relay links. Jellyfin users can now create and manage their own isolated OBS live
+  channels and live playback sessions; operators retain the all-channel view.
+- Unified Jellyfin users and administrators in one role-aware `/dashboard/*` experience. Jellyfin
+  identities now receive explicit user, operator, admin, or owner grants; the local password is a
+  recovery owner; browser sessions, CSRF handling, catalog, and session APIs are shared; and the
+  separate portal routes and cookies were removed. Settings and System are now focused hubs for
+  people, connections, profiles, networking, runtime, API access, infrastructure, work, and
+  diagnostics. SQLite and PostgreSQL schema v8 persist identities and revisioned grants.
 - Fixed standalone worker recovery and local relay placement. Resuming the local worker now updates
   it directly instead of attempting delivery through a nonexistent agent connection; local
   provider credentials are advertised as node capabilities; and the relay wizard validates Local

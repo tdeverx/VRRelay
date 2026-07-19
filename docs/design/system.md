@@ -1,18 +1,17 @@
 # Dashboard design systems
 
-## Administrator dashboard
+## Unified dashboard
 
-The Luma administrator dashboard is canonical under `/dashboard/*`. The retired Nova routes and
-the former `/new/*` preview namespace are removed rather than retained as compatibility aliases.
-A separate Luma user portal lives at
-`/portal/*`. The base URL sends a normal session to the dashboard until the user
-portal is configured, then to the portal. The interface uses a shadcn-svelte registry rooted at
+The Luma dashboard is canonical under `/dashboard/*`. Retired interfaces and the former portal are
+removed rather than retained as compatibility aliases. Jellyfin users, operators, administrators,
+and owners share one shell whose navigation is filtered by server-issued permissions. The interface
+uses a shadcn-svelte registry rooted at
 `apps/web/src/lib/new-ui` with neutral colors and charts, Lucide icons, the
 default radius, solid menus with subtle accents, and a self-hosted Inter family
 that is scoped to the application.
 
-The administrator interface deliberately reuses the existing API facade, generated client,
-contracts, domain types, and administrator authentication session. Its UI
+The interface deliberately reuses the existing API facade, generated client, contracts, domain
+types, and unified authentication session. Its UI
 system/light/dark preference lives in `localStorage`. Theme variables are scoped at the document
 root so portalled components inherit them consistently.
 
@@ -22,16 +21,15 @@ it identifies the grouped navigation, header, metrics, controls, responsive data
 views, details, and optional activity rail, but it is not a source for spacing,
 dimensions, typography, colors, shadows, or interaction styling.
 
-The administrator dashboard mirrors Sessions, Library, Live, New Relay, Cluster, Profiles,
-profile creation, Compatibility, System, Settings, Login, and Setup. Below `md`,
-the Sidebar becomes a Sheet and dense tables become Card summaries.
-
-The user portal intentionally has a smaller surface: Jellyfin login, active links first, explicit
-movie/show search, a show-to-season-to-episode picker, provider artwork, administrator-approved
-profile selection, relay-link creation/copying, and removal of the signed-in user's own links.
-Discovery remains empty until a search is submitted. Provider endpoint and profile policy live in
-administrator Settings. The portal does not expose cluster placement, encoding internals, live
-ingest, compatibility evidence, tokens, or runtime configuration.
+The main navigation contains Home for personal Jellyfin discovery, Live and Sessions for every
+signed-in user, and role-gated System and Settings destinations. The account menu occupies the
+sidebar header and the theme control occupies the application header. Sessions shows personal
+relay links and live playback to users and the system-wide view to operators. Settings uses a
+persistent secondary sidebar grouping Overview, People & access, API access, Connections,
+Profiles, Network, and Runtime; below `md`, that sidebar becomes a select control. System remains a
+landing hub for Nodes, Storage & routing, Jobs & cache, and Diagnostics. Dense tables become Card
+summaries on small screens. Long configuration flows use the existing stepper and responsive
+tab/select patterns rather than introducing another navigation model.
 
 All visible text and controls remain code-native. Any future publication
 screenshot must use synthetic neutral fixtures and must not expose credentials,

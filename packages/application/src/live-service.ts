@@ -86,7 +86,8 @@ export class LiveService {
   ) {}
 
   async create(
-    input: CreateLiveChannelRequest
+    input: CreateLiveChannelRequest,
+    context?: { ownerId?: string }
   ): Promise<{ channel: PublicLiveChannel; publisher: PublisherConnectionDetails }> {
     const id = randomUUID();
     const path = `live-${opaqueToken(10)}`;
@@ -96,6 +97,7 @@ export class LiveService {
     const publisher = this.#publisherConnectionDetails(ingestPath, publishToken);
     const channel: LiveChannel = {
       id,
+      ...(context?.ownerId ? { ownerId: context.ownerId } : {}),
       name: input.name,
       path,
       ...(input.normalize ? { ingestPath } : {}),
@@ -263,10 +265,10 @@ export class LiveService {
     };
   }
 
-  async list(): Promise<PublicLiveChannel[]> {
-    return (await this.repository.listLiveChannels()).map((channel) =>
-      publicLiveChannel(sanitizeLiveChannel(channel))
-    );
+  async list(filter?: { ownerId: string }): Promise<PublicLiveChannel[]> {
+    return (await this.repository.listLiveChannels())
+      .filter((channel) => !filter || channel.ownerId === filter.ownerId)
+      .map((channel) => publicLiveChannel(sanitizeLiveChannel(channel)));
   }
 
   async delete(channelId: string): Promise<void> {

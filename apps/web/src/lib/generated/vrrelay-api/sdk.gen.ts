@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client/index.js';
-import type { ActivateBackendData, ActivateBackendResponses, BrowseCatalogData, BrowseCatalogResponses, BrowsePortalCatalogData, BrowsePortalCatalogResponses, CancelSegmentJobData, CancelSegmentJobResponses, ConnectNodeAgentData, ControlSessionData, ControlSessionResponses, CreateLiveChannelData, CreateLiveChannelResponses, CreateNodeJoinTokenData, CreateNodeJoinTokenResponses, CreatePersonalTokenData, CreatePersonalTokenResponses, CreatePortalSessionData, CreatePortalSessionErrors, CreatePortalSessionResponses, CreateProfileRevisionData, CreateProfileRevisionResponses, CreateProviderBindingData, CreateProviderBindingResponses, CreateProviderData, CreateProviderErrors, CreateProviderResponses, CreateSessionData, CreateSessionErrors, CreateSessionResponses, DeleteLiveChannelData, DeleteLiveChannelResponses, DeletePortalSessionData, DeletePortalSessionResponses, DeleteProviderBindingData, DeleteProviderBindingErrors, DeleteProviderBindingResponses, DeleteProviderData, DeleteProviderErrors, DeleteProviderResponses, DeleteSessionData, DeleteSessionResponses, DrainNodeData, DrainNodeResponses, EnrollNodeData, EnrollNodeErrors, EnrollNodeResponses, EvictCacheData, EvictCacheResponses, GetHealthData, GetHealthResponses, GetMediaCapabilitiesData, GetMediaCapabilitiesResponses, GetPortalConfigurationData, GetPortalConfigurationResponses, GetPortalItemData, GetPortalItemImageData, GetPortalItemImageErrors, GetPortalItemImageResponses, GetPortalItemResponses, GetPortalStatusData, GetPortalStatusResponses, GetPortalUserData, GetPortalUserResponses, GetProviderItemData, GetProviderItemErrors, GetProviderItemResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, GetRuntimeConfigurationData, GetRuntimeConfigurationResponses, GetSessionData, GetSessionErrors, GetSessionResponses, GetSetupStatusData, GetSetupStatusResponses, InitializeAdminData, InitializeAdminErrors, InitializeAdminResponses, ListBackendHealthData, ListBackendHealthResponses, ListCacheInventoryData, ListCacheInventoryResponses, ListClusterNodesData, ListClusterNodesResponses, ListCompatibilityResultsData, ListCompatibilityResultsResponses, ListJobLogsData, ListJobLogsResponses, ListLiveChannelsData, ListLiveChannelsResponses, ListNodeLogsData, ListNodeLogsResponses, ListPersonalTokensData, ListPersonalTokensResponses, ListPortalProfilesData, ListPortalProfilesResponses, ListPortalSessionsData, ListPortalSessionsResponses, ListProfilesData, ListProfilesResponses, ListProviderBindingsData, ListProviderBindingsResponses, ListProvidersData, ListProvidersResponses, ListRecentEventsData, ListRecentEventsResponses, ListSegmentJobsData, ListSegmentJobsResponses, ListSessionsData, ListSessionsResponses, LoginData, LoginErrors, LoginPortalUserData, LoginPortalUserErrors, LoginPortalUserResponses, LoginResponses, LogoutData, LogoutErrors, LogoutPortalUserData, LogoutPortalUserResponses, LogoutResponses, PreviewPlacementData, PreviewPlacementResponses, RecordCompatibilityResultData, RecordCompatibilityResultResponses, RemoveNodeData, RemoveNodeResponses, ReplaceLivePublisherData, ReplaceLivePublisherResponses, RestartRuntimeData, RestartRuntimeErrors, RestartRuntimeResponses, RetrySegmentJobData, RetrySegmentJobResponses, RevokeNodeData, RevokeNodeResponses, RevokePersonalTokenData, RevokePersonalTokenResponses, RotateNodeCertificateData, RotateNodeCertificateResponses, StreamEventsData, UpdatePortalConfigurationData, UpdatePortalConfigurationErrors, UpdatePortalConfigurationResponses, UpdateRuntimeConfigurationData, UpdateRuntimeConfigurationErrors, UpdateRuntimeConfigurationResponses, ValidateBackendData, ValidateBackendResponses, ValidateProviderData, ValidateProviderErrors, ValidateProviderResponses, ValidateRuntimeConfigurationData, ValidateRuntimeConfigurationErrors, ValidateRuntimeConfigurationResponses } from './types.gen.js';
+import type { ActivateBackendData, ActivateBackendResponses, BrowseCatalogData, BrowseCatalogResponses, BrowseUserCatalogData, BrowseUserCatalogResponses, CancelSegmentJobData, CancelSegmentJobResponses, ConnectNodeAgentData, ControlSessionData, ControlSessionResponses, CreateLiveChannelData, CreateLiveChannelResponses, CreateNodeJoinTokenData, CreateNodeJoinTokenResponses, CreatePersonalTokenData, CreatePersonalTokenResponses, CreateProfileRevisionData, CreateProfileRevisionResponses, CreateProviderBindingData, CreateProviderBindingResponses, CreateProviderData, CreateProviderErrors, CreateProviderResponses, CreateSessionData, CreateSessionErrors, CreateSessionResponses, DeleteLiveChannelData, DeleteLiveChannelResponses, DeleteProviderBindingData, DeleteProviderBindingErrors, DeleteProviderBindingResponses, DeleteProviderData, DeleteProviderErrors, DeleteProviderResponses, DeleteSessionData, DeleteSessionResponses, DrainNodeData, DrainNodeResponses, EnrollNodeData, EnrollNodeErrors, EnrollNodeResponses, EvictCacheData, EvictCacheResponses, GetCatalogItemData, GetCatalogItemImageData, GetCatalogItemImageErrors, GetCatalogItemImageResponses, GetCatalogItemResponses, GetCurrentUserData, GetCurrentUserResponses, GetHealthData, GetHealthResponses, GetMediaCapabilitiesData, GetMediaCapabilitiesResponses, GetProviderItemData, GetProviderItemErrors, GetProviderItemResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, GetRuntimeConfigurationData, GetRuntimeConfigurationResponses, GetSessionData, GetSessionErrors, GetSessionResponses, GetSetupStatusData, GetSetupStatusResponses, GetSignInConfigurationData, GetSignInConfigurationResponses, GetSignInStatusData, GetSignInStatusResponses, InitializeAdminData, InitializeAdminErrors, InitializeAdminResponses, ListBackendHealthData, ListBackendHealthResponses, ListCacheInventoryData, ListCacheInventoryResponses, ListCatalogProfilesData, ListCatalogProfilesResponses, ListClusterNodesData, ListClusterNodesResponses, ListCompatibilityResultsData, ListCompatibilityResultsResponses, ListJobLogsData, ListJobLogsResponses, ListLiveChannelsData, ListLiveChannelsResponses, ListNodeLogsData, ListNodeLogsResponses, ListPersonalTokensData, ListPersonalTokensResponses, ListProfilesData, ListProfilesResponses, ListProviderBindingsData, ListProviderBindingsResponses, ListProvidersData, ListProvidersResponses, ListRecentEventsData, ListRecentEventsResponses, ListSegmentJobsData, ListSegmentJobsResponses, ListSessionsData, ListSessionsResponses, ListUsersData, ListUsersResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, PreviewPlacementData, PreviewPlacementResponses, RecordCompatibilityResultData, RecordCompatibilityResultResponses, RemoveNodeData, RemoveNodeResponses, ReplaceLivePublisherData, ReplaceLivePublisherResponses, RestartRuntimeData, RestartRuntimeErrors, RestartRuntimeResponses, RetrySegmentJobData, RetrySegmentJobResponses, RevokeNodeData, RevokeNodeResponses, RevokePersonalTokenData, RevokePersonalTokenResponses, RotateNodeCertificateData, RotateNodeCertificateResponses, StreamEventsData, UpdateRuntimeConfigurationData, UpdateRuntimeConfigurationErrors, UpdateRuntimeConfigurationResponses, UpdateSignInConfigurationData, UpdateSignInConfigurationErrors, UpdateSignInConfigurationResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses, ValidateBackendData, ValidateBackendResponses, ValidateProviderData, ValidateProviderErrors, ValidateProviderResponses, ValidateRuntimeConfigurationData, ValidateRuntimeConfigurationErrors, ValidateRuntimeConfigurationResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -100,25 +100,35 @@ export const logout = <ThrowOnError extends boolean = false>(options?: Options<L
     ...options
 });
 
-export const getPortalStatus = <ThrowOnError extends boolean = false>(options?: Options<GetPortalStatusData, ThrowOnError>): RequestResult<GetPortalStatusResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetPortalStatusResponses, unknown, ThrowOnError>({ url: '/portal/status', ...options });
-
-export const getPortalConfiguration = <ThrowOnError extends boolean = false>(options?: Options<GetPortalConfigurationData, ThrowOnError>): RequestResult<GetPortalConfigurationResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetPortalConfigurationResponses, unknown, ThrowOnError>({
+export const getCurrentUser = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentUserData, ThrowOnError>): RequestResult<GetCurrentUserResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetCurrentUserResponses, unknown, ThrowOnError>({
     security: [{
             in: 'cookie',
             name: 'vrrelay_session',
             type: 'apiKey'
         }, { scheme: 'bearer', type: 'http' }],
-    url: '/portal/configuration',
+    url: '/auth/me',
     ...options
 });
 
-export const updatePortalConfiguration = <ThrowOnError extends boolean = false>(options: Options<UpdatePortalConfigurationData, ThrowOnError>): RequestResult<UpdatePortalConfigurationResponses, UpdatePortalConfigurationErrors, ThrowOnError> => (options.client ?? client).put<UpdatePortalConfigurationResponses, UpdatePortalConfigurationErrors, ThrowOnError>({
+export const getSignInStatus = <ThrowOnError extends boolean = false>(options?: Options<GetSignInStatusData, ThrowOnError>): RequestResult<GetSignInStatusResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetSignInStatusResponses, unknown, ThrowOnError>({ url: '/auth/configuration/status', ...options });
+
+export const getSignInConfiguration = <ThrowOnError extends boolean = false>(options?: Options<GetSignInConfigurationData, ThrowOnError>): RequestResult<GetSignInConfigurationResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetSignInConfigurationResponses, unknown, ThrowOnError>({
     security: [{
             in: 'cookie',
             name: 'vrrelay_session',
             type: 'apiKey'
         }, { scheme: 'bearer', type: 'http' }],
-    url: '/portal/configuration',
+    url: '/auth/configuration',
+    ...options
+});
+
+export const updateSignInConfiguration = <ThrowOnError extends boolean = false>(options: Options<UpdateSignInConfigurationData, ThrowOnError>): RequestResult<UpdateSignInConfigurationResponses, UpdateSignInConfigurationErrors, ThrowOnError> => (options.client ?? client).put<UpdateSignInConfigurationResponses, UpdateSignInConfigurationErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/auth/configuration',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -126,107 +136,68 @@ export const updatePortalConfiguration = <ThrowOnError extends boolean = false>(
     }
 });
 
-export const loginPortalUser = <ThrowOnError extends boolean = false>(options: Options<LoginPortalUserData, ThrowOnError>): RequestResult<LoginPortalUserResponses, LoginPortalUserErrors, ThrowOnError> => (options.client ?? client).post<LoginPortalUserResponses, LoginPortalUserErrors, ThrowOnError>({
-    url: '/portal/auth/login',
+export const browseUserCatalog = <ThrowOnError extends boolean = false>(options?: Options<BrowseUserCatalogData, ThrowOnError>): RequestResult<BrowseUserCatalogResponses, unknown, ThrowOnError> => (options?.client ?? client).get<BrowseUserCatalogResponses, unknown, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/catalog',
+    ...options
+});
+
+export const getCatalogItem = <ThrowOnError extends boolean = false>(options: Options<GetCatalogItemData, ThrowOnError>): RequestResult<GetCatalogItemResponses, unknown, ThrowOnError> => (options.client ?? client).get<GetCatalogItemResponses, unknown, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/catalog/items/{itemId}',
+    ...options
+});
+
+export const getCatalogItemImage = <ThrowOnError extends boolean = false>(options: Options<GetCatalogItemImageData, ThrowOnError>): RequestResult<GetCatalogItemImageResponses, GetCatalogItemImageErrors, ThrowOnError> => (options.client ?? client).get<GetCatalogItemImageResponses, GetCatalogItemImageErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/catalog/items/{itemId}/image',
+    ...options
+});
+
+export const listCatalogProfiles = <ThrowOnError extends boolean = false>(options?: Options<ListCatalogProfilesData, ThrowOnError>): RequestResult<ListCatalogProfilesResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListCatalogProfilesResponses, unknown, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/catalog/profiles',
+    ...options
+});
+
+export const listUsers = <ThrowOnError extends boolean = false>(options?: Options<ListUsersData, ThrowOnError>): RequestResult<ListUsersResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListUsersResponses, unknown, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/users',
+    ...options
+});
+
+export const updateUser = <ThrowOnError extends boolean = false>(options: Options<UpdateUserData, ThrowOnError>): RequestResult<UpdateUserResponses, UpdateUserErrors, ThrowOnError> => (options.client ?? client).patch<UpdateUserResponses, UpdateUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/users/{userId}',
     ...options,
     headers: {
         'Content-Type': 'application/json',
         ...options.headers
     }
-});
-
-export const logoutPortalUser = <ThrowOnError extends boolean = false>(options?: Options<LogoutPortalUserData, ThrowOnError>): RequestResult<LogoutPortalUserResponses, unknown, ThrowOnError> => (options?.client ?? client).post<LogoutPortalUserResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/auth/logout',
-    ...options
-});
-
-export const getPortalUser = <ThrowOnError extends boolean = false>(options?: Options<GetPortalUserData, ThrowOnError>): RequestResult<GetPortalUserResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetPortalUserResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/me',
-    ...options
-});
-
-export const browsePortalCatalog = <ThrowOnError extends boolean = false>(options?: Options<BrowsePortalCatalogData, ThrowOnError>): RequestResult<BrowsePortalCatalogResponses, unknown, ThrowOnError> => (options?.client ?? client).get<BrowsePortalCatalogResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/catalog',
-    ...options
-});
-
-export const getPortalItem = <ThrowOnError extends boolean = false>(options: Options<GetPortalItemData, ThrowOnError>): RequestResult<GetPortalItemResponses, unknown, ThrowOnError> => (options.client ?? client).get<GetPortalItemResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/items/{itemId}',
-    ...options
-});
-
-export const getPortalItemImage = <ThrowOnError extends boolean = false>(options: Options<GetPortalItemImageData, ThrowOnError>): RequestResult<GetPortalItemImageResponses, GetPortalItemImageErrors, ThrowOnError> => (options.client ?? client).get<GetPortalItemImageResponses, GetPortalItemImageErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/items/{itemId}/image',
-    ...options
-});
-
-export const listPortalProfiles = <ThrowOnError extends boolean = false>(options?: Options<ListPortalProfilesData, ThrowOnError>): RequestResult<ListPortalProfilesResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListPortalProfilesResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/profiles',
-    ...options
-});
-
-export const listPortalSessions = <ThrowOnError extends boolean = false>(options?: Options<ListPortalSessionsData, ThrowOnError>): RequestResult<ListPortalSessionsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListPortalSessionsResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/sessions',
-    ...options
-});
-
-export const createPortalSession = <ThrowOnError extends boolean = false>(options: Options<CreatePortalSessionData, ThrowOnError>): RequestResult<CreatePortalSessionResponses, CreatePortalSessionErrors, ThrowOnError> => (options.client ?? client).post<CreatePortalSessionResponses, CreatePortalSessionErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/sessions',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const deletePortalSession = <ThrowOnError extends boolean = false>(options: Options<DeletePortalSessionData, ThrowOnError>): RequestResult<DeletePortalSessionResponses, unknown, ThrowOnError> => (options.client ?? client).delete<DeletePortalSessionResponses, unknown, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'vrrelay_user_session',
-            type: 'apiKey'
-        }],
-    url: '/portal/sessions/{sessionId}',
-    ...options
 });
 
 export const listProviders = <ThrowOnError extends boolean = false>(options?: Options<ListProvidersData, ThrowOnError>): RequestResult<ListProvidersResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListProvidersResponses, unknown, ThrowOnError>({
