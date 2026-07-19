@@ -39,7 +39,7 @@
     title="Diagnostics"
     description="Runtime capacity, FFmpeg capabilities, cache and dependency health."
   />
-  <LoadState {loading} {error} label="system details" />
+  <LoadState {loading} {error} label="system details" variant="metrics" />
   {#if !loading && !error && health && capabilities}
     <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Runtime summary">
       {#each [{ title: 'Relay', value: health.status, icon: Activity }, { title: 'Workers', value: `${health.workers.active} / ${health.workers.limit}`, icon: Gauge }, { title: 'Queue', value: String(health.workers.queued), icon: Database }, { title: 'FFmpeg', value: capabilities.ffmpegVersion, icon: Cpu }] as item}

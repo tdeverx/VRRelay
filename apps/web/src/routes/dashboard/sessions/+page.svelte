@@ -63,6 +63,7 @@
     {error}
     empty={!loading && !error && sessions.length === 0}
     label="relay sessions"
+    variant="cards"
   />
   <div class="grid gap-3 md:grid-cols-2">
     {#each sessions as session}

@@ -116,6 +116,7 @@
     {error}
     empty={!loading && !error && profiles.length === 0}
     label="profiles"
+    variant="table"
   />
   {#if !loading && !error && profiles.length}
     <div class="hidden overflow-hidden rounded-xl border md:block">

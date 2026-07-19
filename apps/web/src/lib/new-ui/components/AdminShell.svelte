@@ -34,6 +34,7 @@
 
   let { children, rail }: { children: Snippet; rail?: Snippet } = $props();
   let health = $state<Awaited<ReturnType<typeof api.health>> | null>(null);
+  let healthLoading = $state(true);
   let theme = $state<ThemePreference>('system');
   let sidebarOpen = $state(false);
   let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
@@ -137,7 +138,8 @@
     void api
       .health()
       .then((value) => (health = value))
-      .catch(() => (health = null));
+      .catch(() => (health = null))
+      .finally(() => (healthLoading = false));
     void api
       .me()
       .then((value) => (currentUser = value))
@@ -171,83 +173,105 @@
     <Sidebar.Header>
       <Sidebar.Menu>
         <Sidebar.MenuItem>
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              {#snippet child({ props })}
-                <Sidebar.MenuButton
-                  {...props}
-                  size="lg"
-                  tooltipContent={currentUser?.displayName ?? 'Account'}
-                >
-                  <UserRound />
-                  <span class="min-w-0">
-                    <strong class="block truncate">{currentUser?.displayName ?? 'Account'}</strong>
-                    <small class="text-muted-foreground block truncate">
-                      {currentUser?.authMethod === 'recovery'
-                        ? 'Recovery access'
-                        : currentUser?.roles.join(' · ')}
-                    </small>
-                  </span>
-                </Sidebar.MenuButton>
-              {/snippet}
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content side="right" align="start" class="w-56">
-              <DropdownMenu.Label>{currentUser?.displayName ?? 'Account'}</DropdownMenu.Label>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item onclick={signOut}><LogOut />Sign out</DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
+          {#if !currentUser}
+            <Sidebar.MenuSkeleton showIcon class="h-12" />
+          {:else}
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                {#snippet child({ props })}
+                  <Sidebar.MenuButton
+                    {...props}
+                    size="lg"
+                    tooltipContent={currentUser?.displayName ?? 'Account'}
+                  >
+                    <UserRound />
+                    <span class="min-w-0">
+                      <strong class="block truncate">{currentUser?.displayName ?? 'Account'}</strong
+                      >
+                      <small class="text-muted-foreground block truncate">
+                        {currentUser?.authMethod === 'recovery'
+                          ? 'Recovery access'
+                          : currentUser?.roles.join(' · ')}
+                      </small>
+                    </span>
+                  </Sidebar.MenuButton>
+                {/snippet}
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content side="right" align="start" class="w-56">
+                <DropdownMenu.Label>{currentUser?.displayName ?? 'Account'}</DropdownMenu.Label>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item onclick={signOut}><LogOut />Sign out</DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          {/if}
         </Sidebar.MenuItem>
       </Sidebar.Menu>
     </Sidebar.Header>
     <Sidebar.Content>
-      {#each groups as group}
+      {#if !currentUser}
         <Sidebar.Group>
-          <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel>
           <Sidebar.GroupContent>
             <Sidebar.Menu>
-              {#each group.items as item}
-                <Sidebar.MenuItem>
-                  <Sidebar.MenuButton
-                    isActive={page.url.pathname === item.href ||
-                      (item.href !== routePrefix && page.url.pathname.startsWith(`${item.href}/`))}
-                    tooltipContent={item.label}
-                  >
-                    {#snippet child({ props })}
-                      <a href={item.href} {...props}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </a>
-                    {/snippet}
-                  </Sidebar.MenuButton>
-                </Sidebar.MenuItem>
+              {#each Array(8) as _}
+                <Sidebar.MenuItem><Sidebar.MenuSkeleton showIcon /></Sidebar.MenuItem>
               {/each}
             </Sidebar.Menu>
           </Sidebar.GroupContent>
         </Sidebar.Group>
-      {/each}
+      {:else}
+        {#each groups as group}
+          <Sidebar.Group>
+            <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel>
+            <Sidebar.GroupContent>
+              <Sidebar.Menu>
+                {#each group.items as item}
+                  <Sidebar.MenuItem>
+                    <Sidebar.MenuButton
+                      isActive={page.url.pathname === item.href ||
+                        (item.href !== routePrefix &&
+                          page.url.pathname.startsWith(`${item.href}/`))}
+                      tooltipContent={item.label}
+                    >
+                      {#snippet child({ props })}
+                        <a href={item.href} {...props}>
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </a>
+                      {/snippet}
+                    </Sidebar.MenuButton>
+                  </Sidebar.MenuItem>
+                {/each}
+              </Sidebar.Menu>
+            </Sidebar.GroupContent>
+          </Sidebar.Group>
+        {/each}
+      {/if}
     </Sidebar.Content>
     <Sidebar.Footer>
       <Sidebar.Menu>
         <Sidebar.MenuItem>
-          <div
-            class="flex items-center gap-2 px-3 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-          >
-            <span
-              class="size-2 rounded-full {health?.status === 'ok'
-                ? 'bg-success'
-                : 'bg-destructive'}"
-              aria-hidden="true"
-            ></span>
-            <span class="min-w-0 group-data-[collapsible=icon]:hidden">
-              <strong class="block truncate text-xs">
-                {health?.status === 'ok' ? 'Relay reachable' : 'Relay unavailable'}
-              </strong>
-              <small class="text-muted-foreground block truncate">
-                {health ? `VRRelay v${health.version}` : 'Version unavailable'}
-              </small>
-            </span>
-          </div>
+          {#if healthLoading}
+            <Sidebar.MenuSkeleton showIcon />
+          {:else}
+            <div
+              class="flex items-center gap-2 px-3 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+            >
+              <span
+                class="size-2 rounded-full {health?.status === 'ok'
+                  ? 'bg-success'
+                  : 'bg-destructive'}"
+                aria-hidden="true"
+              ></span>
+              <span class="min-w-0 group-data-[collapsible=icon]:hidden">
+                <strong class="block truncate text-xs">
+                  {health?.status === 'ok' ? 'Relay reachable' : 'Relay unavailable'}
+                </strong>
+                <small class="text-muted-foreground block truncate">
+                  {health ? `VRRelay v${health.version}` : 'Version unavailable'}
+                </small>
+              </span>
+            </div>
+          {/if}
         </Sidebar.MenuItem>
       </Sidebar.Menu>
     </Sidebar.Footer>

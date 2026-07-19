@@ -31,6 +31,12 @@ relay links and live playback to users and the system-wide view to operators. De
 Card summaries on small screens. Long configuration flows use the existing stepper without
 introducing another navigation model.
 
+Loading states preserve the geometry of the content they replace. Shared skeleton variants cover
+media grids, content cards, responsive tables, people/access records, metric dashboards, and form
+workspaces; routes select the closest final anatomy instead of displaying generic placeholder rows.
+Skeletons are non-interactive, hidden from assistive technology, and announced once through a
+labelled live status region.
+
 The sign-in screen presents one Jellyfin username/password form. Submitting the configured local
 recovery password with an empty username enters recovery-owner administration without advertising
 a separate recovery mode in the interface.

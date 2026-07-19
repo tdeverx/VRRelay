@@ -12,6 +12,7 @@
     PublicProviderConnection
   } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import { adminRoute } from '#lib/new-ui/state.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Alert from '#lib/new-ui/components/ui/alert';
@@ -340,7 +341,9 @@
         <span class="text-muted-foreground text-xs">Step {currentStep} of {steps.length}</span>
         <h2 class="text-xl font-semibold">{steps[currentStep - 1]}</h2>
       </div>
-      {#if currentStep === 1}
+      {#if loading}
+        <LoadState loading label="relay setup" variant="form" />
+      {:else if currentStep === 1}
         <div class="space-y-5">
           <div>
             <h2 class="text-xl font-semibold">Choose a source</h2>
@@ -411,29 +414,35 @@
                 ></Field.Field
               >
             </div>{/if}
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {#each selectedSeason ? episodes : results as item}<Card.Root
-                class={selected?.id === item.id || selectedSeries?.id === item.id
-                  ? 'ring-ring ring-2'
-                  : ''}
-                ><Card.Header
-                  ><Card.Title class="line-clamp-1">{item.name}</Card.Title><Card.Description
-                    >{item.productionYear ?? item.kind}</Card.Description
-                  ></Card.Header
-                ><Card.Footer
-                  ><Button
-                    class="w-full"
-                    variant="outline"
-                    disabled={searching}
-                    onclick={() =>
-                      mediaMode === 'shows' && !selectedSeason ? chooseSeries(item) : choose(item)}
-                    >{mediaMode === 'shows' && !selectedSeason
-                      ? 'Choose series'
-                      : 'Select source'}</Button
-                  ></Card.Footer
-                ></Card.Root
-              >{/each}
-          </div>
+          {#if searching}
+            <LoadState loading label="catalog results" variant="cards" count={6} />
+          {:else}
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {#each selectedSeason ? episodes : results as item}<Card.Root
+                  class={selected?.id === item.id || selectedSeries?.id === item.id
+                    ? 'ring-ring ring-2'
+                    : ''}
+                  ><Card.Header
+                    ><Card.Title class="line-clamp-1">{item.name}</Card.Title><Card.Description
+                      >{item.productionYear ?? item.kind}</Card.Description
+                    ></Card.Header
+                  ><Card.Footer
+                    ><Button
+                      class="w-full"
+                      variant="outline"
+                      disabled={searching}
+                      onclick={() =>
+                        mediaMode === 'shows' && !selectedSeason
+                          ? chooseSeries(item)
+                          : choose(item)}
+                      >{mediaMode === 'shows' && !selectedSeason
+                        ? 'Choose series'
+                        : 'Select source'}</Button
+                    ></Card.Footer
+                  ></Card.Root
+                >{/each}
+            </div>
+          {/if}
         </div>
       {:else if currentStep === 2}
         <div class="space-y-5">

@@ -171,6 +171,7 @@
     {error}
     empty={!loading && !error && channels.length === 0}
     label="live channels"
+    variant="table"
   />
   {#if !loading && !error && channels.length}
     <div class="hidden overflow-hidden rounded-xl border md:block">

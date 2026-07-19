@@ -6,6 +6,10 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Reworked loading states across the dashboard with responsive, content-shaped skeletons for
+  discovery media, sessions, live tables, people and access, settings forms, profiles, nodes,
+  infrastructure, jobs, diagnostics, relay creation, and first-run setup. Loading layouts now hold
+  the final page geometry and expose a single useful status announcement to assistive technology.
 - Flattened the role-aware navigation into one shadcn sidebar that collapses to icons, with User
   and Admin groups and direct links to every destination. Removed the redundant Settings/System
   overview pages, secondary Settings rail, and legacy segmented infrastructure/settings switchers.

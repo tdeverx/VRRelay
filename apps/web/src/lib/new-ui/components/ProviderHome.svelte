@@ -5,6 +5,7 @@
   import { toast } from 'svelte-sonner';
   import type { MediaItem, ProfileRevision } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import ProviderArtwork from '#lib/new-ui/components/ProviderArtwork.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
@@ -139,7 +140,19 @@
 </script>
 
 <div class="mx-auto max-w-7xl space-y-8 p-4 md:p-6">
-  {#if recovery}
+  {#if loading}
+    <section class="space-y-5">
+      <div class="space-y-2">
+        <Skeleton class="h-8 w-72 max-w-full" />
+        <Skeleton class="h-4 w-96 max-w-full" />
+      </div>
+      <div class="flex flex-col gap-3 sm:flex-row">
+        <Skeleton class="h-9 flex-1" />
+        <Skeleton class="h-9 w-full sm:w-28" />
+      </div>
+      <LoadState loading label="Jellyfin discovery" variant="media" />
+    </section>
+  {:else if recovery}
     <Card.Root class="max-w-2xl">
       <Card.Header>
         <h1 class="text-lg leading-none font-semibold">Recovery administration</h1>
@@ -186,9 +199,7 @@
       </form>
 
       {#if searching}
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {#each Array(8) as _}<Skeleton class="aspect-[2/3]" />{/each}
-        </div>
+        <LoadState loading label="catalog results" variant="media" count={8} />
       {:else if hasSearched && items.length === 0}
         <Empty.Root>
           <Empty.Header

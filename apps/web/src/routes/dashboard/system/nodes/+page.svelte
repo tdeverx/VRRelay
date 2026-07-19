@@ -134,7 +134,7 @@
       </Button>
     {/snippet}
   </PageHeader>
-  <LoadState {loading} {error} label="nodes" />
+  <LoadState {loading} {error} label="nodes" variant="metrics" />
   {#if !loading && !error}
     <section class="grid gap-4 sm:grid-cols-3" aria-label="Node summary">
       {#each [{ label: 'Nodes', value: nodes.length }, { label: 'Online', value: nodes.filter((node) => node.agent.connected).length }, { label: 'Worker capacity', value: `${nodes.reduce((total, node) => total + node.capabilities.activeWorkers, 0)} / ${nodes.reduce((total, node) => total + node.capabilities.maxWorkers, 0)}` }] as metric}

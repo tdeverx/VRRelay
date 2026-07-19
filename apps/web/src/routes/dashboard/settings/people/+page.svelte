@@ -124,6 +124,8 @@
     {error}
     empty={!loading && !error && users.length === 0}
     label="known users"
+    variant="people"
+    count={2}
   />
   {#if !loading && !error && users.length > 0}
     <div class="grid gap-3">

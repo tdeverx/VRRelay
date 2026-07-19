@@ -1,15 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '#lib/api';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
   import * as Card from '#lib/new-ui/components/ui/card';
 
   let backends = $state<Awaited<ReturnType<typeof api.clusterBackends>>['items']>([]);
   let loading = $state(true);
+  let error = $state('');
   onMount(async () => {
     try {
       backends = (await api.clusterBackends()).items;
+    } catch (reason) {
+      error = reason instanceof Error ? reason.message : 'Could not load infrastructure services.';
     } finally {
       loading = false;
     }
@@ -21,6 +25,7 @@
     title="Storage & routing"
     description="Active infrastructure services and their application state."
   />
+  <LoadState {loading} {error} label="infrastructure services" variant="cards" count={2} />
   <div class="grid gap-3 md:grid-cols-2">
     {#each backends as backend}
       <Card.Root
@@ -35,7 +40,7 @@
         ></Card.Root
       >
     {:else}
-      {#if !loading}<Card.Root
+      {#if !loading && !error}<Card.Root
           ><Card.Header
             ><Card.Title>No services reported</Card.Title><Card.Description
               >The relay has not returned infrastructure health details.</Card.Description

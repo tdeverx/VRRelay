@@ -103,6 +103,44 @@ test('persists theme preference and follows system changes', async ({ page }) =>
   await expect(page.locator('html')).not.toHaveClass(/dark/);
 });
 
+test('matches loading skeletons to each destination without layout overflow', async ({
+  page,
+  isMobile
+}, testInfo) => {
+  await page.route('**/api/v1/**', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+
+  const routes = [
+    ['/dashboard', 'media'],
+    ['/dashboard/live', 'table'],
+    ['/dashboard/sessions', 'cards'],
+    ['/dashboard/settings/people', 'people'],
+    ['/dashboard/settings/connections', 'form'],
+    ['/dashboard/settings/profiles', 'table'],
+    ['/dashboard/system/nodes', 'metrics'],
+    ['/dashboard/system/services', 'cards'],
+    ['/dashboard/system/work', 'cards'],
+    ['/dashboard/system/diagnostics', 'metrics'],
+    ['/dashboard/relay/new', 'form']
+  ] as const;
+
+  for (const [route, variant] of routes) {
+    await page.goto(route);
+    const skeleton = page.locator(`[data-loading-variant="${variant}"]`).first();
+    await expect(skeleton, `${route} should use the ${variant} skeleton`).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+      `${route} skeleton should not overflow horizontally`
+    ).toBe(false);
+    if (!isMobile && route === '/dashboard/settings/connections') {
+      await page.screenshot({ path: testInfo.outputPath('settings-skeleton.png'), fullPage: true });
+    }
+    await expect(skeleton).toBeHidden({ timeout: 10_000 });
+  }
+});
+
 test('renders every administrator route accessibly at review breakpoints', async ({
   page,
   isMobile

@@ -14,6 +14,7 @@
   import { api, isAuthenticatedError } from '#lib/api';
   import { adminRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
+  import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Alert from '#lib/new-ui/components/ui/alert';
@@ -53,6 +54,8 @@
   let busy = $state(false);
   let validatingProviderId = $state('');
   let runtimeValidated = $state(false);
+  let loading = $state(true);
+  let loadError = $state('');
 
   let scopes = $derived(
     Object.entries(scopeState)
@@ -114,7 +117,9 @@
       }
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
-      toast.error(reason instanceof Error ? reason.message : 'Could not load settings.');
+      loadError = reason instanceof Error ? reason.message : 'Could not load settings.';
+    } finally {
+      loading = false;
     }
   });
 
@@ -372,8 +377,9 @@
           ? 'Listen addresses, public URLs and trusted reverse proxies.'
           : 'Node identity, worker capacity, cache policy and service actions.'}
   />
+  <LoadState {loading} error={loadError} label="settings" variant="form" />
 
-  {#if initialSection === 'connections'}
+  {#if !loading && !loadError && initialSection === 'connections'}
     <div class="grid gap-4 xl:grid-cols-2">
       <Card.Root>
         <Card.Header>
@@ -523,7 +529,7 @@
     </div>
   {/if}
 
-  {#if initialSection === 'tokens'}
+  {#if !loading && !loadError && initialSection === 'tokens'}
     <div class="grid gap-4 xl:grid-cols-2">
       <Card.Root
         ><Card.Header
@@ -583,7 +589,7 @@
     </div>
   {/if}
 
-  {#if initialSection === 'network'}
+  {#if !loading && !loadError && initialSection === 'network'}
     {#if runtimeDraft && runtime && !runtime.writable}
       <Card.Root>
         <Card.Header>
@@ -803,7 +809,7 @@
     {/if}
   {/if}
 
-  {#if initialSection === 'runtime'}
+  {#if !loading && !loadError && initialSection === 'runtime'}
     {#if runtimeDraft}<Card.Root
         ><Card.Header
           ><Card.Title>Runtime capacity</Card.Title><Card.Description
