@@ -3,16 +3,24 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import {
+    Activity,
     Antenna,
-    CircleGauge,
+    Database,
     Film,
-    House,
+    HardDrive,
+    KeyRound,
+    Library,
     LogOut,
     Moon,
-    Settings,
+    Network,
+    Plug,
+    ServerCog,
+    SlidersHorizontal,
     Sun,
     SunMoon,
-    UserRound
+    UserRound,
+    UsersRound,
+    Wrench
   } from '@lucide/svelte';
   import { api } from '#lib/api';
   import * as DropdownMenu from '#lib/new-ui/components/ui/dropdown-menu';
@@ -36,28 +44,82 @@
   let isAdmin = $derived(
     Boolean(currentUser?.roles.some((role) => role === 'admin' || role === 'owner'))
   );
+  let isOwner = $derived(Boolean(currentUser?.roles.includes('owner')));
 
   const routePrefix = '/dashboard';
   let groups = $derived(
     [
       {
-        label: 'Use',
+        label: 'User',
         items: [
-          { label: 'Home', href: routePrefix, icon: House, visible: true },
-          { label: 'Live', href: `${routePrefix}/live`, icon: Antenna, visible: true }
+          { label: 'Jellyfin', href: routePrefix, icon: Library, visible: true },
+          { label: 'Live', href: `${routePrefix}/live`, icon: Antenna, visible: true },
+          { label: 'Sessions', href: `${routePrefix}/sessions`, icon: Film, visible: true }
         ]
       },
       {
-        label: 'Manage',
+        label: 'Admin',
         items: [
-          { label: 'Sessions', href: `${routePrefix}/sessions`, icon: Film, visible: true },
           {
-            label: 'System',
-            href: `${routePrefix}/system`,
-            icon: CircleGauge,
+            label: 'People & access',
+            href: `${routePrefix}/settings/people`,
+            icon: UsersRound,
+            visible: isOwner
+          },
+          {
+            label: 'Connections',
+            href: `${routePrefix}/settings/connections`,
+            icon: Plug,
+            visible: isAdmin
+          },
+          {
+            label: 'Profiles',
+            href: `${routePrefix}/settings/profiles`,
+            icon: SlidersHorizontal,
+            visible: isAdmin
+          },
+          {
+            label: 'Network',
+            href: `${routePrefix}/settings/network`,
+            icon: Network,
+            visible: isAdmin
+          },
+          {
+            label: 'Runtime',
+            href: `${routePrefix}/settings/runtime`,
+            icon: Wrench,
+            visible: isAdmin
+          },
+          {
+            label: 'API access',
+            href: `${routePrefix}/settings/api`,
+            icon: KeyRound,
+            visible: isAdmin
+          },
+          {
+            label: 'Nodes',
+            href: `${routePrefix}/system/nodes`,
+            icon: ServerCog,
             visible: isOperator
           },
-          { label: 'Settings', href: `${routePrefix}/settings`, icon: Settings, visible: isAdmin }
+          {
+            label: 'Storage & routing',
+            href: `${routePrefix}/system/services`,
+            icon: Database,
+            visible: isOperator
+          },
+          {
+            label: 'Jobs & cache',
+            href: `${routePrefix}/system/work`,
+            icon: HardDrive,
+            visible: isOperator
+          },
+          {
+            label: 'Diagnostics',
+            href: `${routePrefix}/system/diagnostics`,
+            icon: Activity,
+            visible: isOperator
+          }
         ]
       }
     ]

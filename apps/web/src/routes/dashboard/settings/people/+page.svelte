@@ -211,5 +211,4 @@
       {/each}
     </div>
   {/if}
-  <Button variant="outline" href="/dashboard/settings">Back to settings</Button>
 </div>

@@ -6,6 +6,13 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Flattened the role-aware navigation into one shadcn sidebar that collapses to icons, with User
+  and Admin groups and direct links to every destination. Removed the redundant Settings/System
+  overview pages, secondary Settings rail, and legacy segmented infrastructure/settings switchers.
+- Simplified sign-in to one Jellyfin form; entering the recovery-owner password with no username
+  now provides the discreet local recovery path without exposing a separate login mode.
+- Refined Jellyfin discovery artwork to sit flush with card edges, removed the season poster from
+  the episode chooser, and expanded episode cards with landscape artwork, metadata, and summaries.
 - Made the default standalone install fully in-process: its bundled worker registers and
   heartbeats without starting the cluster mTLS agent controller or provisioning cluster
   certificates. Cluster transport remains available to dedicated controller deployments.

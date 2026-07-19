@@ -11,7 +11,6 @@
   import { Input } from '#lib/new-ui/components/ui/input';
   import { adminRoute } from '#lib/new-ui/state.svelte';
 
-  let method = $state<'jellyfin' | 'recovery'>('jellyfin');
   let username = $state('');
   let password = $state('');
   let pending = $state(false);
@@ -21,7 +20,6 @@
     try {
       const status = await api.signInStatus();
       providerName = status.providerName ?? 'Jellyfin';
-      if (!status.configured) method = 'recovery';
       await api.me();
       await goto('/dashboard');
     } catch {
@@ -33,8 +31,11 @@
     event.preventDefault();
     pending = true;
     try {
+      const loginUsername = username.trim();
       await api.login(
-        method === 'jellyfin' ? { method, username, password } : { method, password }
+        loginUsername
+          ? { method: 'jellyfin', username: loginUsername, password }
+          : { method: 'recovery', password }
       );
       await goto(adminRoute(page.url.pathname));
     } catch (error) {
@@ -50,56 +51,33 @@
     <Card.Header>
       <Card.Title><h1>Welcome back</h1></Card.Title>
       <Card.Description>
-        Sign in with your own Jellyfin account, or use recovery access for administration.
+        Sign in with your {providerName} account.
       </Card.Description>
     </Card.Header>
     <Card.Content>
       <form id="new-login-form" onsubmit={submit}>
         <Field.Group>
-          <div class="grid grid-cols-2 gap-2" role="group" aria-label="Sign-in method">
-            <Button
-              type="button"
-              variant={method === 'jellyfin' ? 'default' : 'outline'}
-              onclick={() => (method = 'jellyfin')}>{providerName}</Button
-            >
-            <Button
-              type="button"
-              variant={method === 'recovery' ? 'default' : 'outline'}
-              onclick={() => (method = 'recovery')}>Recovery owner</Button
-            >
-          </div>
-          {#if method === 'jellyfin'}
-            <Field.Field>
-              <Field.Label for="new-username">Username</Field.Label>
-              <Input id="new-username" bind:value={username} autocomplete="username" autofocus />
-            </Field.Field>
-          {/if}
           <Field.Field>
-            <Field.Label for="new-password">
-              {method === 'jellyfin' ? `${providerName} password` : 'Recovery password'}
-            </Field.Label>
+            <Field.Label for="new-username">Username</Field.Label>
+            <Input id="new-username" bind:value={username} autocomplete="username" autofocus />
+          </Field.Field>
+          <Field.Field>
+            <Field.Label for="new-password">Password</Field.Label>
             <Input
               id="new-password"
               type="password"
               bind:value={password}
               autocomplete="current-password"
-              autofocus={method === 'recovery'}
             />
             <Field.Description>
-              {method === 'jellyfin'
-                ? 'Your password is exchanged for a session token and is never stored.'
-                : 'Recovery access manages the installation but does not provide a personal catalog.'}
+              Your password is exchanged for a session token and is never stored.
             </Field.Description>
           </Field.Field>
         </Field.Group>
       </form>
     </Card.Content>
     <Card.Footer>
-      <Button
-        type="submit"
-        form="new-login-form"
-        disabled={pending || !password || (method === 'jellyfin' && !username)}
-      >
+      <Button type="submit" form="new-login-form" disabled={pending || !password}>
         {#if pending}<LoaderCircle data-icon="inline-start" class="animate-spin" />{:else}<LogIn
             data-icon="inline-start"
           />{/if}

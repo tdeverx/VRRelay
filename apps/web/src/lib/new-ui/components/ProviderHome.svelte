@@ -149,8 +149,8 @@
         </Card.Description>
       </Card.Header>
       <Card.Footer class="gap-2">
-        <Button href="/dashboard/settings">Open settings</Button>
-        <Button href="/dashboard/system" variant="outline">View system health</Button>
+        <Button href="/dashboard/settings/connections">Open settings</Button>
+        <Button href="/dashboard/system/diagnostics" variant="outline">View system health</Button>
       </Card.Footer>
     </Card.Root>
   {:else}
@@ -203,7 +203,7 @@
       {:else if hasSearched}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {#each items as item}
-            <Card.Root class="overflow-hidden">
+            <Card.Root class="overflow-hidden" style="padding-top: 0">
               <ProviderArtwork {item} />
               <Card.Header>
                 <Card.Title>{item.name}</Card.Title>
@@ -250,11 +250,9 @@
     </Dialog.Header>
 
     {#if loadingSeasons}
-      <div class="grid gap-4 sm:grid-cols-[12rem_1fr]">
-        <Skeleton class="aspect-[2/3]" />
-        <div class="space-y-3">
-          {#each Array(4) as _}<Skeleton class="h-24" />{/each}
-        </div>
+      <div class="space-y-3">
+        <Skeleton class="h-9 w-full" />
+        {#each Array(4) as _}<Skeleton class="h-44" />{/each}
       </div>
     {:else if seasons.length === 0}
       <Empty.Root>
@@ -281,48 +279,45 @@
       </Field.Field>
 
       {#if selectedSeason}
-        <div class="grid gap-4 sm:grid-cols-[12rem_1fr]">
-          <div class="space-y-2">
-            <ProviderArtwork item={selectedSeason} />
-            <p class="text-sm font-medium">{selectedSeason.name}</p>
+        {#if loadingEpisodes}
+          <div class="grid gap-4 md:grid-cols-2">
+            {#each Array(4) as _}<Skeleton class="h-64" />{/each}
           </div>
-          {#if loadingEpisodes}
-            <div class="space-y-3">
-              {#each Array(4) as _}<Skeleton class="h-24" />{/each}
-            </div>
-          {:else if episodes.length === 0}
-            <Empty.Root>
-              <Empty.Header><Empty.Title>No episodes found</Empty.Title></Empty.Header>
-            </Empty.Root>
-          {:else}
-            <div class="grid content-start gap-3">
-              {#each episodes as episode}
-                <Card.Root class="overflow-hidden sm:grid sm:grid-cols-[10rem_1fr]">
-                  <ProviderArtwork item={episode} shape="episode" />
-                  <div>
-                    <Card.Header>
-                      <Card.Title class="text-base">
-                        {episode.indexNumber ? `${episode.indexNumber}. ` : ''}{episode.name}
-                      </Card.Title>
-                      <Card.Description
-                        >{episode.seasonName ?? selectedSeason.name}</Card.Description
-                      >
-                    </Card.Header>
-                    <Card.Footer>
-                      <Button
-                        class="w-full"
-                        disabled={creatingItemId === episode.id}
-                        onclick={() => createLink(episode)}
-                      >
-                        <Link2 />{creatingItemId === episode.id ? 'Creating…' : 'Create link'}
-                      </Button>
-                    </Card.Footer>
-                  </div>
-                </Card.Root>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        {:else if episodes.length === 0}
+          <Empty.Root>
+            <Empty.Header><Empty.Title>No episodes found</Empty.Title></Empty.Header>
+          </Empty.Root>
+        {:else}
+          <div class="grid content-start gap-4 md:grid-cols-2">
+            {#each episodes as episode}
+              <Card.Root class="overflow-hidden" style="padding-top: 0">
+                <ProviderArtwork item={episode} shape="episode" />
+                <Card.Header>
+                  <Card.Title class="text-base">
+                    {episode.indexNumber ? `${episode.indexNumber}. ` : ''}{episode.name}
+                  </Card.Title>
+                  <Card.Description>
+                    {[episode.seasonName ?? selectedSeason.name, episode.productionYear]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Card.Description>
+                </Card.Header>
+                <Card.Content class="text-muted-foreground line-clamp-3 text-sm">
+                  {episode.overview ?? 'Ready to create a relay link for this episode.'}
+                </Card.Content>
+                <Card.Footer>
+                  <Button
+                    class="w-full"
+                    disabled={creatingItemId === episode.id}
+                    onclick={() => createLink(episode)}
+                  >
+                    <Link2 />{creatingItemId === episode.id ? 'Creating…' : 'Create link'}
+                  </Button>
+                </Card.Footer>
+              </Card.Root>
+            {/each}
+          </div>
+        {/if}
       {/if}
     {/if}
   </Dialog.Content>

@@ -113,12 +113,10 @@ test('renders every administrator route accessibly at review breakpoints', async
     '/dashboard/live',
     '/dashboard/relay/new',
     '/dashboard/sessions',
-    '/dashboard/system',
     '/dashboard/system/nodes',
     '/dashboard/system/services',
     '/dashboard/system/work',
     '/dashboard/system/diagnostics',
-    '/dashboard/settings',
     '/dashboard/settings/people',
     '/dashboard/settings/connections',
     '/dashboard/settings/profiles',
@@ -195,7 +193,7 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   const freshSettingsPage = await context.newPage();
   await freshSettingsPage.goto('/dashboard/settings/connections');
   await expect(freshSettingsPage).toHaveURL(/\/dashboard\/settings\/connections$/);
-  await expect(freshSettingsPage.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expect(freshSettingsPage.getByRole('heading', { name: 'Connections' })).toBeVisible();
   await expect(
     freshSettingsPage.getByText(administratorProviderName, { exact: true })
   ).toBeVisible();
@@ -224,9 +222,19 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   });
   expect(logoutResponse.ok()).toBe(true);
   await page.goto('/dashboard/login');
-  await page.getByRole('button', { name: /Jellyfin/ }).click();
+  await expect(page.getByRole('button', { name: 'Recovery owner' })).toHaveCount(0);
+  await page.getByLabel('Password').fill(administratorPassword);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Recovery administration' })).toBeVisible();
+  const recoveryCsrf = await page.evaluate(() => sessionStorage.getItem('vrrelay.csrf'));
+  expect(recoveryCsrf).toBeTruthy();
+  const recoveryLogoutResponse = await page.request.post('/api/v1/auth/logout', {
+    headers: { 'X-CSRF-Token': recoveryCsrf! }
+  });
+  expect(recoveryLogoutResponse.ok()).toBe(true);
+  await page.goto('/dashboard/login');
   await page.getByLabel('Username').fill('browser-user');
-  await page.getByLabel(/password/i).fill('browser-password');
+  await page.getByLabel('Password').fill('browser-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 
@@ -246,6 +254,13 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   await expect(series).toBeVisible();
   await expect(discovery.getByText('The Browser Episode')).toHaveCount(0);
   await expect(movie.getByRole('img', { name: 'Browser Movie poster' })).toBeVisible();
+  const movieBounds = await movie.boundingBox();
+  const movieImageBounds = await movie
+    .getByRole('img', { name: 'Browser Movie poster' })
+    .boundingBox();
+  expect(movieBounds).not.toBeNull();
+  expect(movieImageBounds).not.toBeNull();
+  expect(Math.abs(movieBounds!.y - movieImageBounds!.y)).toBeLessThan(1);
   await series.getByRole('button', { name: 'Choose episode' }).click();
   const episodeDialog = freshUserPage.getByRole('dialog');
   await expect(episodeDialog).toBeVisible();
@@ -257,6 +272,14 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   await expect(
     episode.getByRole('img', { name: 'The Browser Episode episode image' })
   ).toBeVisible();
+  await expect(episode.getByText('A browser-test episode with a full description.')).toBeVisible();
+  const episodeBounds = await episode.boundingBox();
+  const episodeImageBounds = await episode
+    .getByRole('img', { name: 'The Browser Episode episode image' })
+    .boundingBox();
+  expect(episodeBounds).not.toBeNull();
+  expect(episodeImageBounds).not.toBeNull();
+  expect(Math.abs(episodeBounds!.y - episodeImageBounds!.y)).toBeLessThan(1);
   await episode.getByRole('button', { name: 'Create link' }).click();
   await expect(episodeDialog).toBeHidden();
   await expect(freshUserPage.getByText('Relay link created and copied.')).toBeVisible();

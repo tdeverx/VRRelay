@@ -21,15 +21,19 @@ it identifies the grouped navigation, header, metrics, controls, responsive data
 views, details, and optional activity rail, but it is not a source for spacing,
 dimensions, typography, colors, shadows, or interaction styling.
 
-The main navigation contains Home for personal Jellyfin discovery, Live and Sessions for every
-signed-in user, and role-gated System and Settings destinations. The account menu occupies the
+The main sidebar follows the shadcn collapsible-to-icons pattern and is split into User and Admin
+groups. User contains Jellyfin discovery, Live, and Sessions. Admin exposes each permitted
+destination directly: People & access, Connections, Profiles, Network, Runtime, API access, Nodes,
+Storage & routing, Jobs & cache, and Diagnostics. There are no secondary navigation rails,
+segmented page switchers, or Settings/System overview routes. The account menu occupies the
 sidebar header and the theme control occupies the application header. Sessions shows personal
-relay links and live playback to users and the system-wide view to operators. Settings uses a
-persistent secondary sidebar grouping Overview, People & access, API access, Connections,
-Profiles, Network, and Runtime; below `md`, that sidebar becomes a select control. System remains a
-landing hub for Nodes, Storage & routing, Jobs & cache, and Diagnostics. Dense tables become Card
-summaries on small screens. Long configuration flows use the existing stepper and responsive
-tab/select patterns rather than introducing another navigation model.
+relay links and live playback to users and the system-wide view to operators. Dense tables become
+Card summaries on small screens. Long configuration flows use the existing stepper without
+introducing another navigation model.
+
+The sign-in screen presents one Jellyfin username/password form. Submitting the configured local
+recovery password with an empty username enters recovery-owner administration without advertising
+a separate recovery mode in the interface.
 
 All visible text and controls remain code-native. Any future publication
 screenshot must use synthetic neutral fixtures and must not expose credentials,

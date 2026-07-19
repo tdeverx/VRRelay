@@ -20,6 +20,7 @@ const jellyfinItems = [
     Id: 'movie-1',
     Name: 'Browser Movie',
     Type: 'Movie',
+    Overview: 'A browser-test movie ready to relay.',
     ProductionYear: 2026,
     ImageTags: { Primary: 'movie-image' }
   },
@@ -27,6 +28,7 @@ const jellyfinItems = [
     Id: 'series-1',
     Name: 'Browser Series',
     Type: 'Series',
+    Overview: 'A browser-test series with episodic relay support.',
     ProductionYear: 2026,
     ImageTags: { Primary: 'series-image' }
   },
@@ -46,6 +48,7 @@ const jellyfinItems = [
     ParentId: 'season-1',
     SeriesName: 'Browser Series',
     SeasonName: 'Season 1',
+    Overview: 'A browser-test episode with a full description.',
     IndexNumber: 2,
     ParentIndexNumber: 1,
     RunTimeTicks: 1_800_000_000,
