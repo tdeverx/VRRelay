@@ -144,18 +144,27 @@ describe('FFmpeg adapter', () => {
     expect(produced).toEqual([7]);
 
     const firstPacketPts = async (path: string) => {
-      const { stdout } = await execFileAsync(process.env.VRRELAY_FFPROBE ?? 'ffprobe', [
-        '-v',
-        'error',
-        '-select_streams',
-        'v:0',
-        '-show_entries',
-        'packet=pts_time',
-        '-of',
-        'csv=p=0',
-        path
+      const { stderr } = await execFileAsync(ffmpegPath, [
+        '-hide_banner',
+        '-loglevel',
+        'info',
+        '-nostdin',
+        '-copyts',
+        '-i',
+        path,
+        '-map',
+        '0:v:0',
+        '-frames:v',
+        '1',
+        '-vf',
+        'showinfo',
+        '-f',
+        'null',
+        '-'
       ]);
-      return Number.parseFloat(stdout.trim().split(/\r?\n/, 1)[0] ?? '');
+      const match = stderr.match(/\bpts_time:([+-]?\d+(?:\.\d+)?)/);
+      expect(match).not.toBeNull();
+      return Number.parseFloat(match?.[1] ?? '');
     };
     expect(await firstPacketPts(producedPath!)).toBeGreaterThanOrEqual(8);
 

@@ -16,7 +16,8 @@ app copies its sealed runtime to `~/Library/Application Support/VRRelay`, instal
 `org.vrrelay.service` as a per-user LaunchAgent, and starts it. The app also registers itself as a
 login item when launched from Applications. **Restart relay** applies the runtime bundled with the
 current app before restarting; **Stop relay** leaves the runtime and retained data installed. The
-menu opens the dashboard in the system browser.
+menu opens the dashboard in the system browser. **Quit VRRelay** waits for the LaunchAgent to stop
+before exiting, so an intentional menu-app quit also ends active streams.
 
 The LaunchAgent supervises both the TypeScript relay and bundled MediaMTX process independently of
 the menu utility and starts at each login. A signal-forwarding runner keeps `service.log` plus eight
@@ -95,7 +96,10 @@ TLS proxy source ranges. The cluster manifest defaults to
 or production secrets are unsafe. Configure the proxy to send one
 `X-VRRelay-Region` value matching the target node labels, or change the header name with
 `VRRELAY_VIEWER_REGION_HEADER`. `VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT` defaults to `60s` and accepts
-15 seconds through 10 minutes. Then run:
+15 seconds through 10 minutes. `VRRELAY_LOG_LEVEL=info` is the normal setting; use `debug` only
+while collecting detailed redacted playback traces. Advanced deployments may also set the standard
+Pino levels `trace`, `warn`, `error`, `fatal`, or `silent` through the environment; the dashboard
+intentionally exposes only Normal and Detailed. Then run:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.cluster.yml up --build
@@ -123,11 +127,11 @@ For generic VMs, `deploy/opentofu` creates no cloud resources. It renders one se
 The Windows package registers the TypeScript relay with WinSW as an automatic service. That relay
 supervises the bundled MediaMTX process, and WinSW restarts the complete stack if either process
 fails. The native tray controller opens the dashboard in the system browser and exposes start,
-stop, and restart through Windows Service Control Manager. It may be closed independently without
-stopping the service. Release packaging supplies validated Node, FFmpeg
+stop, restart, and quit through Windows Service Control Manager. Quit waits for the service to stop
+and remains open if that operation fails. Release packaging supplies validated Node, FFmpeg
 (AMF/QSV/NVENC capable), MediaMTX, and WinSW binaries.
 
-The Windows tray is a dependency-free Win32 C++ executable. It starts for the installing user at sign-in, opens the dashboard in the system browser, and requests UAC elevation only for service start, stop, or restart. The Windows packager builds it from checked-in source with the statically linked MSVC runtime, downloads the immutable FFmpeg 8.1.2 BtbN GPL archive represented in the runtime manifest, verifies runtime hashes before extraction, signs all bundled executables when credentials are available, and records finalized third-party runtime hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
+The Windows tray is a dependency-free Win32 C++ executable. It starts for the installing user at sign-in, opens the dashboard in the system browser, and requests UAC elevation only for service start, stop, restart, or quit. The Windows packager builds it from checked-in source with the statically linked MSVC runtime, downloads the immutable FFmpeg 8.1.2 BtbN GPL archive represented in the runtime manifest, verifies runtime hashes before extraction, signs all bundled executables when credentials are available, and records finalized third-party runtime hashes in `runtime-provenance.json` before building the installer. Set `VRRELAY_RELEASE_PACKAGING=1` for release builds; that mode requires the Windows signing certificate, signing password, and a verified FFmpeg corresponding-source bundle before the installer can be produced.
 
 ## TLS modes
 

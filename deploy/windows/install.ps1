@@ -12,4 +12,4 @@ Copy-Item "$PSScriptRoot\WinSW-x64.exe" "$InstallDir\VRRelay.exe" -Force
 Copy-Item "$PSScriptRoot\..\..\dist\windows\runtime" "$InstallDir\runtime" -Recurse -Force
 & "$InstallDir\VRRelay.exe" install
 & "$InstallDir\VRRelay.exe" start
-Write-Host "VRRelay service installed. Closing the tray application will not stop streams."
+Write-Host "VRRelay service installed. Quitting the tray application stops the relay and active streams."

@@ -15,6 +15,7 @@ describe('relay configuration', () => {
   it('accepts exact interface listeners and normalizes bracketed IPv6 parsing', () => {
     const current = loadConfig({});
     const configuration = {
+      logLevel: 'info' as const,
       listenAddr: '192.0.2.18:8099',
       publicUrl: current.publicUrl,
       adminUrl: current.adminUrl,
@@ -119,6 +120,14 @@ describe('relay configuration', () => {
     expect(() => loadConfig({ VRRELAY_VIEWER_REGION_HEADER: 'invalid header' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '14s' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '601s' })).toThrow();
+  });
+
+  it('accepts normal dashboard levels and standard operational environment levels', () => {
+    expect(loadConfig({ VRRELAY_LOG_LEVEL: 'info' }).logLevel).toBe('info');
+    expect(loadConfig({ VRRELAY_LOG_LEVEL: 'debug' }).logLevel).toBe('debug');
+    expect(loadConfig({ VRRELAY_LOG_LEVEL: 'warn' }).logLevel).toBe('warn');
+    expect(loadConfig({ VRRELAY_LOG_LEVEL: 'silent' }).logLevel).toBe('silent');
+    expect(() => loadConfig({ VRRELAY_LOG_LEVEL: 'verbose' })).toThrow();
   });
 
   it.each(['false', '0', 'no', 'off', ' FALSE '])(

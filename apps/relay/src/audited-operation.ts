@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ApplicationError, type AuditService } from '@vrrelay/application';
-import type { AuditActor, AuditTarget } from '@vrrelay/domain';
+import type { AuditActor, AuditEvent, AuditTarget } from '@vrrelay/domain';
 import type { Principal } from './auth.js';
 
 type AuditContext = Readonly<Record<string, string | number | boolean | null>>;
@@ -38,6 +38,15 @@ export interface AuditedOperationOptions<T> {
     context?: AuditContext;
   };
   onAuditWriteFailure?: (failure: AuditWriteFailure) => void;
+  onAuditRecorded?: (event: AuditEvent) => void;
+}
+
+function reportAuditRecorded<T>(options: AuditedOperationOptions<T>, event: AuditEvent): void {
+  try {
+    options.onAuditRecorded?.(event);
+  } catch {
+    // Diagnostic logging must never affect the authoritative mutation or audit record.
+  }
 }
 
 function auditFailureType(error: unknown): string {
@@ -70,7 +79,7 @@ export async function auditedOperation<T>(
 ): Promise<T> {
   const operationId = randomUUID();
   try {
-    await audit.record({
+    const recorded = await audit.record({
       operationId,
       category: options.category,
       action: options.action,
@@ -79,6 +88,7 @@ export async function auditedOperation<T>(
       ...(options.target ? { target: options.target } : {}),
       ...(options.context ? { context: options.context } : {})
     });
+    reportAuditRecorded(options, recorded);
   } catch (error) {
     reportAuditWriteFailure(options, {
       operationId,
@@ -93,7 +103,7 @@ export async function auditedOperation<T>(
     result = await operation();
   } catch (error) {
     try {
-      await audit.record({
+      const recorded = await audit.record({
         operationId,
         category: options.category,
         action: options.action,
@@ -108,6 +118,7 @@ export async function auditedOperation<T>(
           errorType: auditFailureType(error)
         }
       });
+      reportAuditRecorded(options, recorded);
     } catch (auditError) {
       reportAuditWriteFailure(options, {
         operationId,
@@ -121,7 +132,7 @@ export async function auditedOperation<T>(
   try {
     const success = options.success?.(result);
     const target = success?.target ?? options.target;
-    await audit.record({
+    const recorded = await audit.record({
       operationId,
       category: options.category,
       action: options.action,
@@ -130,6 +141,7 @@ export async function auditedOperation<T>(
       ...(target ? { target } : {}),
       context: { ...options.context, ...success?.context }
     });
+    reportAuditRecorded(options, recorded);
   } catch (error) {
     reportAuditWriteFailure(options, {
       operationId,

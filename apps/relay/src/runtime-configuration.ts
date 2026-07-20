@@ -20,6 +20,7 @@ export function publicRuntimeConfiguration(
 ): PublicRuntimeConfiguration {
   return {
     configuration: {
+      logLevel: config.logLevel === 'debug' || config.logLevel === 'trace' ? 'debug' : 'info',
       listenAddr: config.listenAddr,
       publicUrl: config.publicUrl,
       adminUrl: config.adminUrl,

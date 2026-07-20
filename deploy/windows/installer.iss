@@ -44,8 +44,8 @@ Filename: "{app}\VRRelay.exe"; Parameters: "start"; Flags: runhidden waituntilte
 Filename: "{app}\VRRelayTray.exe"; Description: "Open VRRelay dashboard controls"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{app}\VRRelayTray.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\VRRelay.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\VRRelayTray.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\VRRelay.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 
 [UninstallDelete]

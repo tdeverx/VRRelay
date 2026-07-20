@@ -706,6 +706,7 @@ export type BackendValidationRequest = {
 };
 
 export type RuntimeConfiguration = {
+    logLevel: 'info' | 'debug';
     listenAddr: string;
     publicUrl: string;
     adminUrl: string;

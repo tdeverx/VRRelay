@@ -23,14 +23,30 @@ describe('runtime configuration', () => {
     expect(JSON.stringify(published)).not.toContain('not-returned');
   });
 
+  it('projects advanced environment log levels onto the two dashboard modes', () => {
+    expect(
+      publicRuntimeConfiguration(loadConfig({ VRRELAY_LOG_LEVEL: 'trace' })).configuration.logLevel
+    ).toBe('debug');
+    expect(
+      publicRuntimeConfiguration(loadConfig({ VRRELAY_LOG_LEVEL: 'warn' })).configuration.logLevel
+    ).toBe('info');
+  });
+
   it('atomically persists a validated allowlisted configuration with private permissions', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'vrrelay-runtime-write-'));
     const path = join(directory, 'runtime.json');
     const config = loadConfig({ VRRELAY_RUNTIME_CONFIG: path });
     const configuration = publicRuntimeConfiguration(config).configuration;
     try {
-      await persistRuntimeConfiguration(config, { ...configuration, maxWorkers: 6 });
-      expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ maxWorkers: 6 });
+      await persistRuntimeConfiguration(config, {
+        ...configuration,
+        logLevel: 'debug',
+        maxWorkers: 6
+      });
+      expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+        logLevel: 'debug',
+        maxWorkers: 6
+      });
       if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
       await expect(
         persistRuntimeConfiguration(config, { ...configuration, listenAddr: 'invalid' })

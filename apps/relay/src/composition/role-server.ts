@@ -23,6 +23,7 @@ import {
   meteredReadable,
   redactRequestUrl
 } from '../server.js';
+import { PlaybackRequestTracker, logPlaybackRequest, safeRangeHeader } from '../request-logging.js';
 
 export type RoleServerServices =
   | {
@@ -99,17 +100,42 @@ export function registerRoleInternalRoutes(
         request.headers.range,
         controller.signal
       );
+      request.log.info(
+        {
+          sourceRequest: {
+            event: 'source.range.opened',
+            nodeId: config.nodeId,
+            ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+            range: safeRangeHeader(request.headers.range),
+            status: source.status
+          }
+        },
+        'source range opened'
+      );
       reply.status(source.status);
       for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
-      return reply
-        .type(source.headers['content-type'] ?? 'application/octet-stream')
-        .send(
-          source.sessionId
-            ? meteredReadable(source.stream, (bytes) =>
-                services.sessions.recordIngress(bytes, source.sessionId)
-              )
-            : source.stream
-        );
+      let transferredBytes = 0;
+      const stream = source.sessionId
+        ? meteredReadable(source.stream, (bytes) => {
+            transferredBytes += bytes;
+            services.sessions.recordIngress(bytes, source.sessionId);
+          })
+        : source.stream;
+      stream.once('end', () =>
+        request.log.debug(
+          {
+            sourceRequest: {
+              event: 'source.range.completed',
+              nodeId: config.nodeId,
+              ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+              range: safeRangeHeader(request.headers.range),
+              transferredBytes
+            }
+          },
+          'source range completed'
+        )
+      );
+      return reply.type(source.headers['content-type'] ?? 'application/octet-stream').send(stream);
     });
   }
 
@@ -152,9 +178,10 @@ export async function createRoleServer(
 ): Promise<FastifyInstance> {
   const viewerIdentityKey = randomBytes(32);
   const viewerAffinity = (request: FastifyRequest) => viewerIdentity(request, viewerIdentityKey);
+  const playbackRequests = new PlaybackRequestTracker();
   const app = Fastify({
     logger: {
-      level: process.env.VRRELAY_LOG_LEVEL ?? 'info',
+      level: config.logLevel,
       redact: {
         paths: [
           'req.headers.authorization',
@@ -169,8 +196,7 @@ export async function createRoleServer(
           return {
             method: request.method,
             url: redactRequestUrl(request.url),
-            host: request.hostname,
-            remoteAddress: request.ip
+            host: request.hostname
           };
         }
       }
@@ -287,20 +313,31 @@ export async function createRoleServer(
     app.get('/play/:token/index.m3u8', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
       const token = (request.params as { token: string }).token;
-      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(token, affinity);
       const base = `${config.playbackUrl.replace(/\/$/, '')}/play/${token}/segment`;
       const manifest = await services.sessions.manifest(token, base);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'manifest',
+        nodeId: config.nodeId
+      });
       services.sessions.recordEgress(Buffer.byteLength(manifest), session.id);
       return reply.type('application/vnd.apple.mpegurl').send(manifest);
     });
     app.get('/play/:token/segment/:index.ts', async (request, reply) => {
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
-      const session = await services.sessions.touchViewer(
-        params.token,
-        viewerAffinity(request),
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(params.token, affinity, segmentIndex);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'segment',
+        nodeId: config.nodeId,
         segmentIndex
-      );
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
@@ -318,11 +355,15 @@ export async function createRoleServer(
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
-      const session = await services.sessions.touchViewer(
-        params.token,
-        viewerAffinity(request),
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(params.token, affinity, segmentIndex);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'segment',
+        nodeId: config.nodeId,
         segmentIndex
-      );
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
@@ -339,7 +380,14 @@ export async function createRoleServer(
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = (request.params as { token: string }).token;
-      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(token, affinity);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'init',
+        nodeId: config.nodeId
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.initSegment(token, controller.signal);
@@ -356,7 +404,8 @@ export async function createRoleServer(
     });
     app.get('/play/:token/live.m3u8', async (request, reply) => {
       const token = (request.params as { token: string }).token;
-      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(token, affinity);
       const channel = await services.sessions.resolveLive(token);
       const response = await fetchLiveHlsWithPathRecovery(
         channel.path,
@@ -371,6 +420,12 @@ export async function createRoleServer(
             : `/play/${token}/live/${line}`
         )
         .join('\n');
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'live-manifest',
+        nodeId: config.nodeId
+      });
       services.sessions.recordEgress(Buffer.byteLength(playlist), session.id);
       return reply.type('application/vnd.apple.mpegurl').send(playlist);
     });

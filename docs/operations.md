@@ -16,12 +16,19 @@ but it only exposes redacted dependency category/kind/status fields.
 The native menu/tray controller polls liveness without adding each successful probe to the request
 log. macOS service output rolls at 10 MiB and retains eight historical files beside
 `~/Library/Logs/VRRelay/service.log`; Windows uses the equivalent WinSW rolling-log policy.
+Set **Settings → Runtime → Diagnostic logging** to **Detailed playback tracing** while reproducing
+an issue. Normal mode records client starts, resumes, seeks, routing decisions, source-range opens,
+and accepted or rejected API mutations. Detailed mode additionally records sequential/retried
+segment traffic and range completions. Correlate entries with `reqId`, `sessionId`, and the short
+one-way `clientId`; raw client addresses, user agents, grants, credentials, request bodies, and
+private source URLs are not logged. Return the setting to normal after testing to reduce volume.
 
 An exact LAN listener remains compatible with the loopback-only source-grant boundary: VRRelay
 opens a private companion listener on `127.0.0.1` at the same port for internal media requests.
 Wildcard and loopback listeners already accept that traffic and do not create a second listener.
-On macOS, **Quit Menu App** closes only the menu controller; the LaunchAgent relay continues until
-**Stop Relay** is used.
+On macOS, **Quit VRRelay** stops the LaunchAgent before the menu controller exits. Windows applies
+the same rule to **Quit VRRelay (stops relay)**. If stopping fails or elevation is cancelled, the
+controller remains open and reports the failure instead of leaving a hidden runtime behind.
 
 ## Standalone worker state
 

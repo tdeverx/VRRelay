@@ -856,6 +856,31 @@
                 oninput={() => (runtimeValidated = false)}
               /></Field.Field
             ><Field.Field
+              ><Field.Label>Diagnostic logging</Field.Label><Select.Root
+                type="single"
+                value={runtimeDraft.logLevel}
+                disabled={!runtime?.writable}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  runtimeDraft!.logLevel = value as RuntimeConfiguration['logLevel'];
+                  runtimeValidated = false;
+                }}
+                ><Select.Trigger class="w-full"
+                  >{runtimeDraft.logLevel === 'debug'
+                    ? 'Detailed playback tracing'
+                    : 'Normal operational logging'}</Select.Trigger
+                ><Select.Content
+                  ><Select.Group
+                    ><Select.Item value="info">Normal operational logging</Select.Item><Select.Item
+                      value="debug">Detailed playback tracing</Select.Item
+                    ></Select.Group
+                  ></Select.Content
+                ></Select.Root
+              ><Field.Description
+                >Detailed mode records every redacted playback request. Normal mode still records
+                client starts, seeks, routing decisions, and configuration changes.</Field.Description
+              ></Field.Field
+            ><Field.Field
               ><Field.Label for="cache-limit">Cache limit (GiB)</Field.Label><Input
                 id="cache-limit"
                 type="number"
