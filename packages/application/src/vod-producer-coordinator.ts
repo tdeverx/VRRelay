@@ -258,7 +258,7 @@ export class VodProducerCoordinator {
       active.completion = this.#run(session, profile, producer, active, leaseKey);
       return active;
     } catch (error) {
-      await this.coordination.release(leaseKey, owner);
+      await this.coordination.release(leaseKey, owner).catch(() => undefined);
       throw error;
     } finally {
       signal?.removeEventListener('abort', forwardAbort);
@@ -376,7 +376,10 @@ export class VodProducerCoordinator {
       if (renewal) clearInterval(renewal);
       if (idleCheck) clearInterval(idleCheck);
       if (this.#active.get(session.id) === active) this.#active.delete(session.id);
-      await this.coordination.release(leaseKey, active.owner);
+      // Lease expiry is the recovery boundary when coordination is unavailable.
+      // A best-effort release must never turn a handled producer shutdown into
+      // an unhandled rejection that terminates the source-worker process.
+      await this.coordination.release(leaseKey, active.owner).catch(() => undefined);
       await rm(directory, { recursive: true, force: true });
       if (acquired) this.callbacks.released?.(session.id);
     }

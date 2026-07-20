@@ -12,6 +12,11 @@ export class RedisCoordinationStore implements CoordinationStore {
   constructor(url: string) {
     this.#client = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 2 });
     this.#subscriber = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 2 });
+    // Command promises still reject to their callers and health() reports the
+    // outage. Listeners prevent ioredis from treating expected reconnect errors
+    // as unhandled EventEmitter errors during a Valkey restart.
+    this.#client.on('error', () => undefined);
+    this.#subscriber.on('error', () => undefined);
     this.#subscriber.on('message', (channel: string, payload: string) => {
       for (const listener of this.#listeners.get(channel) ?? []) listener(payload);
     });

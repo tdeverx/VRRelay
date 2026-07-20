@@ -578,7 +578,10 @@ export class SessionJobCoordinator {
     } finally {
       if (renew) clearInterval(renew);
       signal?.removeEventListener('abort', forwardAbort);
-      await coordination?.release(leaseKey, owner);
+      // Expiry safely releases the lease if coordination is temporarily down.
+      // Do not mask the segment outcome or crash a background request while
+      // Valkey is restarting.
+      await coordination?.release(leaseKey, owner).catch(() => undefined);
     }
   }
 

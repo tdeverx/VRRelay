@@ -13,7 +13,8 @@ semantic versioning after the first public release.
   commands/capabilities, in-memory signed-in-user credential transfer, idle shutdown, drain/failover
   fencing, redacted producer APIs, and dashboard status. The UI and documentation now call out that
   this single-producer guarantee covers HLS VOD only; direct fragmented MP4 remains experimental
-  and request-oriented.
+  and request-oriented. Producer and segment lease cleanup now fails safely during a temporary
+  Valkey outage so workers survive coordination-backend restarts and reconnect normally.
 - Added trusted-proxy regional edge selection with stable session affinity, viewer-region → session
   preferred-region → any-edge fallback, edge-scoped grants per manifest, runtime/UI/deployment
   settings for the region header and producer idle timeout, and spoofed-header fallback metrics.
