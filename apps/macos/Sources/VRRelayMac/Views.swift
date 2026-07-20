@@ -17,7 +17,10 @@ struct RelayMenu: View {
         Button("Restart Relay") { service.restart() }
             .disabled(!service.isRunning || service.isChangingState)
         Divider()
-        Button("Quit VRRelay") {
+        Text("The relay keeps running when the menu app quits.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        Button("Quit Menu App") {
             NSApplication.shared.terminate(nil)
         }
     }

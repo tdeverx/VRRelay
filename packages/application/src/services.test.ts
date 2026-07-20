@@ -695,6 +695,7 @@ describe('VOD relay service', () => {
     expect(await service.cacheUsageBytes()).toBe(Buffer.byteLength('segment'));
     service.recordEgress(10, session.id);
     service.recordEgress(20);
+    service.recordIngress(40, session.id);
     expect(service.egressMbps()).toBeCloseTo(0.000000008);
     expect(service.egressMbps(Date.now() + 30_001)).toBe(0);
     const renderedMetrics = await metrics.render();
@@ -727,6 +728,19 @@ describe('VOD relay service', () => {
     );
     repo.injectStopBeforeNextViewerUpdate();
     await service.touchViewer(token, 'viewer-a');
+    const runtime = await service.runtimeStats(await service.get(session.id));
+    expect(runtime).toMatchObject({
+      activity: 'stopped',
+      viewers: 1,
+      viewerWindowSeconds: 30,
+      sourceIngressMbps: expect.any(Number),
+      viewerEgressMbps: expect.any(Number),
+      cacheHits: expect.any(Number),
+      cacheMisses: expect.any(Number)
+    });
+    expect(runtime.sourceIngressMbps).toBeGreaterThan(0);
+    expect(runtime.viewerEgressMbps).toBeGreaterThan(0);
+    expect(runtime.cacheMisses).toBeGreaterThan(0);
     await service.cleanupExpiredCache();
     expect(await metrics.render()).toContain('vrrelay_viewers_active 1');
     expect(await metrics.render()).not.toContain('session=');
@@ -1088,6 +1102,11 @@ describe('VOD relay service', () => {
     await expect(repo.getSession(session.id)).resolves.toMatchObject({ viewers: 1 });
     await edgeA.touchViewer(edgeToken, 'viewer-b');
     await expect(repo.getSession(session.id)).resolves.toMatchObject({ viewers: 2 });
+    await expect(controller.runtimeStats(await controller.get(session.id))).resolves.toMatchObject({
+      activity: 'streaming',
+      viewers: 2,
+      viewerWindowSeconds: 30
+    });
     await expect(edgeB.touchViewer(edgeToken, 'viewer-b')).rejects.toThrow(
       'Edge playback link is not valid for this node'
     );

@@ -70,8 +70,8 @@ requirements.
 > [!NOTE]
 > The one-producer guarantee currently covers HLS VOD, including MPEG-TS and
 > fMP4-segmented HLS. Experimental direct fragmented-MP4 streaming remains
-> request-oriented and can open more than one provider connection; do not use
-> that profile when the upstream single-connection guarantee is required.
+> request-oriented and can open more than one provider pull; do not use that
+> profile when the upstream single-producer guarantee is required.
 
 ## Requirements
 

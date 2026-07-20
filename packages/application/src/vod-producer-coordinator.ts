@@ -58,6 +58,12 @@ export interface VodProducerCallbacks {
     signal: AbortSignal
   ): Promise<VodProducerRequest>;
   released?(sessionId: string): void;
+  published?(
+    sessionId: string,
+    segmentIndex: number,
+    mediaDurationSeconds: number,
+    observedAtMs: number
+  ): void;
 }
 
 export class VodProducerCoordinator {
@@ -337,6 +343,18 @@ export class VodProducerCoordinator {
           await this.coordination.publish(
             'segments',
             JSON.stringify({ contentKey, sessionId: session.id, segmentIndex: segment.index })
+          );
+          this.callbacks.published?.(
+            session.id,
+            segment.index,
+            Math.min(
+              profile.delivery.segmentDuration,
+              Math.max(
+                0,
+                (session.durationSeconds ?? 0) - segment.index * profile.delivery.segmentDuration
+              )
+            ),
+            Date.now()
           );
         },
         active.controller.signal

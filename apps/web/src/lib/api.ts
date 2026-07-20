@@ -12,6 +12,7 @@ import type {
   PublicProviderBinding,
   PublicProviderConnection,
   RelaySession,
+  SessionRuntimeStats,
   SegmentJob,
   VodProducer
 } from '@vrrelay/domain';
@@ -327,7 +328,8 @@ export const api = {
       filters: string[];
       pixelFormats: string[];
     }>(getMediaCapabilities(required)),
-  sessions: () => result<{ items: RelaySession[] }>(listSessions(required)),
+  sessions: () =>
+    result<{ items: RelaySession[]; runtime: SessionRuntimeStats[] }>(listSessions(required)),
   session: (sessionId: string) =>
     result<RelaySession>(getSession({ ...required, path: { sessionId } })),
   controlSession: (sessionId: string, body: SessionControlRequest) =>

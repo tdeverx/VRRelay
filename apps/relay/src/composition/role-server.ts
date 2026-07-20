@@ -24,7 +24,7 @@ import {
   redactRequestUrl
 } from '../server.js';
 
-type RoleServerServices =
+export type RoleServerServices =
   | {
       kind: 'source-worker';
       sessions: SessionService;
@@ -79,6 +79,71 @@ function metricsAuthorized(config: RelayConfig, request: FastifyRequest): boolea
   const expected = Buffer.from(config.metricsToken);
   const actual = Buffer.from(supplied);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+export function registerRoleInternalRoutes(
+  app: FastifyInstance,
+  config: RelayConfig,
+  services: RoleServerServices
+): void {
+  if (services.kind === 'source-worker') {
+    app.get('/internal/source/:token', async (request, reply) => {
+      if (!isLoopbackPeer(request.raw.socket.remoteAddress))
+        return reply.status(403).send({
+          error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
+        });
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
+      const source = await services.sessions.openSourceProxy(
+        (request.params as { token: string }).token,
+        request.headers.range,
+        controller.signal
+      );
+      reply.status(source.status);
+      for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
+      return reply
+        .type(source.headers['content-type'] ?? 'application/octet-stream')
+        .send(
+          source.sessionId
+            ? meteredReadable(source.stream, (bytes) =>
+                services.sessions.recordIngress(bytes, source.sessionId)
+              )
+            : source.stream
+        );
+    });
+  }
+
+  if (services.kind === 'ingest-origin') {
+    app.post('/internal/mediamtx/auth', async (request, reply) => {
+      if (!isInternalPeer(request.raw.socket.remoteAddress))
+        return reply.status(403).send({
+          error: {
+            code: 'forbidden',
+            message: 'Internal MediaMTX auth is private-network or loopback-only'
+          }
+        });
+      const body = mediaMtxAuthRequestSchema.parse(request.body);
+      return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
+        ? reply.status(204).send()
+        : reply.status(401).send();
+    });
+  }
+
+  if (services.kind === 'edge') {
+    app.post('/internal/mediamtx/auth', async (request, reply) => {
+      if (!isInternalPeer(request.raw.socket.remoteAddress))
+        return reply.status(403).send({
+          error: {
+            code: 'forbidden',
+            message: 'Internal MediaMTX auth is private-network or loopback-only'
+          }
+        });
+      const body = mediaMtxAuthRequestSchema.parse(request.body);
+      return authorizeEdgeMediaMtxRead(body, config.mediaMtxReadToken)
+        ? reply.status(204).send()
+        : reply.status(401).send();
+    });
+  }
 }
 
 export async function createRoleServer(
@@ -160,58 +225,9 @@ export async function createRoleServer(
     return reply.type(services.metrics.contentType).send(await services.metrics.render());
   });
 
-  if (services.kind === 'source-worker') {
-    app.get('/internal/source/:token', async (request, reply) => {
-      if (!isLoopbackPeer(request.raw.socket.remoteAddress))
-        return reply.status(403).send({
-          error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
-        });
-      const controller = new AbortController();
-      reply.raw.once('close', () => controller.abort());
-      const source = await services.sessions.openSourceProxy(
-        (request.params as { token: string }).token,
-        request.headers.range,
-        controller.signal
-      );
-      reply.status(source.status);
-      for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
-      return reply
-        .type(source.headers['content-type'] ?? 'application/octet-stream')
-        .send(source.stream);
-    });
-  }
-
-  if (services.kind === 'ingest-origin') {
-    app.post('/internal/mediamtx/auth', async (request, reply) => {
-      if (!isInternalPeer(request.raw.socket.remoteAddress))
-        return reply.status(403).send({
-          error: {
-            code: 'forbidden',
-            message: 'Internal MediaMTX auth is private-network or loopback-only'
-          }
-        });
-      const body = mediaMtxAuthRequestSchema.parse(request.body);
-      return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
-        ? reply.status(204).send()
-        : reply.status(401).send();
-    });
-  }
+  registerRoleInternalRoutes(app, config, services);
 
   if (services.kind === 'edge') {
-    app.post('/internal/mediamtx/auth', async (request, reply) => {
-      if (!isInternalPeer(request.raw.socket.remoteAddress))
-        return reply.status(403).send({
-          error: {
-            code: 'forbidden',
-            message: 'Internal MediaMTX auth is private-network or loopback-only'
-          }
-        });
-      const body = mediaMtxAuthRequestSchema.parse(request.body);
-      return authorizeEdgeMediaMtxRead(body, config.mediaMtxReadToken)
-        ? reply.status(204).send()
-        : reply.status(401).send();
-    });
-
     const configuredLivePaths = new Map<string, Promise<void>>();
     const ensureLiveEdgePath = async (path: string): Promise<void> => {
       if (!config.liveOriginUrl) return;

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -58,11 +58,11 @@ describe('FFmpeg adapter', () => {
       '-f',
       'lavfi',
       '-i',
-      'testsrc2=size=320x180:rate=24:duration=1',
+      'testsrc2=size=320x180:rate=24:duration=10',
       '-f',
       'lavfi',
       '-i',
-      'sine=frequency=440:sample_rate=48000:duration=1',
+      'sine=frequency=440:sample_rate=48000:duration=10',
       '-c:v',
       'libx264',
       '-pix_fmt',
@@ -113,7 +113,7 @@ describe('FFmpeg adapter', () => {
     const transcoder = new FFmpegTranscoder({ ffmpegPath });
     await transcoder.generateSegment(
       {
-        source: { url: source, headers: {}, durationSeconds: 1, fingerprint: 'fixture' },
+        source: { url: source, headers: {}, durationSeconds: 10, fingerprint: 'fixture' },
         profile,
         segmentIndex: 0,
         startSeconds: 0,
@@ -125,20 +125,64 @@ describe('FFmpeg adapter', () => {
     expect((await stat(destination)).size).toBeGreaterThan(0);
 
     const produced: number[] = [];
+    let producedPath: string | undefined;
     await transcoder.produceVod(
       {
-        source: { url: source, headers: {}, durationSeconds: 1, fingerprint: 'fixture' },
+        source: { url: source, headers: {}, durationSeconds: 10, fingerprint: 'fixture' },
         profile,
         startSegmentIndex: 7,
-        startSeconds: 0,
+        startSeconds: 8,
         duration: 1
       },
       join(directory, 'producer'),
       async (segment) => {
         expect((await stat(segment.path)).size).toBeGreaterThan(0);
         produced.push(segment.index);
+        producedPath = segment.path;
       }
     );
     expect(produced).toEqual([7]);
+
+    const firstPacketPts = async (path: string) => {
+      const { stdout } = await execFileAsync(process.env.VRRELAY_FFPROBE ?? 'ffprobe', [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'packet=pts_time',
+        '-of',
+        'csv=p=0',
+        path
+      ]);
+      return Number.parseFloat(stdout.trim().split(/\r?\n/, 1)[0] ?? '');
+    };
+    expect(await firstPacketPts(producedPath!)).toBeGreaterThanOrEqual(8);
+
+    const fmp4Directory = join(directory, 'producer-fmp4');
+    let fmp4Segment: { path: string; initPath?: string } | undefined;
+    await transcoder.produceVod(
+      {
+        source: { url: source, headers: {}, durationSeconds: 10, fingerprint: 'fixture' },
+        profile: {
+          ...profile,
+          delivery: { ...profile.delivery, container: 'mp4', segmentType: 'fmp4' }
+        },
+        startSegmentIndex: 9,
+        startSeconds: 8,
+        duration: 1
+      },
+      fmp4Directory,
+      async (segment) => {
+        fmp4Segment = segment;
+      }
+    );
+    expect(fmp4Segment?.initPath).toBeDefined();
+    const joinedFmp4 = join(directory, 'joined.mp4');
+    await writeFile(
+      joinedFmp4,
+      Buffer.concat([await readFile(fmp4Segment!.initPath!), await readFile(fmp4Segment!.path)])
+    );
+    expect(await firstPacketPts(joinedFmp4)).toBeGreaterThanOrEqual(8);
   }, 20_000);
 });

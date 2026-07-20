@@ -575,7 +575,7 @@ describe('unified Jellyfin user experience', () => {
       url: '/api/v1/sessions',
       headers: { cookie: bob.cookie }
     });
-    expect(bobSessions.json()).toEqual({ items: [] });
+    expect(bobSessions.json()).toEqual({ items: [], runtime: [] });
     expect(
       (
         await app.inject({

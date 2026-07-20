@@ -17,6 +17,12 @@ The native menu/tray controller polls liveness without adding each successful pr
 log. macOS service output rolls at 10 MiB and retains eight historical files beside
 `~/Library/Logs/VRRelay/service.log`; Windows uses the equivalent WinSW rolling-log policy.
 
+An exact LAN listener remains compatible with the loopback-only source-grant boundary: VRRelay
+opens a private companion listener on `127.0.0.1` at the same port for internal media requests.
+Wildcard and loopback listeners already accept that traffic and do not create a second listener.
+On macOS, **Quit Menu App** closes only the menu controller; the LaunchAgent relay continues until
+**Stop Relay** is used.
+
 ## Standalone worker state
 
 The standalone node is the local source worker and does not start or connect back to a cluster
@@ -44,7 +50,7 @@ After controller restart, sessions and queued jobs remain in PostgreSQL. Expired
 
 ## Metrics and privacy
 
-Set a dedicated 32-character-or-longer `VRRELAY_METRICS_TOKEN`. Viewer counts are estimates: VRRelay HMACs IP/user-agent pairs with an installation-local salt and expires activity after 30 seconds. Relay byte counters are exact.
+Set a dedicated 32-character-or-longer `VRRELAY_METRICS_TOKEN`. Viewer counts are estimates: VRRelay HMACs IP/user-agent pairs with an installation-local salt and expires activity after 30 seconds. Relay byte counters are exact. The Sessions dashboard combines those estimates with short-lived per-node source ingress, viewer egress, producer throughput, and cache snapshots; it does not persist viewer identities or add session IDs to metrics labels.
 
 ## Node and job logs
 

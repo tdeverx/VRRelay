@@ -29,6 +29,12 @@ the supervisor opts into exit-based restart with `VRRELAY_RESTART_MODE=exit`.
 
 Node capability responses report cache usage in bytes, the configured cache limit when present, and `egressMbps` as the trailing 30-second average of media payload bytes actually consumed by clients. Viewer counts remain explicitly estimated; cumulative media byte counters are exact.
 
+`GET /api/v1/sessions` returns both the authorized session list and a matching array of short-lived
+runtime snapshots. These snapshots expose estimated 30-second viewers, derived activity,
+producer/window state, transcode realtime factor, source ingress, viewer egress, and delivery-cache
+counts. They contain no client identity, source URL, provider credential, or unbounded Prometheus
+label and expire naturally when a node stops reporting.
+
 `GET /api/v1/vod-producers` gives administrators a redacted list of durable producer ownership,
 generation, state, playback window, demand age, and failure data. `GET
 /api/v1/vod-producers/{sessionId}` applies the same session ownership rules as session detail. No

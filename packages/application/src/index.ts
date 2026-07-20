@@ -63,6 +63,8 @@ export interface SourceResponse {
   stream: Readable;
   status: number;
   headers: Record<string, string>;
+  /** Present only for the relay's opaque loopback source proxy. */
+  sessionId?: string;
 }
 
 export interface PlaybackEvent {
