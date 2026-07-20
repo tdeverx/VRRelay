@@ -59,7 +59,7 @@ import {
 } from '@vrrelay/contracts';
 import { isPrivateAddress, validateProviderUrl } from '@vrrelay/adapters';
 import { requiresSetupToken, validateRuntimeConfiguration, type RelayConfig } from './config.js';
-import { publicProviderBinding, type ClusterNode } from '@vrrelay/domain';
+import { publicProviderBinding, type AuditEvent, type ClusterNode } from '@vrrelay/domain';
 import { AuthService, type Principal } from './auth.js';
 import type { AgentController } from './agent-transport.js';
 import type { BackendService } from './backend-service.js';
@@ -73,6 +73,7 @@ import {
   type AuditedOperationOptions,
   type AuditWriteFailure
 } from './audited-operation.js';
+import { PlaybackRequestTracker, logPlaybackRequest, safeRangeHeader } from './request-logging.js';
 
 export { auditActor, auditedOperation } from './audited-operation.js';
 
@@ -154,17 +155,42 @@ export function registerStandaloneInternalRoutes(
       request.headers.range,
       controller.signal
     );
+    request.log.info(
+      {
+        sourceRequest: {
+          event: 'source.range.opened',
+          nodeId: config.nodeId,
+          ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+          range: safeRangeHeader(request.headers.range),
+          status: source.status
+        }
+      },
+      'source range opened'
+    );
     reply.status(source.status);
     for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
-    return reply
-      .type(source.headers['content-type'] ?? 'application/octet-stream')
-      .send(
-        source.sessionId
-          ? meteredReadable(source.stream, (bytes) =>
-              services.sessions.recordIngress(bytes, source.sessionId)
-            )
-          : source.stream
-      );
+    let transferredBytes = 0;
+    const stream = source.sessionId
+      ? meteredReadable(source.stream, (bytes) => {
+          transferredBytes += bytes;
+          services.sessions.recordIngress(bytes, source.sessionId);
+        })
+      : source.stream;
+    stream.once('end', () =>
+      request.log.debug(
+        {
+          sourceRequest: {
+            event: 'source.range.completed',
+            nodeId: config.nodeId,
+            ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+            range: safeRangeHeader(request.headers.range),
+            transferredBytes
+          }
+        },
+        'source range completed'
+      )
+    );
+    return reply.type(source.headers['content-type'] ?? 'application/octet-stream').send(stream);
   });
 }
 
@@ -365,6 +391,24 @@ function reportAuditWriteFailure(request: FastifyRequest, failure: AuditWriteFai
   request.log.error({ audit: failure }, 'durable audit outcome could not be written');
 }
 
+function reportClientChange(request: FastifyRequest, event: AuditEvent): void {
+  request.log.info(
+    {
+      clientChange: {
+        event: 'client.change',
+        operationId: event.operationId,
+        category: event.category,
+        action: event.action,
+        outcome: event.outcome,
+        actor: event.actor,
+        ...(event.target ? { target: event.target } : {}),
+        context: event.context
+      }
+    },
+    'client change recorded'
+  );
+}
+
 function tokenFromPath(request: FastifyRequest): string {
   return (request.params as { token: string }).token;
 }
@@ -514,7 +558,7 @@ export async function createServer(
       disableRequestLogging: (request) => request.url.split('?', 1)[0] === '/api/v1/health'
     }),
     logger: {
-      level: process.env.VRRELAY_LOG_LEVEL ?? 'info',
+      level: config.logLevel,
       redact: {
         paths: [
           'req.headers.authorization',
@@ -532,8 +576,7 @@ export async function createServer(
           return {
             method: request.method,
             url: redactRequestUrl(request.url),
-            host: request.hostname,
-            remoteAddress: request.ip
+            host: request.hostname
           };
         }
       }
@@ -546,6 +589,25 @@ export async function createServer(
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID()
   });
+  app.addHook('onResponse', (request, reply, done) => {
+    if (
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) &&
+      request.url.split('?', 1)[0]?.startsWith('/api/v1/')
+    )
+      request.log.info(
+        {
+          clientRequest: {
+            event: 'client.mutation.completed',
+            method: request.method,
+            url: redactRequestUrl(request.url),
+            status: reply.statusCode,
+            outcome: reply.statusCode < 400 ? 'accepted' : 'rejected'
+          }
+        },
+        'client mutation completed'
+      );
+    done();
+  });
   const isPlacementNodeConnected = placementNodeConnectivity(
     surface,
     config.nodeId,
@@ -556,6 +618,7 @@ export async function createServer(
   const isTrustedRegionPeer = compileProxyTrust(config.trustedProxyCidrs);
   const viewerIdentityKey = randomBytes(32);
   const viewerAffinity = (request: FastifyRequest) => viewerIdentity(request, viewerIdentityKey);
+  const playbackRequests = new PlaybackRequestTracker();
   const viewerRegion = async (request: FastifyRequest) => {
     if (request.headers[config.viewerRegionHeader] === undefined) return undefined;
     const regions = [...new Set((await services.cluster.list()).map((node) => node.region))];
@@ -712,7 +775,7 @@ export async function createServer(
   const auditAs = <T>(
     request: FastifyRequest,
     principal: Principal,
-    options: Omit<AuditedOperationOptions<T>, 'actor' | 'onAuditWriteFailure'>,
+    options: Omit<AuditedOperationOptions<T>, 'actor' | 'onAuditWriteFailure' | 'onAuditRecorded'>,
     operation: () => Promise<T>
   ) =>
     auditedOperation(
@@ -720,7 +783,8 @@ export async function createServer(
       {
         ...options,
         actor: auditActor(principal),
-        onAuditWriteFailure: (failure) => reportAuditWriteFailure(request, failure)
+        onAuditWriteFailure: (failure) => reportAuditWriteFailure(request, failure),
+        onAuditRecorded: (event) => reportClientChange(request, event)
       },
       operation
     );
@@ -1123,6 +1187,7 @@ export async function createServer(
           action: 'node.enroll',
           actor: { type: 'node' },
           onAuditWriteFailure: (failure) => reportAuditWriteFailure(request, failure),
+          onAuditRecorded: (event) => reportClientChange(request, event),
           success: (enrollment) => ({
             target: { type: 'node', id: enrollment.node.id },
             context: {
@@ -1760,12 +1825,10 @@ export async function createServer(
   app.get('/play/:token/index.m3u8', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const token = tokenFromPath(request);
-    const session = await services.sessions.touchViewer(token, viewerAffinity(request));
-    const route = await services.cluster.selectEdge(
-      session.id,
-      session.preferredRegion,
-      await viewerRegion(request)
-    );
+    const affinity = viewerAffinity(request);
+    const session = await services.sessions.touchViewer(token, affinity);
+    const region = await viewerRegion(request);
+    const route = await services.cluster.selectEdge(session.id, session.preferredRegion, region);
     if (surface === 'controller' && (!route || route.nodeId === config.nodeId))
       throw new ApplicationError(
         'edge_unavailable',
@@ -1780,6 +1843,14 @@ export async function createServer(
       ? `${route.publicUrl.replace(/\/$/, '')}/play/${edgeToken}/segment`
       : undefined;
     const manifest = await services.sessions.manifest(token, base);
+    logPlaybackRequest(request.log, playbackRequests, {
+      sessionId: session.id,
+      clientAffinity: affinity,
+      resource: 'manifest',
+      nodeId: config.nodeId,
+      ...(region ? { viewerRegion: region } : {}),
+      ...(route ? { selectedEdgeNodeId: route.nodeId } : {})
+    });
     services.sessions.recordEgress(Buffer.byteLength(manifest), session.id);
     return reply.type('application/vnd.apple.mpegurl').send(manifest);
   });
@@ -1787,11 +1858,15 @@ export async function createServer(
     app.get('/play/:token/segment/:index.ts', async (request, reply) => {
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
-      const session = await services.sessions.touchViewer(
-        params.token,
-        viewerAffinity(request),
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(params.token, affinity, segmentIndex);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'segment',
+        nodeId: config.nodeId,
         segmentIndex
-      );
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
@@ -1809,11 +1884,15 @@ export async function createServer(
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
-      const session = await services.sessions.touchViewer(
-        params.token,
-        viewerAffinity(request),
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(params.token, affinity, segmentIndex);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'segment',
+        nodeId: config.nodeId,
         segmentIndex
-      );
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
@@ -1830,7 +1909,14 @@ export async function createServer(
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = tokenFromPath(request);
-      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(token, affinity);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'init',
+        nodeId: config.nodeId
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.initSegment(token, controller.signal);
@@ -1847,7 +1933,14 @@ export async function createServer(
     });
     app.get('/play/:token/stream.mp4', async (request, reply) => {
       const token = tokenFromPath(request);
-      const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+      const affinity = viewerAffinity(request);
+      const session = await services.sessions.touchViewer(token, affinity);
+      logPlaybackRequest(request.log, playbackRequests, {
+        sessionId: session.id,
+        clientAffinity: affinity,
+        resource: 'stream',
+        nodeId: config.nodeId
+      });
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       reply.raw.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
@@ -1863,15 +1956,22 @@ export async function createServer(
   }
   app.get('/play/:token/live.m3u8', async (request, reply) => {
     const token = tokenFromPath(request);
-    const session = await services.sessions.touchViewer(token, viewerAffinity(request));
+    const affinity = viewerAffinity(request);
+    const session = await services.sessions.touchViewer(token, affinity);
     const query = request.query as { edge?: string };
+    let region: string | undefined;
     if (surface === 'controller' || query.edge !== '1') {
-      const route = await services.cluster.selectEdge(
-        session.id,
-        session.preferredRegion,
-        await viewerRegion(request)
-      );
+      region = await viewerRegion(request);
+      const route = await services.cluster.selectEdge(session.id, session.preferredRegion, region);
       if (route && route.nodeId !== config.nodeId) {
+        logPlaybackRequest(request.log, playbackRequests, {
+          sessionId: session.id,
+          clientAffinity: affinity,
+          resource: 'live-manifest',
+          nodeId: config.nodeId,
+          ...(region ? { viewerRegion: region } : {}),
+          selectedEdgeNodeId: route.nodeId
+        });
         const edgeToken = await services.sessions.createEdgePlaybackGrant(token, route.nodeId);
         const target = `${route.publicUrl.replace(/\/$/, '')}/play/${edgeToken}/live.m3u8?edge=1`;
         const redirect = `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=8000000\n${target}\n`;
@@ -1899,6 +1999,13 @@ export async function createServer(
           : `/play/${token}/live/${line}`
       )
       .join('\n');
+    logPlaybackRequest(request.log, playbackRequests, {
+      sessionId: session.id,
+      clientAffinity: affinity,
+      resource: 'live-manifest',
+      nodeId: config.nodeId,
+      ...(region ? { viewerRegion: region } : {})
+    });
     services.sessions.recordEgress(Buffer.byteLength(playlist), session.id);
     return reply.type('application/vnd.apple.mpegurl').send(playlist);
   });

@@ -105,6 +105,9 @@ const ConfigSchema = z
     applicationVersion: z.string().regex(SEMANTIC_VERSION_PATTERN).default(APPLICATION_VERSION),
     runtimeConfigPath: z.string().min(1).optional(),
     restartMode: z.enum(['none', 'exit']).default('none'),
+    logLevel: z
+      .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
+      .default('info'),
     listenAddr: z.string().default('127.0.0.1:8099'),
     publicUrl: serviceUrl.default('http://127.0.0.1:8099'),
     adminUrl: serviceUrl.default('http://127.0.0.1:8099'),
@@ -345,6 +348,7 @@ export function loadConfig(environment = process.env): RelayConfig {
     applicationVersion: environment.VRRELAY_VERSION,
     runtimeConfigPath,
     restartMode: environment.VRRELAY_RESTART_MODE,
+    logLevel: environment.VRRELAY_LOG_LEVEL ?? runtime?.logLevel,
     listenAddr: environment.VRRELAY_LISTEN_ADDR ?? runtime?.listenAddr,
     publicUrl,
     adminUrl:

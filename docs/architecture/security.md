@@ -47,7 +47,7 @@ result to the actual HTTP/TLS socket while preserving the approved hostname for
 Host and TLS verification. Provider redirects are never followed and
 authorization is never forwarded to a redirect target.
 
-Jellyfin authorization headers are not placed in FFmpeg arguments. The relay creates a short-lived, opaque loopback source grant; FFmpeg reads that internal URL while Node performs the authenticated upstream request. API responses and logs never expose the source URL, secret reference, token, internal path, or FFmpeg arguments. Structured request logging redacts playback and internal source grants from URL paths.
+Jellyfin authorization headers are not placed in FFmpeg arguments. The relay creates a short-lived, opaque loopback source grant; FFmpeg reads that internal URL while Node performs the authenticated upstream request. API responses and logs never expose the source URL, secret reference, token, internal path, or FFmpeg arguments. Structured request logging redacts playback and internal source grants from URL paths, omits raw client addresses and user agents, and correlates playback with short one-way client trace IDs. Mutation logs contain only the already-redacted durable audit projection and never serialize request bodies.
 
 Quest-facing playback requires a publicly trusted HTTPS certificate. Compose includes an optional Caddy ACME mode; manual-certificate and external reverse-proxy modes are also supported. The relay and agent WebSocket must receive the correct proxy headers and WebSocket upgrade handling, and internal source routes must never be exposed separately.
 

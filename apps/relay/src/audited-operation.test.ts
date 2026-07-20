@@ -25,12 +25,16 @@ const options = {
 describe('auditedOperation', () => {
   it('writes correlated attempt and success records around a mutation', async () => {
     const events: AuditEvent[] = [];
-    const result = await auditedOperation(recorder(events), options, async () => ({
-      id: 'token-1'
-    }));
+    const recorded: AuditEvent[] = [];
+    const result = await auditedOperation(
+      recorder(events),
+      { ...options, onAuditRecorded: (event) => recorded.push(event) },
+      async () => ({ id: 'token-1' })
+    );
 
     expect(result).toEqual({ id: 'token-1' });
     expect(events.map(({ outcome }) => outcome)).toEqual(['attempt', 'success']);
+    expect(recorded.map(({ outcome }) => outcome)).toEqual(['attempt', 'success']);
     expect(new Set(events.map(({ operationId }) => operationId)).size).toBe(1);
   });
 

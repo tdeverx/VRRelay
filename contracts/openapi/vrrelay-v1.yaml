@@ -2049,6 +2049,7 @@ components:
       type: object
       required:
         [
+          logLevel,
           listenAddr,
           publicUrl,
           adminUrl,
@@ -2064,6 +2065,7 @@ components:
           nodeRegion
         ]
       properties:
+        logLevel: { type: string, enum: [info, debug], default: info }
         listenAddr: { type: string, minLength: 3, maxLength: 260 }
         publicUrl: { type: string, format: uri }
         adminUrl: { type: string, format: uri }

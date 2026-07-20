@@ -39,9 +39,11 @@ final class RelayService {
     static let shared = RelayService()
     private let logger = Logger(subsystem: "org.vrrelay.app", category: "relay")
     private var monitor: Timer?
+    private var quitRequested = false
 
     var isRunning = false
     var isChangingState = false
+    private(set) var terminationAllowed = false
     var statusMessage = "Checking service…"
     var dashboardURL: URL {
         let configurationURL = FileManager.default.homeDirectoryForCurrentUser
@@ -70,6 +72,22 @@ final class RelayService {
     func start() { perform(.recovery, pendingMessage: "Starting background service…") }
     func stop() { perform(.stop, pendingMessage: "Stopping background service…") }
     func restart() { perform(.restart, pendingMessage: "Restarting background service…") }
+    func quit() {
+        quitRequested = true
+        guard !isChangingState else {
+            statusMessage = "Waiting to stop relay before quitting…"
+            return
+        }
+        stopBeforeQuitting()
+    }
+
+    private func stopBeforeQuitting() {
+        quitRequested = false
+        perform(.stop, pendingMessage: "Stopping relay before quitting…") {
+            self.terminationAllowed = true
+            NSApplication.shared.terminate(nil)
+        }
+    }
 
     func openDashboard() {
         guard !isChangingState else { return }
@@ -129,8 +147,10 @@ final class RelayService {
             }.value
             if result.status == 0 {
                 if action == .stop {
+                    isRunning = false
                     isChangingState = false
-                    await refreshStatus()
+                    statusMessage = "Background service stopped"
+                    whenReady?()
                 } else if await waitForHealthyService() {
                     isRunning = true
                     isChangingState = false
@@ -145,6 +165,9 @@ final class RelayService {
                 isChangingState = false
                 statusMessage = "Service \(action.rawValue) failed: \(result.output)"
                 logger.error("User service action failed: \(result.output, privacy: .private)")
+            }
+            if quitRequested && !isChangingState {
+                stopBeforeQuitting()
             }
         }
     }

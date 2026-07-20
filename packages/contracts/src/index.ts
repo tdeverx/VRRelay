@@ -295,6 +295,7 @@ const ListenerAddressSchema = z
   .refine((value) => /^.+:\d+$/.test(value), 'Listener address must use host:port format');
 
 export const RuntimeConfigurationSchema = z.object({
+  logLevel: z.enum(['info', 'debug']).default('info'),
   listenAddr: ListenerAddressSchema,
   publicUrl: z.url(),
   adminUrl: z.url(),

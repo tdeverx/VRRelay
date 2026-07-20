@@ -26,6 +26,10 @@ const macApp = readFileSync(
   'utf8'
 );
 const macViews = readFileSync(resolve(root, 'apps/macos/Sources/VRRelayMac/Views.swift'), 'utf8');
+const macService = readFileSync(
+  resolve(root, 'apps/macos/Sources/VRRelayMac/RelayService.swift'),
+  'utf8'
+);
 const macInfo = readFileSync(resolve(root, 'deploy/macos/Info.plist'), 'utf8');
 const failures = [];
 
@@ -41,6 +45,12 @@ requireText(macApp, 'MenuBarExtra(', 'macOS controller must remain a menu-bar ut
 rejectText(macApp, 'WindowGroup(', 'macOS controller must not embed an application window');
 rejectText(macApp, 'Settings {', 'macOS controller must not embed a settings window');
 rejectText(macViews, 'WebKit', 'macOS controller must open the dashboard in the system browser');
+requireText(macViews, 'service.quit()', 'macOS Quit must stop the managed relay runtime');
+requireText(
+  macService,
+  'perform(.stop, pendingMessage: "Stopping relay before quitting…")',
+  'macOS Quit must complete the stop action before terminating'
+);
 requireText(
   macInfo,
   '<key>LSUIElement</key><true/>',
@@ -77,6 +87,11 @@ requireText(
   windowsHost,
   'CreateMutexW',
   'Windows tray controller must prevent duplicate instances'
+);
+requireText(
+  windowsHost,
+  'runElevatedAction(window, L"stop", true)',
+  'Windows tray Quit must stop the service before closing'
 );
 rejectText(windowsHost, 'electron', 'Windows tray controller must not depend on Electron');
 

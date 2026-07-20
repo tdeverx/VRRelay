@@ -266,6 +266,10 @@ pending.
 - The authenticated Sessions view now derives ready/streaming/error state from the live producer
   and viewer window and displays short-lived per-node transcode, network, playback-window, and
   cache diagnostics. Viewer identity remains installation-HMACed and expires after 30 seconds.
+- Request diagnostics classify redacted client starts, retries, resumes, seeks, edge selection,
+  source-range transitions, and control-plane mutation outcomes. Normal and detailed logging are
+  selectable in Runtime settings without exposing raw client addresses, grants, credentials,
+  request bodies, or private URLs.
 - Worker queue/pressure, segment job attempts/retries/failures/duration, disk
   and object-store cache requests, object operation latency/errors, and object
   restore outcomes now use bounded Prometheus labels; session IDs, object keys,

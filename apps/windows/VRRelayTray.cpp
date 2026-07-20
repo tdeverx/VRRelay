@@ -81,6 +81,7 @@ DWORD controlService(const std::wstring& action) {
   if (!service) {
     const DWORD error = GetLastError();
     CloseServiceHandle(manager);
+    if (action == L"stop" && error == ERROR_SERVICE_DOES_NOT_EXIST) return ERROR_SUCCESS;
     return error;
   }
 
@@ -257,9 +258,9 @@ void openDashboard(HWND window) {
         MB_OK | MB_ICONERROR);
 }
 
-void runElevatedAction(HWND window, const wchar_t* action) {
+void runElevatedAction(HWND window, const wchar_t* action, bool quitWhenComplete = false) {
   if (g_actionPending.exchange(true)) return;
-  std::thread([window, action = std::wstring(action)] {
+  std::thread([window, action = std::wstring(action), quitWhenComplete] {
     const std::wstring executable = executablePath();
     const std::wstring parameters = L"--control " + action;
     SHELLEXECUTEINFOW execution{};
@@ -282,8 +283,18 @@ void runElevatedAction(HWND window, const wchar_t* action) {
         result = GetLastError();
       CloseHandle(execution.hProcess);
     }
-    PostMessageW(window, kActionCompleteMessage, result, 0);
+    PostMessageW(window, kActionCompleteMessage, result, quitWhenComplete ? 1 : 0);
   }).detach();
+}
+
+void requestQuit(HWND window) {
+  if (g_actionPending.load()) return;
+  const DWORD state = queryServiceState();
+  if (state == SERVICE_STOPPED) {
+    DestroyWindow(window);
+    return;
+  }
+  runElevatedAction(window, L"stop", true);
 }
 
 void showMenu(HWND window) {
@@ -302,7 +313,7 @@ void showMenu(HWND window) {
   AppendMenuW(menu, MF_STRING | busy | (state != SERVICE_RUNNING ? MF_GRAYED : 0),
       kRestartService, L"Restart Relay");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kQuit, L"Quit VRRelay Tray");
+  AppendMenuW(menu, MF_STRING | busy, kQuit, L"Quit VRRelay (stops relay)");
 
   POINT cursor{};
   GetCursorPos(&cursor);
@@ -328,21 +339,25 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         case kStartService: runElevatedAction(window, L"start"); break;
         case kStopService: runElevatedAction(window, L"stop"); break;
         case kRestartService: runElevatedAction(window, L"restart"); break;
-        case kQuit: DestroyWindow(window); break;
+        case kQuit: requestQuit(window); break;
         default: break;
       }
       return 0;
     case kActionCompleteMessage:
       g_actionPending = false;
-      if (wParam != ERROR_SUCCESS && wParam != ERROR_CANCELLED)
+      if (wParam != ERROR_SUCCESS)
         showError(window, static_cast<DWORD>(wParam));
+      else if (lParam != 0) {
+        DestroyWindow(window);
+        return 0;
+      }
       addOrUpdateTrayIcon(window, NIM_MODIFY);
       return 0;
     case WM_TIMER:
       if (wParam == kRefreshTimerId) addOrUpdateTrayIcon(window, NIM_MODIFY);
       return 0;
     case WM_CLOSE:
-      DestroyWindow(window);
+      requestQuit(window);
       return 0;
     case WM_DESTROY:
       KillTimer(window, kRefreshTimerId);

@@ -15,8 +15,15 @@ semantic versioning after the first public release.
   absolute MPEG-TS and fMP4 timestamps, and the cache pipeline epoch prevents reuse of older
   reset-timestamp segments.
 - Fixed explicit LAN listener configurations failing local source grants by starting a private
-  loopback companion for internal media routes. Clarified in the macOS menu that quitting the menu
-  app leaves the supervised relay service running.
+  loopback companion for internal media routes. Quitting the macOS menu or Windows tray now waits
+  for the managed relay runtime to stop before the controller exits.
+- Added privacy-safe playback diagnostics with stable per-process client trace IDs, start/resume/
+  retry/seek classification, regional edge decisions, serialized source-range transitions, and
+  semantic API mutation outcomes. Runtime settings can switch between normal operational logging
+  and detailed per-request playback tracing; tokens, raw client addresses, user agents, request
+  bodies, source URLs, and provider credentials remain excluded.
+- Fixed persistent fMP4 producer initialization on Windows by running FFmpeg in the producer output
+  directory so its relative init segment is resolved consistently across platforms.
 - Replaced per-segment HLS transcoding with one durable, fenced VOD producer per session. The
   assigned source worker now owns one playback-rate Jellyfin source pull, publishes completed
   segments to shared object storage, survives controller recovery through schema v9 state, and

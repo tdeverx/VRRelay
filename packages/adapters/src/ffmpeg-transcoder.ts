@@ -162,6 +162,7 @@ export class FFmpegTranscoder implements Transcoder {
     const extension = fmp4 ? 'm4s' : 'ts';
     const playlist = join(directory, 'producer.m3u8');
     const pattern = join(directory, `segment-%d.${extension}`);
+    const initPath = fmp4 ? join(directory, 'init.mp4') : undefined;
     const initialBurst = Math.min(30, Math.max(6, request.profile.delivery.segmentDuration * 3));
     const args = [
       '-hide_banner',
@@ -213,7 +214,6 @@ export class FFmpegTranscoder implements Transcoder {
         .map((entry) => ({ file: entry.file, index: Number(entry.match[1]) }))
         .filter((entry) => !published.has(entry.index))
         .sort((left, right) => left.index - right.index);
-      const initPath = fmp4 ? join(directory, 'init.mp4') : undefined;
       if (initPath)
         try {
           await access(initPath);
@@ -230,7 +230,7 @@ export class FFmpegTranscoder implements Transcoder {
       }
     };
     let outcome: { error?: unknown } | undefined;
-    const running = this.#run(args, undefined, signal).then(
+    const running = this.#run(args, undefined, signal, false, directory).then(
       () => {
         outcome = {};
       },
@@ -494,10 +494,14 @@ export class FFmpegTranscoder implements Transcoder {
     args: string[],
     output?: Writable,
     signal?: AbortSignal,
-    mergeStderr = false
+    mergeStderr = false,
+    cwd?: string
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.#ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(this.#ffmpegPath, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        ...(cwd ? { cwd } : {})
+      });
       let stderr = '';
       child.stderr.on('data', (chunk: Buffer) => {
         if (mergeStderr && output) output.write(chunk);
