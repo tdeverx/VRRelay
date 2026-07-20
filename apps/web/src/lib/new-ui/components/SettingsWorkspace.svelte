@@ -899,7 +899,9 @@
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >Stops the continuous source connection after demand goes quiet.</Field.Description
+                >Stops the continuous source connection after demand goes quiet. The shared
+                single-producer guarantee currently applies to HLS VOD profiles only; experimental
+                direct fragmented-MP4 streams remain per request.</Field.Description
               ></Field.Field
             ></Field.Group
           ></Card.Content

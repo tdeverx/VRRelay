@@ -27,7 +27,9 @@ not release evidence by themselves.
   caching, one fenced continuous producer per session, regional edge routing, durable producer
   recovery state, and MPEG-TS output as the intended production
   default. fMP4, fragmented MP4, H.265, AV1, and other experimental paths are
-  not supported release claims.
+  not supported release claims. The single-producer guarantee covers HLS VOD
+  only; direct fragmented MP4 remains request-oriented and may open one
+  provider connection per request.
 - MediaMTX-backed RTMP, SRT, and WHIP ingest plus live HLS fan-out foundations.
 - Outbound mTLS agent transport, node enrollment, role metadata, PostgreSQL,
   Valkey, filesystem/S3-compatible/Azure/GCS adapters, and a distributed

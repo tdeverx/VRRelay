@@ -67,6 +67,12 @@ See the [architecture overview](docs/architecture/overview.md) and
 [deployment guide](docs/deployment.md) for placement, failover, and rollout
 requirements.
 
+> [!NOTE]
+> The one-producer guarantee currently covers HLS VOD, including MPEG-TS and
+> fMP4-segmented HLS. Experimental direct fragmented-MP4 streaming remains
+> request-oriented and can open more than one provider connection; do not use
+> that profile when the upstream single-connection guarantee is required.
+
 ## Requirements
 
 - Node.js `26.5.0` and npm `12.0.1` (`.nvmrc` pins the Node version).

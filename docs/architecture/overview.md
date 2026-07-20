@@ -114,4 +114,9 @@ Segments are written atomically, reused temporarily, and evicted after cache exp
 sessions keep their playback URL and durable producer recovery metadata, not permanent media or a
 permanently running worker.
 
+The durable producer applies to HLS VOD profiles, including MPEG-TS and fMP4-segmented HLS.
+Experimental direct fragmented-MP4 delivery is still request-oriented and does not yet provide the
+one-provider-connection-per-session guarantee. A future shared CMAF/fMP4 delivery path must isolate
+viewer backpressure and late joins while reusing one upstream producer.
+
 See the [code map](code-map.md) for entry points and change boundaries.
