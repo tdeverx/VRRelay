@@ -113,9 +113,11 @@ export interface PlaybackRequestLogInput {
 export function logPlaybackRequest(
   logger: DiagnosticLogger,
   tracker: PlaybackRequestTracker,
-  input: PlaybackRequestLogInput
+  input: PlaybackRequestLogInput,
+  observed?: PlaybackClientObservation
 ): PlaybackClientObservation {
-  const observation = tracker.observe(input.sessionId, input.clientAffinity, input.segmentIndex);
+  const observation =
+    observed ?? tracker.observe(input.sessionId, input.clientAffinity, input.segmentIndex);
   const context = {
     clientRequest: {
       event: 'playback.request',

@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CatalogQuerySchema,
   EnrollNodeRequestSchema,
-  RotateNodeCertificateRequestSchema
+  RotateNodeCertificateRequestSchema,
+  SignInConfigurationRequestSchema
 } from './index.js';
 
 const capabilities = {
@@ -26,6 +27,19 @@ describe('catalog query contract', () => {
       'Episode'
     ]);
     expect(CatalogQuerySchema.parse({}).kinds).toEqual([]);
+    expect(CatalogQuerySchema.parse({ section: 'next_up' }).section).toBe('next_up');
+  });
+});
+
+describe('interactive sign-in policy', () => {
+  it('keeps playback reporting enabled for existing stored configurations', () => {
+    expect(
+      SignInConfigurationRequestSchema.parse({
+        providerId: 'provider-1',
+        defaultProfileId: 'profile-1',
+        allowedProfileIds: ['profile-1']
+      }).reportPlaybackActivity
+    ).toBe(true);
   });
 });
 

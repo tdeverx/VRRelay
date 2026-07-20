@@ -41,6 +41,7 @@
   let audioLayout = $state('stereo');
   let sampleRate = $state(48000);
   let audioBitrate = $state(192);
+  let defaultAudioLanguage = $state('eng');
   let method = $state<ProfileRevision['delivery']['method']>('hls');
   let container = $state<ProfileRevision['delivery']['container']>('mpegts');
   let segmentDuration = $state(4);
@@ -98,6 +99,7 @@
     audioLayout = profile.audio.layout;
     sampleRate = profile.audio.sampleRate;
     audioBitrate = profile.audio.bitrateKbps;
+    defaultAudioLanguage = profile.audio.defaultLanguage ?? 'eng';
     method = profile.delivery.method;
     container = profile.delivery.container;
     segmentDuration = profile.delivery.segmentDuration;
@@ -167,7 +169,8 @@
           channels: Number(audioChannels),
           layout: audioLayout,
           sampleRate: Number(sampleRate),
-          bitrateKbps: Number(audioBitrate)
+          bitrateKbps: Number(audioBitrate),
+          defaultLanguage: defaultAudioLanguage.trim().toLowerCase() || undefined
         },
         delivery: {
           ...base.delivery,
@@ -420,6 +423,15 @@
                 min="1"
                 bind:value={audioBitrate}
               /></Field.Field
+            ><Field.Field
+              ><Field.Label for="audio-default-language">Default audio language</Field.Label><Input
+                id="audio-default-language"
+                bind:value={defaultAudioLanguage}
+                placeholder="eng"
+              /><Field.Description
+                >ISO 639-2 or BCP-47 preference when a relay does not select a track explicitly. The
+                selected source track still overrides this.</Field.Description
+              ></Field.Field
             ><Field.Field
               ><Field.Label for="delivery-method">Delivery method</Field.Label><Select.Root
                 type="single"

@@ -7,6 +7,7 @@
   import { api, isAuthenticatedError } from '#lib/api';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import ProviderArtwork from '#lib/new-ui/components/ProviderArtwork.svelte';
+  import ProviderMediaRow from '#lib/new-ui/components/ProviderMediaRow.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
   import * as Dialog from '#lib/new-ui/components/ui/dialog';
@@ -19,6 +20,10 @@
   let username = $state('');
   let search = $state('');
   let items = $state<MediaItem[]>([]);
+  let continueWatching = $state<MediaItem[]>([]);
+  let upNext = $state<MediaItem[]>([]);
+  let recentlyAdded = $state<MediaItem[]>([]);
+  let loadingRows = $state(true);
   let profiles = $state<ProfileRevision[]>([]);
   let profileId = $state('');
   let loading = $state(true);
@@ -43,15 +48,32 @@
       username = user.displayName;
       recovery = user.authMethod === 'recovery';
       if (recovery) return;
-      const profileResult = await api.catalogProfiles();
+      const profileRequest = api.catalogProfiles();
+      const rowResults = await Promise.allSettled([
+        api.userCatalog({ section: 'continue_watching', limit: 16 }),
+        api.userCatalog({ section: 'next_up', limit: 16 }),
+        api.userCatalog({ section: 'recently_added', kinds: ['Movie', 'Episode'], limit: 24 })
+      ]);
+      const profileResult = await profileRequest;
       profiles = profileResult.items;
       profileId = profileResult.defaultProfileId ?? profiles[0]?.profileId ?? '';
+      [continueWatching, upNext, recentlyAdded] = rowResults.map((result) =>
+        result.status === 'fulfilled' ? result.value.items : []
+      );
+      if (rowResults.some((result) => result.status === 'rejected'))
+        toast.warning('Some Jellyfin home rows could not be loaded. Search is still available.');
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto('/dashboard/login');
       toast.error(reason instanceof Error ? reason.message : 'Could not load your home page.');
     } finally {
+      loadingRows = false;
       loading = false;
     }
+  }
+
+  async function chooseRowItem(item: MediaItem) {
+    if (item.kind === 'Series') await chooseShow(item);
+    else await createLink(item);
   }
 
   async function runSearch(event?: SubmitEvent) {
@@ -198,6 +220,36 @@
         >
       </form>
 
+      <div class="space-y-8 pt-2">
+        <ProviderMediaRow
+          id="continue-watching"
+          title="Continue Watching"
+          description="Pick up something already in progress on Jellyfin."
+          items={continueWatching}
+          loading={loadingRows}
+          {creatingItemId}
+          onChoose={chooseRowItem}
+        />
+        <ProviderMediaRow
+          id="up-next"
+          title="Up Next"
+          description="The next episodes Jellyfin has lined up for you."
+          items={upNext}
+          loading={loadingRows}
+          {creatingItemId}
+          onChoose={chooseRowItem}
+        />
+        <ProviderMediaRow
+          id="recently-added"
+          title="Recently Added"
+          description="New movies and episodes from your libraries."
+          items={recentlyAdded}
+          loading={loadingRows}
+          {creatingItemId}
+          onChoose={chooseRowItem}
+        />
+      </div>
+
       {#if searching}
         <LoadState loading label="catalog results" variant="media" count={8} />
       {:else if hasSearched && items.length === 0}
@@ -212,7 +264,10 @@
           >
         </Empty.Root>
       {:else if hasSearched}
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div
+          class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          data-testid="catalog-search-results"
+        >
           {#each items as item}
             <Card.Root class="overflow-hidden" style="padding-top: 0">
               <ProviderArtwork {item} />

@@ -32,6 +32,11 @@ export function publicRuntimeConfiguration(
       cacheTtlMs: config.cacheTtlMs,
       cacheLimitBytes: config.cacheLimitBytes,
       vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       nodeName: config.nodeName,
       nodeRegion: config.nodeRegion
     },

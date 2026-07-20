@@ -39,8 +39,9 @@ import type {
 import { CapacityError, ConflictError, NotFoundError, UnauthorizedError } from './errors.js';
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 import { SessionCache } from './session-cache.js';
+import { pacedReadable, type VodProducerSourcePacing } from './vod-source-pacing.js';
 import { SessionJobCoordinator } from './session-jobs.js';
-import { VodProducerCoordinator } from './vod-producer-coordinator.js';
+import { estimateVodProducerBufferMs, VodProducerCoordinator } from './vod-producer-coordinator.js';
 
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
 const VIEWER_WINDOW_MS = 30_000;
@@ -69,6 +70,8 @@ interface LocalSessionRuntime {
   ingress: RuntimeSample[];
   egress: RuntimeSample[];
   production: Array<RuntimeSample & { wallSeconds: number }>;
+  sourceRequests: RuntimeSample[];
+  sourceConnectionCount: number;
   cacheHits: number;
   cacheMisses: number;
   lastSegmentPublishedAtMs?: number;
@@ -82,6 +85,8 @@ interface SessionRuntimeSnapshot {
   observedAtMs: number;
   sourceIngressMbps: number;
   viewerEgressMbps: number;
+  sourceConnectionCount: number;
+  sourceRequestsLast30s: number;
   cacheHits: number;
   cacheMisses: number;
   transcodeRealtimeFactor?: number;
@@ -133,6 +138,65 @@ function decodeEdgeGrantBody(body: string): EdgePlaybackGrantPayload {
   return decoded as EdgePlaybackGrantPayload;
 }
 
+const LANGUAGE_ALIASES: Record<string, string> = {
+  ar: 'ara',
+  cs: 'ces',
+  da: 'dan',
+  de: 'deu',
+  el: 'ell',
+  en: 'eng',
+  es: 'spa',
+  fi: 'fin',
+  fr: 'fra',
+  he: 'heb',
+  hu: 'hun',
+  it: 'ita',
+  ja: 'jpn',
+  ko: 'kor',
+  nl: 'nld',
+  no: 'nor',
+  pl: 'pol',
+  pt: 'por',
+  ro: 'ron',
+  ru: 'rus',
+  sv: 'swe',
+  th: 'tha',
+  tr: 'tur',
+  uk: 'ukr',
+  vi: 'vie',
+  zh: 'zho'
+};
+
+function normalizeLanguage(value: string): string {
+  return value.trim().toLowerCase().replaceAll('_', '-');
+}
+
+function audioLanguageMatches(
+  trackLanguage: string | undefined,
+  preferredLanguage: string
+): boolean {
+  if (!trackLanguage) return false;
+  const preferred = normalizeLanguage(preferredLanguage);
+  const actual = normalizeLanguage(trackLanguage);
+  const preferredBase = preferred.split('-', 1)[0] ?? preferred;
+  const actualBase = actual.split('-', 1)[0] ?? actual;
+  return (
+    preferred === actual ||
+    preferredBase === actualBase ||
+    LANGUAGE_ALIASES[preferredBase] === actualBase ||
+    LANGUAGE_ALIASES[actualBase] === preferredBase
+  );
+}
+
+function selectDefaultAudioTrack(item: MediaItem, preferredLanguage = 'eng'): string | undefined {
+  const tracks = item.audioTracks ?? [];
+  return (
+    tracks.find((track) => audioLanguageMatches(track.language, preferredLanguage))?.id ??
+    tracks.find((track) => track.isDefault)?.id ??
+    tracks[0]?.id
+  );
+}
+
 export interface SessionServiceOptions {
   publicUrl: string;
   internalUrl: string;
@@ -145,6 +209,11 @@ export interface SessionServiceOptions {
   jobLogRetentionRows?: number;
   jobLogQueryLimit?: number;
   vodProducerIdleTimeoutMs?: number;
+  vodProducerBufferLowWatermarkMs?: number;
+  vodProducerBufferHighWatermarkMs?: number;
+  vodProducerMaxConcurrent?: number;
+  vodProducerMaxPerProvider?: number;
+  vodProducerSeekCooldownMs?: number;
 }
 
 export interface SessionServiceInfrastructure {
@@ -167,7 +236,13 @@ export class SessionService {
   readonly #inflight = new Map<string, Promise<string>>();
   readonly #sourceGrants = new Map<
     string,
-    { source: ResolvedSource; provider: MediaProvider; expiresAt: number; sessionId?: string }
+    {
+      source: ResolvedSource;
+      provider: MediaProvider;
+      expiresAt: number;
+      sessionId?: string;
+      pacing?: VodProducerSourcePacing;
+    }
   >();
   readonly #waiters: Array<() => void> = [];
   readonly #viewers = new Map<string, Map<string, number>>();
@@ -224,8 +299,8 @@ export class SessionService {
         this.#cache,
         {
           acquire: (signal) => this.#acquire(signal),
-          prepare: (session, profile, startSegmentIndex, signal) =>
-            this.#prepareVodProducer(session, profile, startSegmentIndex, signal),
+          prepare: (session, profile, startSegmentIndex, signal, pacing) =>
+            this.#prepareVodProducer(session, profile, startSegmentIndex, signal, pacing),
           released: (sessionId) => {
             this.#release();
             this.#ephemeralSourceCredentials.delete(sessionId);
@@ -237,7 +312,18 @@ export class SessionService {
         {
           cacheDir: options.cacheDir,
           nodeId: options.nodeId ?? 'standalone',
-          idleTimeoutMs: options.vodProducerIdleTimeoutMs ?? 60_000
+          idleTimeoutMs: options.vodProducerIdleTimeoutMs ?? 60_000,
+          bufferLowWatermarkMs: options.vodProducerBufferLowWatermarkMs ?? 30_000,
+          bufferHighWatermarkMs: options.vodProducerBufferHighWatermarkMs ?? 60_000,
+          maxConcurrentProducers: Math.min(
+            options.vodProducerMaxConcurrent ?? options.maxWorkers,
+            options.maxWorkers
+          ),
+          maxConcurrentProducersPerProvider: Math.min(
+            options.vodProducerMaxPerProvider ?? options.maxWorkers,
+            options.maxWorkers
+          ),
+          seekCooldownMs: options.vodProducerSeekCooldownMs ?? 5_000
         },
         infrastructure.metrics
       );
@@ -258,6 +344,7 @@ export class SessionService {
     let durationSeconds: number | undefined;
     let liveChannelRevision: number | undefined;
     let name = input.name;
+    let resolvedSource = input.kind === 'vod' ? input.source : undefined;
     if (input.kind === 'vod') {
       const connection = await this.repository.getProvider(input.source.providerId);
       if (!connection) throw new NotFoundError('Provider connection was not found');
@@ -281,6 +368,10 @@ export class SessionService {
       if (!durationSeconds || durationSeconds <= 0)
         throw new Error('Selected media does not expose a finite duration');
       name ??= item.name;
+      if (!input.source.audioTrackId) {
+        const audioTrackId = selectDefaultAudioTrack(item, profile.audio.defaultLanguage ?? 'eng');
+        if (audioTrackId) resolvedSource = { ...input.source, audioTrackId };
+      }
     } else {
       if (profile.delivery.method !== 'hls' || profile.delivery.playlistType !== 'live')
         throw new ConflictError('Live sessions require a live HLS profile');
@@ -297,7 +388,7 @@ export class SessionService {
       name: name ?? 'Untitled relay',
       kind: input.kind,
       ...(input.kind === 'vod'
-        ? { source: input.source, durationSeconds }
+        ? { source: resolvedSource!, durationSeconds }
         : { liveChannelId: input.liveChannelId }),
       profileId: profile.profileId,
       profileRevision: profile.revision,
@@ -436,18 +527,37 @@ export class SessionService {
       (total, snapshot) => total + snapshot.viewerEgressMbps,
       0
     );
+    const sourceConnectionCount = activeSnapshots.reduce(
+      (total, snapshot) => total + (snapshot.sourceConnectionCount ?? 0),
+      0
+    );
+    const sourceRequestsLast30s = activeSnapshots.reduce(
+      (total, snapshot) => total + (snapshot.sourceRequestsLast30s ?? 0),
+      0
+    );
     const cacheHits = snapshots.reduce((total, snapshot) => total + snapshot.cacheHits, 0);
     const cacheMisses = snapshots.reduce((total, snapshot) => total + snapshot.cacheMisses, 0);
     const transcodeRealtimeFactor = activeSnapshots
       .map((snapshot) => snapshot.transcodeRealtimeFactor)
       .find((factor): factor is number => factor !== undefined);
-    const demanded = producer?.demandedSegmentIndex;
-    const published = producer?.lastPublishedSegmentIndex;
     const segmentDuration = profile?.delivery.segmentDuration ?? 0;
-    const bufferSeconds =
-      demanded === undefined || published === undefined
-        ? 0
-        : Math.max(0, published - demanded) * segmentDuration;
+    const currentAttempt = producer?.workerHistory.at(-1);
+    const playbackAnchorSegmentIndex =
+      producer?.playbackAnchorSegmentIndex ?? producer?.startSegmentIndex ?? 0;
+    const playbackAnchorAtMs = producer?.playbackAnchorAt
+      ? Date.parse(producer.playbackAnchorAt)
+      : currentAttempt
+        ? Date.parse(currentAttempt.startedAt)
+        : Number.NaN;
+    const bufferSeconds = producer
+      ? estimateVodProducerBufferMs({
+          playbackAnchorSegmentIndex,
+          lastPublishedSegmentIndex: producer.lastPublishedSegmentIndex,
+          segmentDurationSeconds: segmentDuration,
+          playbackAnchorAtMs,
+          observedAtMs: now
+        }) / 1_000
+      : 0;
     const producerActive =
       producer && ['starting', 'running', 'switching'].includes(producer.state);
     const activity: SessionRuntimeStats['activity'] =
@@ -473,11 +583,14 @@ export class SessionService {
             ...(producer.lastPublishedSegmentIndex === undefined
               ? {}
               : { lastPublishedSegmentIndex: producer.lastPublishedSegmentIndex }),
+            ...(producer.bufferState ? { bufferState: producer.bufferState } : {}),
             demandAgeMs: Math.max(0, now - Date.parse(producer.lastDemandAt))
           }
         : {}),
       bufferSeconds,
       ...(transcodeRealtimeFactor === undefined ? {} : { transcodeRealtimeFactor }),
+      sourceConnectionCount,
+      sourceRequestsLast30s,
       sourceIngressMbps,
       viewerEgressMbps,
       cacheHits,
@@ -751,7 +864,7 @@ export class SessionService {
       signal
     );
     await this.transcoder.streamFragmentedMp4(
-      this.#proxySource(source, provider),
+      this.#proxySource(source, provider, session.id),
       profile,
       output,
       signal
@@ -777,7 +890,11 @@ export class SessionService {
           signal
         )
       : await grant.provider.openSource(grant.source, range, signal);
-    return { ...source, ...(grant.sessionId ? { sessionId: grant.sessionId } : {}) };
+    return {
+      ...source,
+      ...(grant.pacing ? { stream: pacedReadable(source.stream, grant.pacing, signal) } : {}),
+      ...(grant.sessionId ? { sessionId: grant.sessionId } : {})
+    };
   }
 
   async resolveLive(token: string): Promise<LiveChannel> {
@@ -906,7 +1023,8 @@ export class SessionService {
   async touchViewer(
     token: string,
     viewerIdentity: string,
-    segmentIndex?: number
+    segmentIndex?: number,
+    playbackDiscontinuity = false
   ): Promise<RelaySession> {
     const { session } = await this.#playback(token);
     const viewer = createHmac('sha256', await this.#getViewerSalt())
@@ -928,7 +1046,8 @@ export class SessionService {
           viewerHash: viewer,
           segmentIndex,
           observedAtMs: Date.now(),
-          windowMs: VIEWER_WINDOW_MS
+          windowMs: VIEWER_WINDOW_MS,
+          ...(playbackDiscontinuity ? { playbackDiscontinuity: true } : {})
         });
       if (session.viewers !== aggregation.totalViewers) {
         await this.#setSessionViewers(session.id, aggregation.totalViewers);
@@ -1059,7 +1178,8 @@ export class SessionService {
     session: RelaySession,
     profile: ProfileRevision,
     startSegmentIndex: number,
-    signal: AbortSignal
+    signal: AbortSignal,
+    pacing: VodProducerSourcePacing
   ) {
     if (!session.source || !session.durationSeconds)
       throw new NotFoundError('VOD source was not found');
@@ -1084,7 +1204,7 @@ export class SessionService {
           signal
         );
     return {
-      source: this.#proxySource(source, provider, session.id),
+      source: this.#proxySource(source, provider, session.id, pacing),
       profile,
       startSegmentIndex,
       startSeconds,
@@ -1297,14 +1417,16 @@ export class SessionService {
   #proxySource(
     source: ResolvedSource,
     provider: MediaProvider,
-    sessionId?: string
+    sessionId?: string,
+    pacing?: VodProducerSourcePacing
   ): ResolvedSource {
     const token = opaqueToken();
     this.#sourceGrants.set(token, {
       source,
       provider,
       expiresAt: Date.now() + 15 * 60_000,
-      ...(sessionId ? { sessionId } : {})
+      ...(sessionId ? { sessionId } : {}),
+      ...(pacing ? { pacing } : {})
     });
     return { ...source, url: `${this.options.internalUrl}/internal/source/${token}`, headers: {} };
   }
@@ -1368,6 +1490,8 @@ export class SessionService {
       ingress: [],
       egress: [],
       production: [],
+      sourceRequests: [],
+      sourceConnectionCount: 0,
       cacheHits: 0,
       cacheMisses: 0,
       lastSnapshotAtMs: 0
@@ -1382,6 +1506,25 @@ export class SessionService {
     runtime[direction].push({ value: bytes, observedAtMs: now });
     this.#pruneRuntime(runtime, now);
     this.#publishRuntimeSnapshot(sessionId, runtime, now);
+  }
+
+  #recordSourceRequest(sessionId: string): void {
+    const now = Date.now();
+    const runtime = this.#localRuntime(sessionId);
+    runtime.sourceRequests.push({ value: 1, observedAtMs: now });
+    this.#pruneRuntime(runtime, now);
+    this.infrastructure.metrics?.increment('vod_source_requests_total');
+    this.#publishRuntimeSnapshot(sessionId, runtime, now);
+  }
+
+  #setSourceConnectionCount(sessionId: string, count: number): void {
+    const runtime = this.#localRuntime(sessionId);
+    runtime.sourceConnectionCount = Math.max(0, count);
+    this.infrastructure.metrics?.gauge(
+      'vod_source_connections_active',
+      runtime.sourceConnectionCount
+    );
+    this.#publishRuntimeSnapshot(sessionId, runtime, Date.now());
   }
 
   #recordSessionCache(sessionId: string, hit: boolean): void {
@@ -1411,7 +1554,12 @@ export class SessionService {
 
   #pruneRuntime(runtime: LocalSessionRuntime, now: number): void {
     const cutoff = now - RUNTIME_TRAFFIC_WINDOW_MS;
-    for (const samples of [runtime.ingress, runtime.egress, runtime.production])
+    for (const samples of [
+      runtime.ingress,
+      runtime.egress,
+      runtime.production,
+      runtime.sourceRequests
+    ])
       while (samples[0] && samples[0].observedAtMs <= cutoff) samples.shift();
   }
 
@@ -1434,6 +1582,8 @@ export class SessionService {
       observedAtMs: now,
       sourceIngressMbps: mbps(runtime.ingress),
       viewerEgressMbps: mbps(runtime.egress),
+      sourceConnectionCount: runtime.sourceConnectionCount,
+      sourceRequestsLast30s: runtime.sourceRequests.length,
       cacheHits: runtime.cacheHits,
       cacheMisses: runtime.cacheMisses,
       ...(wallSeconds > 0 ? { transcodeRealtimeFactor: mediaSeconds / wallSeconds } : {})
@@ -1486,6 +1636,12 @@ export class SessionService {
           parsed.sourceIngressMbps >= 0 &&
           Number.isFinite(parsed.viewerEgressMbps) &&
           parsed.viewerEgressMbps >= 0 &&
+          (parsed.sourceConnectionCount === undefined ||
+            (Number.isInteger(parsed.sourceConnectionCount) &&
+              parsed.sourceConnectionCount >= 0)) &&
+          (parsed.sourceRequestsLast30s === undefined ||
+            (Number.isInteger(parsed.sourceRequestsLast30s) &&
+              parsed.sourceRequestsLast30s >= 0)) &&
           Number.isInteger(parsed.cacheHits) &&
           parsed.cacheHits >= 0 &&
           Number.isInteger(parsed.cacheMisses) &&
@@ -1543,6 +1699,7 @@ export class SessionService {
       const combinedSignal = signal
         ? AbortSignal.any([signal, controller.signal])
         : controller.signal;
+      this.#recordSourceRequest(sessionId);
       const response = await provider.openSource(source, range, combinedSignal);
       let released = false;
       let releaseRequest!: () => void;
@@ -1555,9 +1712,11 @@ export class SessionService {
         released = true;
         if (this.#activeSourceRequests.get(sessionId) === request)
           this.#activeSourceRequests.delete(sessionId);
+        this.#setSourceConnectionCount(sessionId, 0);
         releaseRequest();
       };
       this.#activeSourceRequests.set(sessionId, request);
+      this.#setSourceConnectionCount(sessionId, 1);
       response.stream.once('end', finish);
       response.stream.once('close', finish);
       response.stream.once('error', finish);

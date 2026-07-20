@@ -52,6 +52,7 @@ export const CreateProviderRequestSchema = z
 export type CreateProviderRequest = z.infer<typeof CreateProviderRequestSchema>;
 
 export const CatalogQuerySchema = z.object({
+  section: z.enum(['continue_watching', 'next_up', 'recently_added']).optional(),
   parentId: z.string().optional(),
   search: z.string().max(200).optional(),
   kinds: z
@@ -152,7 +153,8 @@ export const SignInConfigurationRequestSchema = z
   .object({
     providerId: z.string().min(1),
     defaultProfileId: z.string().min(1),
-    allowedProfileIds: z.array(z.string().min(1)).min(1)
+    allowedProfileIds: z.array(z.string().min(1)).min(1),
+    reportPlaybackActivity: z.boolean().default(true)
   })
   .superRefine((value, context) => {
     if (!value.allowedProfileIds.includes(value.defaultProfileId))
@@ -294,35 +296,49 @@ const ListenerAddressSchema = z
   .max(260)
   .refine((value) => /^.+:\d+$/.test(value), 'Listener address must use host:port format');
 
-export const RuntimeConfigurationSchema = z.object({
-  logLevel: z.enum(['info', 'debug']).default('info'),
-  listenAddr: ListenerAddressSchema,
-  publicUrl: z.url(),
-  adminUrl: z.url(),
-  playbackUrl: z.url(),
-  trustedProxyCidrs: z.array(z.string().min(1).max(100)).max(32),
-  viewerRegionHeader: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9][a-z0-9-]{0,62}$/)
-    .default('x-vrrelay-region'),
-  agentListenAddr: ListenerAddressSchema,
-  maxWorkers: z.number().int().min(1).max(32),
-  cacheTtlMs: z
-    .number()
-    .int()
-    .min(1_000)
-    .max(7 * 24 * 60 * 60 * 1_000),
-  cacheLimitBytes: z
-    .number()
-    .int()
-    .positive()
-    .max(10 * 1024 * 1024 * 1024 * 1024),
-  vodProducerIdleTimeoutMs: z.number().int().min(15_000).max(600_000).default(60_000),
-  nodeName: z.string().trim().min(1).max(100),
-  nodeRegion: z.string().trim().min(1).max(100)
-});
+export const RuntimeConfigurationSchema = z
+  .object({
+    logLevel: z.enum(['info', 'debug']).default('info'),
+    listenAddr: ListenerAddressSchema,
+    publicUrl: z.url(),
+    adminUrl: z.url(),
+    playbackUrl: z.url(),
+    trustedProxyCidrs: z.array(z.string().min(1).max(100)).max(32),
+    viewerRegionHeader: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[a-z0-9][a-z0-9-]{0,62}$/)
+      .default('x-vrrelay-region'),
+    agentListenAddr: ListenerAddressSchema,
+    maxWorkers: z.number().int().min(1).max(32),
+    cacheTtlMs: z
+      .number()
+      .int()
+      .min(1_000)
+      .max(7 * 24 * 60 * 60 * 1_000),
+    cacheLimitBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(10 * 1024 * 1024 * 1024 * 1024),
+    vodProducerIdleTimeoutMs: z.number().int().min(15_000).max(600_000).default(60_000),
+    vodProducerBufferLowWatermarkMs: z.number().int().min(4_000).max(300_000).default(30_000),
+    vodProducerBufferHighWatermarkMs: z.number().int().min(8_000).max(600_000).default(60_000),
+    vodProducerMaxConcurrent: z.number().int().min(1).max(32).default(2),
+    vodProducerMaxPerProvider: z.number().int().min(1).max(32).default(2),
+    vodProducerSeekCooldownMs: z.number().int().min(1_000).max(60_000).default(5_000),
+    nodeName: z.string().trim().min(1).max(100),
+    nodeRegion: z.string().trim().min(1).max(100)
+  })
+  .superRefine((value, context) => {
+    if (value.vodProducerBufferLowWatermarkMs >= value.vodProducerBufferHighWatermarkMs)
+      context.addIssue({
+        code: 'custom',
+        path: ['vodProducerBufferHighWatermarkMs'],
+        message: 'VOD producer high watermark must be greater than the low watermark'
+      });
+  });
 export type RuntimeConfiguration = z.infer<typeof RuntimeConfigurationSchema>;
 
 export const RuntimeConfigurationUpdateRequestSchema = RuntimeConfigurationSchema;

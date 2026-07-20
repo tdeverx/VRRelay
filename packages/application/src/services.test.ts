@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
@@ -531,6 +531,204 @@ describe('VOD relay service', () => {
       expect((failure as Error).message).not.toMatch(/live channel/i);
     }
   );
+
+  it('pins the profile default audio language when a VOD source has multiple tracks', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-audio-language-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p-audio-language',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'audio-language-secret',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('audio-language-secret', 'token');
+    const languageProvider: MediaProvider = {
+      ...provider,
+      item: async (connection, _secret, id) => ({
+        id,
+        providerId: connection.id,
+        name: 'Multilingual film',
+        kind: 'Movie',
+        durationSeconds: 120,
+        audioTracks: [
+          {
+            id: 'audio-eng',
+            index: 0,
+            kind: 'audio',
+            title: 'English',
+            language: 'eng',
+            isDefault: true
+          },
+          {
+            id: 'audio-jpn',
+            index: 1,
+            kind: 'audio',
+            title: 'Japanese',
+            language: 'ja'
+          }
+        ]
+      })
+    };
+    const registry = new DefaultProviderRegistry();
+    registry.register(languageProvider);
+    const profiles = new ProfileService(repo);
+    const selectedProfile = await profiles.createRevision(
+      profileInput({
+        profileId: 'language-profile',
+        audio: { defaultLanguage: 'jpn' }
+      })
+    );
+    const service = new SessionService(
+      repo,
+      secrets,
+      registry,
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async () => {},
+        streamFragmentedMp4: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 1_000,
+        maxWorkers: 1
+      }
+    );
+
+    const session = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p-audio-language', itemId: 'movie' },
+      profileId: selectedProfile.profileId,
+      profileRevision: selectedProfile.revision,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    expect(session.source?.audioTrackId).toBe('audio-jpn');
+
+    const explicit = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p-audio-language', itemId: 'movie', audioTrackId: 'audio-eng' },
+      profileId: selectedProfile.profileId,
+      profileRevision: selectedProfile.revision,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    expect(explicit.source?.audioTrackId).toBe('audio-eng');
+  });
+
+  it('reports upstream source requests and active connection state', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-source-stats-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p-source-stats',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'source-stats-secret',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('source-stats-secret', 'token');
+    const sourceProvider: MediaProvider = {
+      ...provider,
+      openSource: async () => ({
+        status: 200,
+        headers: {},
+        stream: Readable.from([Buffer.from('source')])
+      })
+    };
+    const registry = new DefaultProviderRegistry();
+    registry.register(sourceProvider);
+    const selectedProfile = await new ProfileService(repo).createRevision(
+      profileInput({
+        profileId: 'source-stats-profile',
+        delivery: { method: 'fragmented_mp4', container: 'mp4', segmentType: 'none' }
+      })
+    );
+    let service!: SessionService;
+    const transcoder: Transcoder = {
+      discover: async () => ({
+        ffmpegVersion: 'test',
+        encoders: [],
+        muxers: [],
+        filters: [],
+        pixelFormats: []
+      }),
+      generateSegment: async () => {},
+      streamFragmentedMp4: async (source, _profile, output) => {
+        const grantToken = source.url.split('/internal/source/')[1];
+        if (!grantToken) throw new Error('Missing source grant');
+        const response = await service.openSourceProxy(grantToken);
+        await new Promise<void>((resolve, reject) => {
+          response.stream.on('data', (chunk) => output.write(chunk));
+          response.stream.once('end', () => {
+            output.end();
+            resolve();
+          });
+          response.stream.once('error', reject);
+        });
+      }
+    };
+    service = new SessionService(repo, secrets, registry, transcoder, new InMemoryEventBus(), {
+      publicUrl: 'https://relay.example',
+      internalUrl: 'http://127.0.0.1:8099',
+      cacheDir: join(dir, 'cache'),
+      cacheTtlMs: 1_000,
+      maxWorkers: 1
+    });
+    const session = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p-source-stats', itemId: 'movie' },
+      profileId: selectedProfile.profileId,
+      profileRevision: selectedProfile.revision,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
+    const output = new Writable({ write: (_chunk, _encoding, callback) => callback() });
+    await service.streamFragmentedMp4(token, output);
+    await expect(service.runtimeStats(session)).resolves.toMatchObject({
+      sourceConnectionCount: 0,
+      sourceRequestsLast30s: 1
+    });
+  });
 
   it('publishes a finite manifest and coalesces identical segment work', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-'));
@@ -1395,10 +1593,24 @@ describe('Live relay service', () => {
     expect(JSON.stringify(stored)).not.toContain(created.publisher.publishToken);
     expect(stored?.publishTokenHash).toMatch(/^[a-f0-9]{64}$/);
 
+    const legacy = (await repo.getVersionedLiveChannel(created.channel.id))!;
+    await repo.compareAndSetLiveChannel(
+      {
+        ...legacy.value,
+        rtmpUrl: `rtmp://127.0.0.1:1935/${legacy.value.ingestPath}`,
+        srtUrl: `srt://127.0.0.1:8890?streamid=publish:${legacy.value.ingestPath}`,
+        whipUrl: `http://127.0.0.1:8889/${legacy.value.ingestPath}/whip`
+      },
+      legacy.revision
+    );
+
     const [listed] = await service.list();
     expect(listed).toBeDefined();
     expect(listed).not.toHaveProperty('publishTokenHash');
     expect(JSON.stringify(listed)).not.toContain(created.publisher.publishToken);
+    expect(listed?.rtmpUrl).toBe(`rtmp://ingest.example/live/${stored?.ingestPath}`);
+    expect(listed?.srtUrl).toBe(`srt://ingest.example:8890?streamid=publish:${stored?.ingestPath}`);
+    expect(listed?.whipUrl).toBe(`https://ingest.example/${stored?.ingestPath}/whip`);
     await expect(
       service.authorizeMediaMtx(
         {

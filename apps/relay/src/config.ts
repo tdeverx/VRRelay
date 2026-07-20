@@ -126,6 +126,17 @@ const ConfigSchema = z
     vodProducerIdleTimeoutMs: duration
       .pipe(z.number().int().min(15_000).max(600_000))
       .default(60_000),
+    vodProducerBufferLowWatermarkMs: duration
+      .pipe(z.number().int().min(4_000).max(300_000))
+      .default(30_000),
+    vodProducerBufferHighWatermarkMs: duration
+      .pipe(z.number().int().min(8_000).max(600_000))
+      .default(60_000),
+    vodProducerMaxConcurrent: z.coerce.number().int().min(1).max(32).default(2),
+    vodProducerMaxPerProvider: z.coerce.number().int().min(1).max(32).default(2),
+    vodProducerSeekCooldownMs: duration
+      .pipe(z.number().int().min(1_000).max(60_000))
+      .default(5_000),
     masterKey: z.string().optional(),
     secretBackend: z.enum(['auto', 'keychain', 'dpapi', 'encrypted-file']).default('auto'),
     mediaMtxHlsUrl: z.url().default('http://127.0.0.1:8888'),
@@ -192,6 +203,13 @@ const ConfigSchema = z
         path: ['mediaMtxExecutable'],
         message:
           'VRRELAY_MEDIAMTX_EXECUTABLE and VRRELAY_MEDIAMTX_CONFIG must be configured together'
+      });
+
+    if (value.vodProducerBufferLowWatermarkMs >= value.vodProducerBufferHighWatermarkMs)
+      context.addIssue({
+        code: 'custom',
+        path: ['vodProducerBufferHighWatermarkMs'],
+        message: 'VOD producer high watermark must be greater than the low watermark'
       });
 
     if (value.environment !== 'production') return;
@@ -368,6 +386,18 @@ export function loadConfig(environment = process.env): RelayConfig {
     cacheLimitBytes: environment.VRRELAY_CACHE_LIMIT_BYTES ?? runtime?.cacheLimitBytes,
     vodProducerIdleTimeoutMs:
       environment.VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT ?? runtime?.vodProducerIdleTimeoutMs,
+    vodProducerBufferLowWatermarkMs:
+      environment.VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK ??
+      runtime?.vodProducerBufferLowWatermarkMs,
+    vodProducerBufferHighWatermarkMs:
+      environment.VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK ??
+      runtime?.vodProducerBufferHighWatermarkMs,
+    vodProducerMaxConcurrent:
+      environment.VRRELAY_VOD_PRODUCER_MAX_CONCURRENT ?? runtime?.vodProducerMaxConcurrent,
+    vodProducerMaxPerProvider:
+      environment.VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER ?? runtime?.vodProducerMaxPerProvider,
+    vodProducerSeekCooldownMs:
+      environment.VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN ?? runtime?.vodProducerSeekCooldownMs,
     masterKey: optionalEnvironmentValue(environment.VRRELAY_MASTER_KEY),
     secretBackend: environment.VRRELAY_SECRET_BACKEND,
     mediaMtxHlsUrl: environment.VRRELAY_MEDIAMTX_HLS_URL,

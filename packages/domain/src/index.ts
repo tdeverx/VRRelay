@@ -92,6 +92,8 @@ export const MediaItemSchema = z.object({
   overview: z.string().optional(),
   productionYear: z.number().int().optional(),
   durationSeconds: z.number().nonnegative().optional(),
+  playbackPositionSeconds: z.number().nonnegative().optional(),
+  playedPercentage: z.number().min(0).max(100).optional(),
   imageUrl: z.string().optional(),
   parentId: z.string().optional(),
   seriesName: z.string().optional(),
@@ -145,7 +147,15 @@ export const AudioSettingsSchema = z.object({
   channels: z.number().int().min(1).max(8),
   layout: z.string().min(1),
   sampleRate: z.number().int().min(8_000).max(192_000),
-  bitrateKbps: z.number().int().min(32).max(1_536)
+  bitrateKbps: z.number().int().min(32).max(1_536),
+  /** Preferred ISO 639-2 or BCP-47 source language when no track is selected. */
+  defaultLanguage: z
+    .string()
+    .trim()
+    .min(2)
+    .max(16)
+    .regex(/^[a-zA-Z]{2,8}(?:[-_][a-zA-Z0-9]{2,8})?$/)
+    .optional()
 });
 export type AudioSettings = z.infer<typeof AudioSettingsSchema>;
 
@@ -435,6 +445,9 @@ export const VodProducerStateSchema = z.enum([
 ]);
 export type VodProducerState = z.infer<typeof VodProducerStateSchema>;
 
+export const VodProducerBufferStateSchema = z.enum(['catching_up', 'buffered']);
+export type VodProducerBufferState = z.infer<typeof VodProducerBufferStateSchema>;
+
 export const VodProducerAttemptSchema = z.object({
   generation: z.number().int().positive(),
   nodeId: z.string().min(1),
@@ -454,7 +467,10 @@ export const VodProducerSchema = z.object({
   state: VodProducerStateSchema,
   demandedSegmentIndex: z.number().int().nonnegative(),
   startSegmentIndex: z.number().int().nonnegative(),
+  playbackAnchorSegmentIndex: z.number().int().nonnegative().optional(),
+  playbackAnchorAt: z.iso.datetime().optional(),
   lastPublishedSegmentIndex: z.number().int().nonnegative().optional(),
+  bufferState: VodProducerBufferStateSchema.optional(),
   leaseExpiresAt: z.iso.datetime().optional(),
   lastDemandAt: z.iso.datetime(),
   idleDeadlineAt: z.iso.datetime().optional(),
@@ -478,9 +494,12 @@ export const SessionRuntimeStatsSchema = z.object({
   generation: z.number().int().positive().optional(),
   demandedSegmentIndex: z.number().int().nonnegative().optional(),
   lastPublishedSegmentIndex: z.number().int().nonnegative().optional(),
+  bufferState: VodProducerBufferStateSchema.optional(),
   bufferSeconds: z.number().min(0),
   demandAgeMs: z.number().int().nonnegative().optional(),
   transcodeRealtimeFactor: z.number().min(0).optional(),
+  sourceConnectionCount: z.number().int().nonnegative(),
+  sourceRequestsLast30s: z.number().int().nonnegative(),
   sourceIngressMbps: z.number().min(0),
   viewerEgressMbps: z.number().min(0),
   cacheHits: z.number().int().nonnegative(),

@@ -173,7 +173,7 @@ export class FFmpegTranscoder implements Transcoder {
         ? []
         : ['-ss', request.startSeconds.toFixed(3)]),
       '-readrate',
-      '1',
+      '2',
       '-readrate_initial_burst',
       initialBurst.toFixed(3),
       ...this.#inputArgs(request.source, request.profile),

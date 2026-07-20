@@ -27,6 +27,11 @@ describe('relay configuration', () => {
       cacheTtlMs: current.cacheTtlMs,
       cacheLimitBytes: current.cacheLimitBytes,
       vodProducerIdleTimeoutMs: current.vodProducerIdleTimeoutMs,
+      vodProducerBufferLowWatermarkMs: current.vodProducerBufferLowWatermarkMs,
+      vodProducerBufferHighWatermarkMs: current.vodProducerBufferHighWatermarkMs,
+      vodProducerMaxConcurrent: current.vodProducerMaxConcurrent,
+      vodProducerMaxPerProvider: current.vodProducerMaxPerProvider,
+      vodProducerSeekCooldownMs: current.vodProducerSeekCooldownMs,
       nodeName: current.nodeName,
       nodeRegion: current.nodeRegion
     };
@@ -60,6 +65,11 @@ describe('relay configuration', () => {
         cacheTtlMs: 60_000,
         cacheLimitBytes: 1_000_000,
         vodProducerIdleTimeoutMs: 60_000,
+        vodProducerBufferLowWatermarkMs: 30_000,
+        vodProducerBufferHighWatermarkMs: 60_000,
+        vodProducerMaxConcurrent: 2,
+        vodProducerMaxPerProvider: 2,
+        vodProducerSeekCooldownMs: 5_000,
         nodeName: 'Configured node',
         nodeRegion: 'studio'
       })
@@ -111,15 +121,36 @@ describe('relay configuration', () => {
     expect(
       loadConfig({
         VRRELAY_VIEWER_REGION_HEADER: 'X-VRRelay-Region',
-        VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '15s'
+        VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '15s',
+        VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '30s',
+        VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK: '60s',
+        VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '4',
+        VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '3',
+        VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN: '12s'
       })
     ).toMatchObject({
       viewerRegionHeader: 'x-vrrelay-region',
-      vodProducerIdleTimeoutMs: 15_000
+      vodProducerIdleTimeoutMs: 15_000,
+      vodProducerBufferLowWatermarkMs: 30_000,
+      vodProducerBufferHighWatermarkMs: 60_000,
+      vodProducerMaxConcurrent: 4,
+      vodProducerMaxPerProvider: 3,
+      vodProducerSeekCooldownMs: 12_000
     });
     expect(() => loadConfig({ VRRELAY_VIEWER_REGION_HEADER: 'invalid header' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '14s' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '601s' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '0' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '33' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '0' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN: '999ms' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN: '61s' })).toThrow();
+    expect(() =>
+      loadConfig({
+        VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '60s',
+        VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK: '30s'
+      })
+    ).toThrow(/high watermark must be greater/);
   });
 
   it('accepts normal dashboard levels and standard operational environment levels', () => {

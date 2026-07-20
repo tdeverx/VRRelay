@@ -77,6 +77,24 @@ interface JellyfinItem {
   ImageTags?: Record<string, string>;
   MediaSources?: JellyfinMediaSource[];
   MediaStreams?: JellyfinMediaStream[];
+  RecursiveItemCount?: number;
+  ChildCount?: number;
+  LocationType?: string;
+  IsPlaceHolder?: boolean;
+  UserData?: {
+    PlaybackPositionTicks?: number;
+    PlayedPercentage?: number;
+  };
+}
+
+function isPlayableCatalogItem(item: JellyfinItem): boolean {
+  if (item.IsPlaceHolder || item.LocationType === 'Virtual') return false;
+  if (item.Type === 'Movie' || item.Type === 'Episode') return (item.MediaSources?.length ?? 0) > 0;
+  if (item.Type === 'Series' || item.Type === 'Season') {
+    const descendants = item.RecursiveItemCount ?? item.ChildCount;
+    return descendants === undefined || descendants > 0;
+  }
+  return true;
 }
 
 interface JellyfinItemsResult {
@@ -194,6 +212,9 @@ export class JellyfinProvider implements MediaProvider {
       Recursive: query.parentId ? 'false' : 'true',
       Fields: 'Overview,MediaSources,MediaStreams,PrimaryImageAspectRatio',
       EnableImages: 'true',
+      ExcludeLocationTypes: 'Virtual',
+      IsMissing: 'false',
+      IsPlaceHolder: 'false',
       StartIndex: String(query.offset ?? 0),
       Limit: String(query.limit ?? 50),
       SortBy: query.search ? 'SortName' : 'DateCreated,SortName',
@@ -202,7 +223,17 @@ export class JellyfinProvider implements MediaProvider {
     if (query.parentId) params.set('ParentId', query.parentId);
     if (query.search) params.set('SearchTerm', query.search);
     if ((query.kinds?.length ?? 0) > 0) params.set('IncludeItemTypes', query.kinds.join(','));
-    const path = connection.userId ? `/Users/${connection.userId}/Items` : '/Items';
+    let path = connection.userId ? `/Users/${connection.userId}/Items` : '/Items';
+    if (query.section === 'continue_watching' && connection.userId) {
+      path = `/Users/${connection.userId}/Items/Resume`;
+      params.set('MediaTypes', 'Video');
+    } else if (query.section === 'next_up' && connection.userId) {
+      path = '/Shows/NextUp';
+      params.set('UserId', connection.userId);
+    } else if (query.section === 'recently_added') {
+      params.set('Recursive', 'true');
+      if ((query.kinds?.length ?? 0) === 0) params.set('IncludeItemTypes', 'Movie,Episode');
+    }
     const result = await this.#request<JellyfinItemsResult>(
       connection.baseUrl,
       `${path}?${params}`,
@@ -213,7 +244,9 @@ export class JellyfinProvider implements MediaProvider {
       }
     );
     return {
-      items: (result.Items ?? []).map((item) => this.#mapItem(connection.id, item)),
+      items: (result.Items ?? [])
+        .filter(isPlayableCatalogItem)
+        .map((item) => this.#mapItem(connection.id, item)),
       total: result.TotalRecordCount ?? 0
     };
   }
@@ -403,6 +436,12 @@ export class JellyfinProvider implements MediaProvider {
       ...(item.Overview ? { overview: item.Overview } : {}),
       ...(item.ProductionYear ? { productionYear: item.ProductionYear } : {}),
       ...(item.RunTimeTicks ? { durationSeconds: item.RunTimeTicks / 10_000_000 } : {}),
+      ...(item.UserData?.PlaybackPositionTicks
+        ? { playbackPositionSeconds: item.UserData.PlaybackPositionTicks / 10_000_000 }
+        : {}),
+      ...(item.UserData?.PlayedPercentage !== undefined
+        ? { playedPercentage: item.UserData.PlayedPercentage }
+        : {}),
       ...(item.ParentId ? { parentId: item.ParentId } : {}),
       ...(item.SeriesName ? { seriesName: item.SeriesName } : {}),
       ...(item.SeasonName ? { seasonName: item.SeasonName } : {}),

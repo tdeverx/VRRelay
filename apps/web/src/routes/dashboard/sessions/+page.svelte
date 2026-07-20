@@ -80,6 +80,23 @@
     if (value < 1_000) return 'Demand now';
     return `Demand ${Math.round(value / 1_000)}s ago`;
   }
+  function producerStatus(stats: SessionRuntimeStats | undefined) {
+    switch (stats?.producerState) {
+      case 'complete':
+        return 'Complete';
+      case 'failed':
+        return 'Failed';
+      case 'idle':
+        return 'Idle';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'switching':
+        return 'Switching';
+    }
+    if (stats?.bufferState === 'catching_up') return 'Catching up';
+    if (stats?.bufferState === 'buffered') return 'Buffered';
+    return stats?.producerState === 'starting' ? 'Starting' : 'No producer';
+  }
 </script>
 
 <div class="space-y-6 p-4 md:p-6">
@@ -139,8 +156,8 @@
                 : `${stats.transcodeRealtimeFactor.toFixed(2)}×`}
             </div>
             <div class="text-xs text-muted-foreground">
-              {stats?.producerState ?? 'No producer'} · {stats?.bufferSeconds.toFixed(1) ?? '0.0'}s
-              lead
+              {producerStatus(stats)} · {stats?.bufferSeconds.toFixed(1) ?? '0.0'}s producer
+              headroom
             </div>
           </div>
           <div class="rounded-md border p-3">
@@ -149,7 +166,9 @@
             </div>
             <div class="mt-1 font-semibold">{mbps(stats?.viewerEgressMbps)} out</div>
             <div class="text-xs text-muted-foreground">
-              {mbps(stats?.sourceIngressMbps)} from source
+              {mbps(stats?.sourceIngressMbps)} from source · {stats?.sourceConnectionCount ?? 0}
+              upstream connection{(stats?.sourceConnectionCount ?? 0) === 1 ? '' : 's'}
+              · {stats?.sourceRequestsLast30s ?? 0} requests / 30s
             </div>
           </div>
           <div class="rounded-md border p-3">

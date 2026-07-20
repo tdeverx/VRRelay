@@ -330,14 +330,25 @@ export async function createRoleServer(
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
       const affinity = viewerAffinity(request);
-      const session = await services.sessions.touchViewer(params.token, affinity, segmentIndex);
-      logPlaybackRequest(request.log, playbackRequests, {
-        sessionId: session.id,
-        clientAffinity: affinity,
-        resource: 'segment',
-        nodeId: config.nodeId,
-        segmentIndex
-      });
+      const observation = playbackRequests.observe(params.token, affinity, segmentIndex);
+      const session = await services.sessions.touchViewer(
+        params.token,
+        affinity,
+        segmentIndex,
+        observation.change === 'seeked-forward' || observation.change === 'seeked-backward'
+      );
+      logPlaybackRequest(
+        request.log,
+        playbackRequests,
+        {
+          sessionId: session.id,
+          clientAffinity: affinity,
+          resource: 'segment',
+          nodeId: config.nodeId,
+          segmentIndex
+        },
+        observation
+      );
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
@@ -356,14 +367,25 @@ export async function createRoleServer(
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
       const affinity = viewerAffinity(request);
-      const session = await services.sessions.touchViewer(params.token, affinity, segmentIndex);
-      logPlaybackRequest(request.log, playbackRequests, {
-        sessionId: session.id,
-        clientAffinity: affinity,
-        resource: 'segment',
-        nodeId: config.nodeId,
-        segmentIndex
-      });
+      const observation = playbackRequests.observe(params.token, affinity, segmentIndex);
+      const session = await services.sessions.touchViewer(
+        params.token,
+        affinity,
+        segmentIndex,
+        observation.change === 'seeked-forward' || observation.change === 'seeked-backward'
+      );
+      logPlaybackRequest(
+        request.log,
+        playbackRequests,
+        {
+          sessionId: session.id,
+          clientAffinity: affinity,
+          resource: 'segment',
+          nodeId: config.nodeId,
+          segmentIndex
+        },
+        observation
+      );
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);

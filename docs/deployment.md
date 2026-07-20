@@ -96,10 +96,19 @@ TLS proxy source ranges. The cluster manifest defaults to
 or production secrets are unsafe. Configure the proxy to send one
 `X-VRRelay-Region` value matching the target node labels, or change the header name with
 `VRRELAY_VIEWER_REGION_HEADER`. `VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT` defaults to `60s` and accepts
-15 seconds through 10 minutes. `VRRELAY_LOG_LEVEL=info` is the normal setting; use `debug` only
+15 seconds through 10 minutes. `VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK` and
+`VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK` default to `30s` and `60s`; the high watermark must be
+greater than the low watermark. The producer catches up below the low watermark and backpressures
+its existing source connection at the high watermark. `VRRELAY_LOG_LEVEL=info` is the normal setting; use `debug` only
 while collecting detailed redacted playback traces. Advanced deployments may also set the standard
 Pino levels `trace`, `warn`, `error`, `fatal`, or `silent` through the environment; the dashboard
-intentionally exposes only Normal and Detailed. Then run:
+intentionally exposes only Normal and Detailed. `VRRELAY_VOD_PRODUCER_MAX_CONCURRENT` and
+`VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER` default to `2` and bound source-worker producer admission
+(the effective limit also cannot exceed `VRRELAY_MAX_WORKERS`).
+`VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN` defaults to `5s` and suppresses replacement churn during rapid
+distant seeks. Session diagnostics expose the active upstream source connection count and source
+request attempts over the last 30 seconds so operators can distinguish provider pressure from edge
+delivery pressure. Then run:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.cluster.yml up --build

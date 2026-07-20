@@ -246,6 +246,16 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
     await freshSettingsPage.getByRole('button', { name: 'Add endpoint' }).click();
   }
   await expect(freshSettingsPage.getByText('Per-user login')).toBeVisible();
+  const playbackReporting = freshSettingsPage.getByRole('switch', {
+    name: 'Save playback activity to Jellyfin'
+  });
+  await expect(playbackReporting).toBeChecked();
+  await playbackReporting.click();
+  await freshSettingsPage.getByRole('button', { name: 'Save user access' }).click();
+  await expect(
+    freshSettingsPage.getByText('Interactive sign-in configuration saved.')
+  ).toBeVisible();
+  await expect(playbackReporting).not.toBeChecked();
   expect(
     await freshSettingsPage.evaluate(() => sessionStorage.getItem('vrrelay.csrf'))
   ).toBeTruthy();
@@ -282,15 +292,23 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   await expect(
     freshUserPage.getByRole('heading', { name: 'Choose something to relay' })
   ).toBeVisible();
-  const discovery = freshUserPage.locator('main section').first();
-  await expect(discovery.locator('[data-slot="card"]')).toHaveCount(0);
+  const continueRow = freshUserPage.getByTestId('catalog-row-continue-watching');
+  const nextRow = freshUserPage.getByTestId('catalog-row-up-next');
+  const recentRow = freshUserPage.getByTestId('catalog-row-recently-added');
+  await expect(continueRow.getByText('Browser Movie', { exact: true })).toBeVisible();
+  await expect(continueRow.getByText('30m watched', { exact: true })).toBeVisible();
+  await expect(nextRow.getByText('The Browser Episode', { exact: true })).toBeVisible();
+  await expect(recentRow.getByText('Browser Movie', { exact: true })).toBeVisible();
   await freshUserPage.getByLabel('Search movies and shows').fill('Browser');
   await freshUserPage.getByRole('button', { name: 'Search', exact: true }).click();
-  const movie = freshUserPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
-  const series = freshUserPage.locator('[data-slot="card"]').filter({ hasText: 'Browser Series' });
+  const searchResults = freshUserPage.getByTestId('catalog-search-results');
+  const movie = searchResults.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
+  const series = searchResults.locator('[data-slot="card"]').filter({ hasText: 'Browser Series' });
   await expect(movie).toBeVisible();
   await expect(series).toBeVisible();
-  await expect(discovery.getByText('The Browser Episode')).toHaveCount(0);
+  await expect(searchResults.getByText('The Browser Episode')).toHaveCount(0);
+  await expect(searchResults.getByText('Browser Empty Movie')).toHaveCount(0);
+  await expect(searchResults.getByText('Browser Empty Series')).toHaveCount(0);
   await expect(movie.getByRole('img', { name: 'Browser Movie poster' })).toBeVisible();
   const movieBounds = await movie.boundingBox();
   const movieImageBounds = await movie

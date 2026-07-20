@@ -151,10 +151,7 @@
   async function choose(item: MediaItem) {
     try {
       selected = await api.item(item.providerId, item.id);
-      audioTrackId =
-        selected.audioTracks?.find((track) => track.isDefault)?.id ??
-        selected.audioTracks?.[0]?.id ??
-        '';
+      audioTrackId = selected.audioTracks?.length ? 'default' : '';
       subtitleTrackId = 'none';
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not load media details.');
@@ -248,7 +245,7 @@
           providerId: selected.providerId,
           itemId: selected.id,
           versionId: selected.versions?.[0]?.id,
-          audioTrackId: audioTrackId || undefined,
+          ...(audioTrackId && audioTrackId !== 'default' ? { audioTrackId } : {}),
           subtitleTrackId: subtitleTrackId === 'none' ? undefined : subtitleTrackId
         },
         profileId: currentProfile.profileId,
@@ -460,11 +457,18 @@
                     type="single"
                     bind:value={audioTrackId}
                     ><Select.Trigger class="w-full"
-                      >{selected?.audioTracks?.find((track) => track.id === audioTrackId)?.title ??
-                        'Default audio'}</Select.Trigger
+                      >{audioTrackId === 'default'
+                        ? `Profile default (${currentProfile?.audio.defaultLanguage ?? 'eng'})`
+                        : (selected?.audioTracks?.find((track) => track.id === audioTrackId)
+                            ?.title ?? 'Choose audio')}</Select.Trigger
                     ><Select.Content
+                      ><Select.Item value="default"
+                        >Profile default ({currentProfile?.audio.defaultLanguage ??
+                          'eng'})</Select.Item
                       >{#each selected?.audioTracks ?? [] as track}<Select.Item value={track.id}
-                          >{track.title || track.language || track.id}</Select.Item
+                          >{track.title || track.language || track.id}{track.language
+                            ? ` · ${track.language}`
+                            : ''}</Select.Item
                         >{/each}</Select.Content
                     ></Select.Root
                   ></Field.Field

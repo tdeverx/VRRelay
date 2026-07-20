@@ -162,6 +162,8 @@ type ViewerSet = Map<string, number>;
 interface SegmentDemand {
   segmentIndex: number;
   observedAtMs: number;
+  playbackAnchorSegmentIndex?: number;
+  playbackAnchorObservedAtMs?: number;
 }
 
 export class MemoryCoordinationStore implements CoordinationStore {
@@ -245,11 +247,27 @@ export class MemoryCoordinationStore implements CoordinationStore {
     segmentIndex: number;
     observedAtMs: number;
     windowMs: number;
+    playbackDiscontinuity?: boolean;
   }): Promise<void> {
     const demands = this.#segmentDemands.get(input.sessionId) ?? new Map<string, SegmentDemand>();
+    const existing = demands.get(input.viewerHash);
+    const preserveAnchor =
+      existing?.playbackAnchorObservedAtMs !== undefined &&
+      existing.playbackAnchorObservedAtMs >= input.observedAtMs - input.windowMs;
     demands.set(input.viewerHash, {
       segmentIndex: input.segmentIndex,
-      observedAtMs: input.observedAtMs
+      observedAtMs: input.observedAtMs,
+      ...(input.playbackDiscontinuity
+        ? {
+            playbackAnchorSegmentIndex: input.segmentIndex,
+            playbackAnchorObservedAtMs: input.observedAtMs
+          }
+        : preserveAnchor
+          ? {
+              playbackAnchorSegmentIndex: existing.playbackAnchorSegmentIndex,
+              playbackAnchorObservedAtMs: existing.playbackAnchorObservedAtMs
+            }
+          : {})
     });
     const cutoff = input.observedAtMs - input.windowMs;
     for (const [viewerHash, demand] of demands)
@@ -262,7 +280,15 @@ export class MemoryCoordinationStore implements CoordinationStore {
     sessionId: string;
     observedAtMs: number;
     windowMs: number;
-  }): Promise<Array<{ viewerHash: string; segmentIndex: number; observedAtMs: number }>> {
+  }): Promise<
+    Array<{
+      viewerHash: string;
+      segmentIndex: number;
+      observedAtMs: number;
+      playbackAnchorSegmentIndex?: number;
+      playbackAnchorObservedAtMs?: number;
+    }>
+  > {
     const demands = this.#segmentDemands.get(input.sessionId);
     if (!demands) return [];
     const cutoff = input.observedAtMs - input.windowMs;

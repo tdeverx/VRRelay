@@ -109,9 +109,20 @@ Activated object-store/backend configuration records per-node application state 
 
 The HLS manifest is finite on its first response: it declares `PLAYLIST-TYPE:VOD`, every planned segment duration, and `ENDLIST`. This gives a compatible player a finite duration and seekable segment timeline. The player maintains its own current position; that value is not supplied by the manifest. VRRelay does not synchronize viewers. A VRChat world distributes the URL and playback time and seeks clients as needed.
 
-No permanent alternate rendition is generated. The producer starts at the demanded segment, builds
-a three-segment-duration buffer (bounded to 6–30 seconds), then reads at approximately playback
-rate. It stops after 60 seconds without demand by default (configurable from 15–600 seconds).
+No permanent alternate rendition is generated. The producer starts at the demanded segment and
+uses a low/high watermark buffer. By default it catches up at up to approximately 2× while
+headroom is at or below 30 seconds, backpressures the same source connection at 60 seconds, and
+does not resume catch-up until the low watermark is reached. Both watermarks are configurable and
+the hysteresis prevents rapid pacing oscillation. Headroom is measured from the completed segment
+timeline against a one-speed playback clock anchored when the producer generation starts. Segment
+requests remain demand and seek evidence; an eager player downloading every available segment does
+not collapse measured playback headroom to zero. It stops after 60 seconds without demand by
+default (configurable from 15–600 seconds).
+Each source worker admits at most the configured global and per-provider producer limits (default
+two, bounded by its worker capacity). A distant playback window must also win the active-viewer
+majority and pass the seek cooldown before a replacement generation is started. Session runtime
+snapshots include the upstream connection count and recent source-request attempts, while regional
+edges continue to serve the shared object-store segments without opening another provider connection.
 Segments are written atomically, reused temporarily, and evicted after cache expiry. Pinned
 sessions keep their playback URL and durable producer recovery metadata, not permanent media or a
 permanently running worker.

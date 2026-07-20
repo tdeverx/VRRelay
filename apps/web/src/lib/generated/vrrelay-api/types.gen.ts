@@ -88,6 +88,7 @@ export type SignInConfiguration = {
     providerId: string;
     defaultProfileId: string;
     allowedProfileIds: Array<string>;
+    reportPlaybackActivity: boolean;
 };
 
 export type SignInConfigurationState = {
@@ -184,6 +185,8 @@ export type MediaItem = {
     overview?: string;
     productionYear?: number;
     durationSeconds?: number;
+    playbackPositionSeconds?: number;
+    playedPercentage?: number;
     imageUrl?: string;
     parentId?: string;
     seriesName?: string;
@@ -237,6 +240,7 @@ export type AudioSettings = {
     layout: string;
     sampleRate: number;
     bitrateKbps: number;
+    defaultLanguage?: string;
 };
 
 export type DeliverySettings = {
@@ -368,9 +372,12 @@ export type SessionRuntimeStats = {
     generation?: number;
     demandedSegmentIndex?: number;
     lastPublishedSegmentIndex?: number;
+    bufferState?: 'catching_up' | 'buffered';
     bufferSeconds: number;
     demandAgeMs?: number;
     transcodeRealtimeFactor?: number;
+    sourceConnectionCount: number;
+    sourceRequestsLast30s: number;
     sourceIngressMbps: number;
     viewerEgressMbps: number;
     cacheHits: number;
@@ -388,6 +395,7 @@ export type VodProducer = {
     demandedSegmentIndex: number;
     startSegmentIndex: number;
     lastPublishedSegmentIndex?: number;
+    bufferState?: 'catching_up' | 'buffered';
     leaseExpiresAt?: string;
     lastDemandAt: string;
     idleDeadlineAt?: string;
@@ -718,6 +726,11 @@ export type RuntimeConfiguration = {
     cacheTtlMs: number;
     cacheLimitBytes: number;
     vodProducerIdleTimeoutMs: number;
+    vodProducerBufferLowWatermarkMs: number;
+    vodProducerBufferHighWatermarkMs: number;
+    vodProducerMaxConcurrent: number;
+    vodProducerMaxPerProvider: number;
+    vodProducerSeekCooldownMs: number;
     nodeName: string;
     nodeRegion: string;
 };
@@ -1239,6 +1252,7 @@ export type BrowseUserCatalogData = {
     body?: never;
     path?: never;
     query?: {
+        section?: 'continue_watching' | 'next_up' | 'recently_added';
         parentId?: string;
         search?: string;
         kinds?: Array<string>;

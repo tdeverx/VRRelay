@@ -183,12 +183,17 @@ export interface CoordinationStore {
     segmentIndex: number;
     observedAtMs: number;
     windowMs: number;
+    playbackDiscontinuity?: boolean;
   }): Promise<void>;
-  listSegmentDemands(input: {
-    sessionId: string;
-    observedAtMs: number;
-    windowMs: number;
-  }): Promise<Array<{ viewerHash: string; segmentIndex: number; observedAtMs: number }>>;
+  listSegmentDemands(input: { sessionId: string; observedAtMs: number; windowMs: number }): Promise<
+    Array<{
+      viewerHash: string;
+      segmentIndex: number;
+      observedAtMs: number;
+      playbackAnchorSegmentIndex?: number;
+      playbackAnchorObservedAtMs?: number;
+    }>
+  >;
   publish(channel: string, payload: string): Promise<void>;
   subscribe(channel: string, listener: (payload: string) => void): Promise<() => Promise<void>>;
   health(): Promise<BackendStatus>;

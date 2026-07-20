@@ -260,6 +260,7 @@ export const api = {
     result<SignInConfigurationRequest>(updateSignInConfiguration({ ...required, body })),
   userCatalog: (
     query: {
+      section?: 'continue_watching' | 'next_up' | 'recently_added';
       search?: string;
       parentId?: string;
       kinds?: string[];

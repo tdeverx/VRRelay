@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { NodeCapability, ProviderBinding, ProviderConnection } from '@vrrelay/domain';
 import type { NodeAgentOptions } from '../agent-transport.js';
 import { loadConfig } from '../config.js';
-import { configuredNodeAgentOptions, locallyAvailableProviderIds } from './runtime.js';
+import {
+  advertisedIngestUrl,
+  configuredNodeAgentOptions,
+  locallyAvailableProviderIds
+} from './runtime.js';
 
 const capabilities = async (): Promise<NodeCapability> => ({
   encoders: [],
@@ -18,6 +22,24 @@ const capabilities = async (): Promise<NodeCapability> => ({
 });
 
 describe('runtime public routing configuration', () => {
+  it('replaces default loopback ingest hosts with the configured public hostname', () => {
+    expect(advertisedIngestUrl('rtmp://127.0.0.1:1935', 'https://relay.example.test')).toBe(
+      'rtmp://relay.example.test:1935'
+    );
+    expect(advertisedIngestUrl('srt://localhost:8890', 'https://relay.example.test')).toBe(
+      'srt://relay.example.test:8890'
+    );
+    expect(advertisedIngestUrl('http://127.0.0.1:8889', 'https://relay.example.test')).toBe(
+      'http://relay.example.test:8889'
+    );
+  });
+
+  it('preserves explicitly configured non-loopback ingest endpoints', () => {
+    expect(
+      advertisedIngestUrl('rtmp://ingest.example.test:1935', 'https://relay.example.test')
+    ).toBe('rtmp://ingest.example.test:1935');
+  });
+
   it('advertises the playback origin to the controller when origins are distinct', () => {
     const config = loadConfig({
       VRRELAY_PUBLIC_URL: 'https://relay.example.test',

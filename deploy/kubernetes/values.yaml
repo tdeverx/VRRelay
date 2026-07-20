@@ -3,7 +3,15 @@ disruptionBudget: { enabled: true }
 rollout: { runtimeSecretChecksum: '' }
 migration: { activeDeadlineSeconds: 1800 }
 routing: { viewerRegionHeader: x-vrrelay-region }
-vodProducer: { idleTimeout: 60s }
+vodProducer:
+  {
+    idleTimeout: 60s,
+    bufferLowWatermark: 30s,
+    bufferHighWatermark: 60s,
+    maxConcurrent: 2,
+    maxPerProvider: 2,
+    seekCooldown: 5s
+  }
 networkPolicy:
   enabled: true
   externalEgress:

@@ -89,6 +89,16 @@ const EDGE_TRANSCODER: Transcoder = {
   }
 };
 
+export function advertisedIngestUrl(configuredUrl: string, publicUrl: string): string {
+  const configured = new URL(configuredUrl);
+  const publicOrigin = new URL(publicUrl);
+  const loopback = (hostname: string) =>
+    hostname === 'localhost' || hostname === '::1' || hostname.startsWith('127.');
+  if (loopback(configured.hostname) && !loopback(publicOrigin.hostname))
+    configured.hostname = publicOrigin.hostname;
+  return configured.toString().replace(/\/$/, '');
+}
+
 function liveService(
   config: RelayConfig,
   repository: ReturnType<typeof createRepository>,
@@ -100,9 +110,9 @@ function liveService(
     repository,
     {
       publicUrl: config.publicUrl,
-      rtmpUrl: config.mediaMtxRtmpUrl,
-      srtUrl: config.mediaMtxSrtUrl,
-      whipUrl: config.mediaMtxWhipUrl,
+      rtmpUrl: advertisedIngestUrl(config.mediaMtxRtmpUrl, config.publicUrl),
+      srtUrl: advertisedIngestUrl(config.mediaMtxSrtUrl, config.publicUrl),
+      whipUrl: advertisedIngestUrl(config.mediaMtxWhipUrl, config.publicUrl),
       hlsUrl: config.mediaMtxHlsUrl,
       internalRtspUrl: config.mediaMtxRtspUrl,
       allowUnauthenticatedInternalRead: config.mediaMtxAllowInternalRead,
@@ -379,6 +389,11 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       nodeId: config.nodeId,
       roles: config.nodeRoles,
       vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
@@ -591,6 +606,11 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
       nodeId: config.nodeId,
       roles: ['source-worker'],
       vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
@@ -789,6 +809,11 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
       nodeId: config.nodeId,
       roles: ['edge'],
       vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },

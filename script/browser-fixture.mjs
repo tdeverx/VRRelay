@@ -22,7 +22,10 @@ const jellyfinItems = [
     Type: 'Movie',
     Overview: 'A browser-test movie ready to relay.',
     ProductionYear: 2026,
-    ImageTags: { Primary: 'movie-image' }
+    RunTimeTicks: 72_000_000_000,
+    UserData: { PlaybackPositionTicks: 18_000_000_000, PlayedPercentage: 25 },
+    ImageTags: { Primary: 'movie-image' },
+    MediaSources: [{ Id: 'movie-source', Name: 'Original', Container: 'mkv' }]
   },
   {
     Id: 'series-1',
@@ -30,6 +33,7 @@ const jellyfinItems = [
     Type: 'Series',
     Overview: 'A browser-test series with episodic relay support.',
     ProductionYear: 2026,
+    RecursiveItemCount: 2,
     ImageTags: { Primary: 'series-image' }
   },
   {
@@ -39,6 +43,7 @@ const jellyfinItems = [
     ParentId: 'series-1',
     SeriesName: 'Browser Series',
     IndexNumber: 1,
+    RecursiveItemCount: 1,
     ImageTags: { Primary: 'season-image' }
   },
   {
@@ -86,6 +91,20 @@ const jellyfinItems = [
         ]
       }
     ]
+  },
+  {
+    Id: 'movie-empty',
+    Name: 'Browser Empty Movie',
+    Type: 'Movie',
+    Overview: 'Metadata without a playable file.',
+    MediaSources: []
+  },
+  {
+    Id: 'series-empty',
+    Name: 'Browser Empty Series',
+    Type: 'Series',
+    Overview: 'A show with no playable episodes.',
+    RecursiveItemCount: 0
   }
 ];
 
@@ -120,6 +139,14 @@ const jellyfin = createServer(async (request, response) => {
   }
   if (request.method === 'GET' && url.pathname === '/System/Info') {
     send(200, { ServerName: 'Browser Jellyfin', Version: '10.11.0' });
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/Users/browser-user/Items/Resume') {
+    send(200, { Items: [jellyfinItems[0]], TotalRecordCount: 1 });
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/Shows/NextUp') {
+    send(200, { Items: [jellyfinItems[3]], TotalRecordCount: 1 });
     return;
   }
   if (request.method === 'GET' && /^\/Items\/[^/]+\/Images\/Primary$/.test(url.pathname)) {

@@ -42,6 +42,7 @@
   let signInConfigured = $state(false);
   let defaultProfileId = $state('');
   let allowedProfileIds = $state<string[]>([]);
+  let reportPlaybackActivity = $state(true);
   let tokenName = $state('Unity client');
   let newToken = $state('');
   let scopeState = $state<Record<Exclude<Scope, 'admin'>, boolean>>({
@@ -86,6 +87,7 @@
         signInProviderId = signInResult.configuration.providerId;
         defaultProfileId = signInResult.configuration.defaultProfileId;
         allowedProfileIds = signInResult.configuration.allowedProfileIds;
+        reportPlaybackActivity = signInResult.configuration.reportPlaybackActivity;
       } else {
         signInProviderId =
           providerResult.items.find((provider) => provider.authMode === 'delegated')?.id ?? '';
@@ -181,7 +183,8 @@
     await api.updateSignInConfiguration({
       providerId,
       defaultProfileId,
-      allowedProfileIds
+      allowedProfileIds,
+      reportPlaybackActivity
     });
     signInConfigured = true;
     return true;
@@ -194,7 +197,8 @@
       const configuration: SignInConfigurationRequest = {
         providerId: signInProviderId,
         defaultProfileId,
-        allowedProfileIds
+        allowedProfileIds,
+        reportPlaybackActivity
       };
       await api.updateSignInConfiguration(configuration);
       signInConfigured = true;
@@ -516,6 +520,19 @@
                 {/each}
               </div>
             </Field.Field>
+            <label
+              class="flex items-center justify-between gap-4 rounded-lg border p-3"
+              for="report-playback-activity"
+            >
+              <span>
+                <span class="block text-sm font-medium">Save playback activity to Jellyfin</span>
+                <span class="text-muted-foreground block text-xs">
+                  When disabled, VRRelay still tracks viewers and session health, but Jellyfin does
+                  not receive play, progress, or stop events.
+                </span>
+              </span>
+              <Switch id="report-playback-activity" bind:checked={reportPlaybackActivity} />
+            </label>
             <Button
               disabled={busy ||
                 !signInProviderId ||
@@ -856,6 +873,32 @@
                 oninput={() => (runtimeValidated = false)}
               /></Field.Field
             ><Field.Field
+              ><Field.Label for="producer-max-concurrent">Maximum VOD producers</Field.Label><Input
+                id="producer-max-concurrent"
+                type="number"
+                min="1"
+                max="32"
+                bind:value={runtimeDraft.vodProducerMaxConcurrent}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /><Field.Description
+                >Limits continuous source producers on this node. Other transcode work still uses
+                the general worker pool.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="producer-max-provider">Maximum producers per provider</Field.Label
+              ><Input
+                id="producer-max-provider"
+                type="number"
+                min="1"
+                max="32"
+                bind:value={runtimeDraft.vodProducerMaxPerProvider}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /><Field.Description
+                >Caps simultaneous VOD source connections to one provider on this node.</Field.Description
+              ></Field.Field
+            ><Field.Field
               ><Field.Label>Diagnostic logging</Field.Label><Select.Root
                 type="single"
                 value={runtimeDraft.logLevel}
@@ -927,6 +970,62 @@
                 >Stops the continuous source connection after demand goes quiet. The shared
                 single-producer guarantee currently applies to HLS VOD profiles only; experimental
                 direct fragmented-MP4 streams remain per request.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="producer-buffer-low"
+                >VOD buffer refill threshold (seconds)</Field.Label
+              ><Input
+                id="producer-buffer-low"
+                type="number"
+                min="4"
+                max="300"
+                value={Math.round(runtimeDraft.vodProducerBufferLowWatermarkMs / 1_000)}
+                disabled={!runtime?.writable}
+                oninput={(event) => {
+                  runtimeDraft!.vodProducerBufferLowWatermarkMs = Math.round(
+                    Number(event.currentTarget.value) * 1_000
+                  );
+                  runtimeValidated = false;
+                }}
+              /><Field.Description
+                >When producer headroom reaches this level, catch-up transcoding resumes.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="producer-buffer-high">VOD buffer target (seconds)</Field.Label
+              ><Input
+                id="producer-buffer-high"
+                type="number"
+                min="8"
+                max="600"
+                value={Math.round(runtimeDraft.vodProducerBufferHighWatermarkMs / 1_000)}
+                disabled={!runtime?.writable}
+                oninput={(event) => {
+                  runtimeDraft!.vodProducerBufferHighWatermarkMs = Math.round(
+                    Number(event.currentTarget.value) * 1_000
+                  );
+                  runtimeValidated = false;
+                }}
+              /><Field.Description
+                >Catch-up pauses at this level. It must be greater than the refill threshold.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="producer-seek-cooldown"
+                >Seek replacement cooldown (seconds)</Field.Label
+              ><Input
+                id="producer-seek-cooldown"
+                type="number"
+                min="1"
+                max="60"
+                value={Math.round(runtimeDraft.vodProducerSeekCooldownMs / 1_000)}
+                disabled={!runtime?.writable}
+                oninput={(event) => {
+                  runtimeDraft!.vodProducerSeekCooldownMs = Math.round(
+                    Number(event.currentTarget.value) * 1_000
+                  );
+                  runtimeValidated = false;
+                }}
+              /><Field.Description
+                >Prevents repeated distant seeks from rapidly replacing the shared producer.</Field.Description
               ></Field.Field
             ></Field.Group
           ></Card.Content

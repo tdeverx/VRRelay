@@ -9,7 +9,8 @@ import type { ProfileRevision, RelaySession, VodProducer } from '@vrrelay/domain
 import type { Transcoder } from './index.js';
 import { InMemoryEventBus } from './index.js';
 import { SessionCache } from './session-cache.js';
-import { VodProducerCoordinator } from './vod-producer-coordinator.js';
+import { estimateVodProducerBufferMs, VodProducerCoordinator } from './vod-producer-coordinator.js';
+import type { VodProducerSourcePacing } from './vod-source-pacing.js';
 
 const directories: string[] = [];
 
@@ -126,7 +127,16 @@ class ReleaseFailingCoordination extends MemoryCoordinationStore {
 async function fixture(
   idleTimeoutMs = 60_000,
   coordination: MemoryCoordinationStore = new MemoryCoordinationStore(),
-  timing: { leaseMs?: number; leaseRenewMs?: number } = {}
+  timing: {
+    leaseMs?: number;
+    leaseRenewMs?: number;
+    bufferLowWatermarkMs?: number;
+    bufferHighWatermarkMs?: number;
+    maxConcurrentProducers?: number;
+    maxConcurrentProducersPerProvider?: number;
+    seekCooldownMs?: number;
+    waitForSegmentMs?: number;
+  } = {}
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'vrrelay-producer-'));
   directories.push(directory);
@@ -140,6 +150,7 @@ async function fixture(
     new InMemoryEventBus()
   );
   const starts: number[] = [];
+  let sourcePacing: VodProducerSourcePacing | undefined;
   const coordinator = new VodProducerCoordinator(
     repository,
     coordination,
@@ -147,25 +158,59 @@ async function fixture(
     continuousTranscoder(starts),
     cache,
     {
-      prepare: async (_session, selectedProfile, startSegmentIndex) => ({
-        source: {
-          url: 'http://127.0.0.1/internal/source/opaque',
-          headers: {},
-          durationSeconds: 120,
-          fingerprint: 'fixture'
-        },
-        profile: selectedProfile,
-        startSegmentIndex,
-        startSeconds: startSegmentIndex * selectedProfile.delivery.segmentDuration,
-        duration: 120 - startSegmentIndex * selectedProfile.delivery.segmentDuration
-      })
+      prepare: async (_session, selectedProfile, startSegmentIndex, _signal, pacing) => {
+        sourcePacing = pacing;
+        return {
+          source: {
+            url: 'http://127.0.0.1/internal/source/opaque',
+            headers: {},
+            durationSeconds: 120,
+            fingerprint: 'fixture'
+          },
+          profile: selectedProfile,
+          startSegmentIndex,
+          startSeconds: startSegmentIndex * selectedProfile.delivery.segmentDuration,
+          duration: 120 - startSegmentIndex * selectedProfile.delivery.segmentDuration
+        };
+      }
     },
-    { cacheDir: join(directory, 'cache'), nodeId: 'worker-a', idleTimeoutMs, ...timing }
+    {
+      cacheDir: join(directory, 'cache'),
+      nodeId: 'worker-a',
+      idleTimeoutMs,
+      bufferLowWatermarkMs: 30_000,
+      bufferHighWatermarkMs: 60_000,
+      // Existing coordination tests exercise immediate majority seeks. Production
+      // uses the configured cooldown; tests that cover it opt in explicitly.
+      seekCooldownMs: 0,
+      ...timing
+    }
   );
-  return { coordinator, coordination, repository, starts };
+  return { coordinator, coordination, repository, starts, sourcePacing: () => sourcePacing };
 }
 
 describe('durable VOD producer coordination', () => {
+  it('measures producer headroom against a one-speed playback clock', () => {
+    expect(
+      estimateVodProducerBufferMs({
+        playbackAnchorSegmentIndex: 10,
+        lastPublishedSegmentIndex: 19,
+        segmentDurationSeconds: 4,
+        playbackAnchorAtMs: 1_000,
+        observedAtMs: 11_000
+      })
+    ).toBe(30_000);
+    expect(
+      estimateVodProducerBufferMs({
+        playbackAnchorSegmentIndex: 10,
+        lastPublishedSegmentIndex: 19,
+        segmentDurationSeconds: 4,
+        playbackAnchorAtMs: 1_000,
+        observedAtMs: 51_000
+      })
+    ).toBe(0);
+  });
+
   it('joins concurrent and sequential demand, then replaces only for a distant majority seek', async () => {
     const { coordinator, coordination, repository, starts } = await fixture();
     const selectedSession = session();
@@ -221,6 +266,131 @@ describe('durable VOD producer coordination', () => {
     const producer = await coordinator.get(selectedSession.id);
     expect(producer).toMatchObject({ state: 'idle' });
     expect(producer?.ownerNodeId).toBeUndefined();
+    await coordinator.close();
+    repository.close();
+  }, 5_000);
+
+  it('rejects new producers when the source worker or provider reaches capacity', async () => {
+    const { coordinator, coordination, repository } = await fixture(60_000, undefined, {
+      maxConcurrentProducers: 1,
+      maxConcurrentProducersPerProvider: 1
+    });
+    const first = session('session-capacity-first');
+    await coordination.recordSegmentDemand({
+      sessionId: first.id,
+      viewerHash: 'viewer-a',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await coordinator.ensure(first, profile, 0);
+
+    const sameProvider = {
+      ...session('session-capacity-provider'),
+      source: { ...first.source!, itemId: 'movie-2' }
+    };
+    await coordination.recordSegmentDemand({
+      sessionId: sameProvider.id,
+      viewerHash: 'viewer-b',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await expect(coordinator.ensure(sameProvider, profile, 0)).rejects.toThrow(
+      'source worker has reached its VOD producer capacity'
+    );
+
+    const otherProvider = {
+      ...session('session-capacity-worker'),
+      source: { ...first.source!, providerId: 'provider-2' }
+    };
+    await coordination.recordSegmentDemand({
+      sessionId: otherProvider.id,
+      viewerHash: 'viewer-c',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await expect(coordinator.ensure(otherProvider, profile, 0)).rejects.toThrow(
+      'source worker has reached its VOD producer capacity'
+    );
+
+    await coordinator.close();
+    repository.close();
+  });
+
+  it('suppresses seek churn during the configured replacement cooldown', async () => {
+    const { coordinator, coordination, repository, starts } = await fixture(60_000, undefined, {
+      seekCooldownMs: 5_000
+    });
+    const selectedSession = session('session-seek-cooldown');
+    await coordination.recordSegmentDemand({
+      sessionId: selectedSession.id,
+      viewerHash: 'viewer-current',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await coordinator.ensure(selectedSession, profile, 0);
+    for (const viewerHash of ['viewer-seek-a', 'viewer-seek-b', 'viewer-seek-c'])
+      await coordination.recordSegmentDemand({
+        sessionId: selectedSession.id,
+        viewerHash,
+        segmentIndex: 10,
+        observedAtMs: Date.now(),
+        windowMs: 30_000
+      });
+
+    const controller = new AbortController();
+    const seeking = coordinator.ensure(selectedSession, profile, 10, controller.signal);
+    const abortTimer = setTimeout(
+      () => controller.abort(new Error('seek cooldown test aborted')),
+      100
+    );
+    await expect(seeking).rejects.toThrow('seek cooldown test aborted');
+    clearTimeout(abortTimer);
+    expect(starts).toEqual([0]);
+    expect(await coordinator.get(selectedSession.id)).toMatchObject({
+      generation: 1,
+      state: 'running',
+      demandedSegmentIndex: 10
+    });
+    await coordinator.close();
+    repository.close();
+  });
+
+  it('uses low and high watermarks without oscillating between them', async () => {
+    const { coordinator, coordination, repository, sourcePacing } = await fixture(
+      60_000,
+      new MemoryCoordinationStore(),
+      { bufferLowWatermarkMs: 2_500, bufferHighWatermarkMs: 3_000 }
+    );
+    const selectedSession = session('session-buffer-watermarks');
+    await coordination.recordSegmentDemand({
+      sessionId: selectedSession.id,
+      viewerHash: 'viewer-a',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await coordinator.ensure(selectedSession, profile, 0);
+    expect(sourcePacing()?.state).toBe('buffered');
+    expect(await coordinator.get(selectedSession.id)).toMatchObject({ bufferState: 'buffered' });
+
+    await coordination.recordSegmentDemand({
+      sessionId: selectedSession.id,
+      viewerHash: 'viewer-a',
+      segmentIndex: 1,
+      observedAtMs: Date.now(),
+      windowMs: 30_000,
+      playbackDiscontinuity: true
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    expect(sourcePacing()?.state).toBe('catching_up');
+    expect(await coordinator.get(selectedSession.id)).toMatchObject({
+      bufferState: 'catching_up',
+      playbackAnchorSegmentIndex: 1
+    });
     await coordinator.close();
     repository.close();
   }, 5_000);

@@ -21,8 +21,9 @@ not release evidence by themselves.
 - First-run administrator authentication, HTTP-only sessions, CSRF protection,
   scoped personal access tokens, opaque playback grants, structured profile
   validation, basic redaction, and provider URL policy.
-- Jellyfin authentication, catalog/source mapping, ranged source access, and
-  playback activity reporting on the implemented happy paths.
+- Jellyfin authentication, playable-only search/hierarchy plus Continue Watching, Up Next, and
+  Recently Added discovery, catalog/source mapping, ranged source access, and
+  administrator-controlled playback activity reporting on the implemented happy paths.
 - Finite just-in-time HLS VOD, FFmpeg capability discovery, temporary segment
   caching, one fenced continuous producer per session, regional edge routing, durable producer
   recovery state, and MPEG-TS output as the intended production
@@ -266,6 +267,13 @@ pending.
 - The authenticated Sessions view now derives ready/streaming/error state from the live producer
   and viewer window and displays short-lived per-node transcode, network, playback-window, and
   cache diagnostics. Viewer identity remains installation-HMACed and expires after 30 seconds.
+- HLS VOD producers now maintain configurable low/high buffer watermarks. Catch-up runs at up to
+  approximately 2× below 30 seconds by default, backpressures the same provider connection at 60
+  seconds, and resumes only at the low watermark so normal request jitter does not exhaust the
+  playback buffer.
+- Session runtime diagnostics now expose upstream source connection/request activity. Producer
+  admission is bounded globally and per provider, and distant seek replacement has a configurable
+  cooldown to protect provider bandwidth during synchronized playback.
 - Request diagnostics classify redacted client starts, retries, resumes, seeks, edge selection,
   source-range transitions, and control-plane mutation outcomes. Normal and detailed logging are
   selectable in Runtime settings without exposing raw client addresses, grants, credentials,

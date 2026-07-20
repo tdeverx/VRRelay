@@ -11,6 +11,19 @@ The external administrative API is versioned under `/api/v1`. Its OpenAPI descri
 
 Public responses must not contain provider secrets, private source URLs, FFmpeg arguments, backend connection strings, certificate private material, or filesystem paths.
 
+`GET /api/v1/catalog` accepts the provider-neutral `section` values `continue_watching`, `next_up`,
+and `recently_added` in addition to hierarchy and search queries. Provider adapters translate those
+sections into their native discovery APIs. Media items may include a saved playback position and
+percentage for progress presentation.
+Jellyfin catalog responses exclude virtual, missing, and placeholder entries; movies and episodes
+must expose at least one media source, while empty shows and seasons are omitted when Jellyfin
+reports that they contain no descendants.
+
+The administrator-owned interactive sign-in configuration includes `reportPlaybackActivity`.
+Signed-in users cannot override this policy when creating a VOD session. Disabling it prevents all
+provider playback start, progress, and stop calls while retaining VRRelay's own viewer, session,
+producer, and request diagnostics.
+
 `GET /api/v1/health` is lightweight liveness. `GET /api/v1/ready` is
 dependency-aware readiness for orchestrators: it returns 503 when a backend
 dependency is unhealthy or a staged backend change requires restart, and it
@@ -21,7 +34,8 @@ exposed publicly.
 
 `GET /api/v1/configuration/runtime` returns an allowlisted, non-secret view of listener and
 advertised URLs, proxy CIDRs, the trusted viewer-region header, agent listener, encoder/cache
-limits, VOD producer idle timeout, and node labels. Validation and
+limits, VOD producer idle timeout, low/high producer buffer watermarks, producer concurrency and
+per-provider caps, seek-replacement cooldown, and node labels. Validation and
 updates require administrator authentication plus browser CSRF protection. Updates are writable
 only when the service manager explicitly supplies `VRRELAY_RUNTIME_CONFIG`; explicit deployment
 environment variables retain precedence. `/configuration/runtime/restart` is available only when
@@ -31,9 +45,13 @@ Node capability responses report cache usage in bytes, the configured cache limi
 
 `GET /api/v1/sessions` returns both the authorized session list and a matching array of short-lived
 runtime snapshots. These snapshots expose estimated 30-second viewers, derived activity,
-producer/window state, transcode realtime factor, source ingress, viewer egress, and delivery-cache
+producer/window and catch-up/buffered state, transcode realtime factor, upstream source connection
+and request counts, source ingress, viewer egress, and delivery-cache
 counts. They contain no client identity, source URL, provider credential, or unbounded Prometheus
 label and expire naturally when a node stops reporting.
+
+Profiles may set `audio.defaultLanguage` to an ISO 639-2 or BCP-47 language. A VOD session resolves
+that preference when no `audioTrackId` is supplied; an explicit track remains authoritative.
 
 `GET /api/v1/vod-producers` gives administrators a redacted list of durable producer ownership,
 generation, state, playback window, demand age, and failure data. `GET
@@ -48,6 +66,9 @@ normalized channel is pinned to the first live-session profile. Jellyfin browser
 user-owned channels: list and mutation routes filter by the current stable identity, while
 operators, administrators, owners, and appropriately scoped personal tokens use the system-wide
 view. Ownership is assigned server-side and is not part of the public channel response.
+For standalone/native defaults, loopback RTMP, SRT, and WHIP hosts are re-advertised with the
+configured public relay hostname. Explicit non-loopback ingest URLs continue to override this
+derivation.
 
 ## Changing the API
 

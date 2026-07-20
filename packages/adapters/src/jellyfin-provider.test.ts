@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE, type ProviderConnection } from '@vrrelay/domain';
+import { CatalogQuerySchema } from '@vrrelay/contracts';
 import { JellyfinProvider, type JellyfinConnectorRequest } from './jellyfin-provider.js';
 import { resolveProviderRequestTarget, validateProviderUrl } from './network-policy.js';
 
@@ -18,6 +19,137 @@ function response(
 }
 
 describe('Jellyfin request transport', () => {
+  it('maps provider-neutral home sections to Jellyfin feeds and user progress', async () => {
+    const requests: JellyfinConnectorRequest[] = [];
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async (request) => {
+        requests.push(request);
+        return response(
+          200,
+          JSON.stringify({
+            Items: [
+              {
+                Id: 'episode-1',
+                Name: 'A New Episode',
+                Type: 'Episode',
+                RunTimeTicks: 3_600_000_000,
+                MediaSources: [{ Id: 'episode-source' }],
+                UserData: { PlaybackPositionTicks: 900_000_000, PlayedPercentage: 25 }
+              }
+            ],
+            TotalRecordCount: 1
+          }),
+          { 'content-type': 'application/json' }
+        );
+      }
+    });
+    const now = new Date().toISOString();
+    const connection = {
+      id: 'provider',
+      type: 'jellyfin',
+      name: 'Jellyfin',
+      baseUrl: 'https://jellyfin.invalid',
+      authMode: 'delegated',
+      secretRef: 'provider:delegated',
+      userId: 'user-1',
+      capabilities: ['search'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    } satisfies ProviderConnection;
+
+    const result = await provider.browse(
+      connection,
+      'sensitive-user-token',
+      CatalogQuerySchema.parse({ section: 'continue_watching', limit: 16 })
+    );
+    await provider.browse(
+      connection,
+      'sensitive-user-token',
+      CatalogQuerySchema.parse({ section: 'next_up', limit: 16 })
+    );
+    await provider.browse(
+      connection,
+      'sensitive-user-token',
+      CatalogQuerySchema.parse({ section: 'recently_added', limit: 24 })
+    );
+
+    expect(result.items[0]).toMatchObject({
+      id: 'episode-1',
+      playbackPositionSeconds: 90,
+      playedPercentage: 25
+    });
+    expect(requests.map((request) => request.url.pathname)).toEqual([
+      '/Users/user-1/Items/Resume',
+      '/Shows/NextUp',
+      '/Users/user-1/Items'
+    ]);
+    expect(requests[1]?.url.searchParams.get('UserId')).toBe('user-1');
+    expect(requests[2]?.url.searchParams.get('IncludeItemTypes')).toBe('Movie,Episode');
+    expect(requests[0]?.url.searchParams.get('ExcludeLocationTypes')).toBe('Virtual');
+    expect(requests[0]?.url.searchParams.get('IsMissing')).toBe('false');
+    expect(requests[0]?.url.searchParams.get('IsPlaceHolder')).toBe('false');
+  });
+
+  it('omits catalog entries that have no playable media files', async () => {
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async () =>
+        response(
+          200,
+          JSON.stringify({
+            Items: [
+              { Id: 'movie-ready', Name: 'Ready movie', Type: 'Movie', MediaSources: [{}] },
+              { Id: 'movie-empty', Name: 'Empty movie', Type: 'Movie', MediaSources: [] },
+              { Id: 'series-ready', Name: 'Ready show', Type: 'Series', RecursiveItemCount: 3 },
+              { Id: 'series-empty', Name: 'Empty show', Type: 'Series', RecursiveItemCount: 0 },
+              {
+                Id: 'episode-virtual',
+                Name: 'Virtual episode',
+                Type: 'Episode',
+                LocationType: 'Virtual',
+                MediaSources: [{}]
+              },
+              {
+                Id: 'movie-placeholder',
+                Name: 'Placeholder movie',
+                Type: 'Movie',
+                IsPlaceHolder: true,
+                MediaSources: [{}]
+              }
+            ],
+            TotalRecordCount: 6
+          }),
+          { 'content-type': 'application/json' }
+        )
+    });
+    const now = new Date().toISOString();
+    const connection = {
+      id: 'provider',
+      type: 'jellyfin',
+      name: 'Jellyfin',
+      baseUrl: 'https://jellyfin.invalid',
+      authMode: 'delegated',
+      secretRef: 'provider:delegated',
+      userId: 'user-1',
+      capabilities: ['search'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    } satisfies ProviderConnection;
+
+    const result = await provider.browse(
+      connection,
+      'sensitive-user-token',
+      CatalogQuerySchema.parse({ search: 'media', kinds: ['Movie', 'Series'] })
+    );
+
+    expect(result.items.map((item) => item.id)).toEqual(['movie-ready', 'series-ready']);
+  });
+
   it('loads artwork through the pinned authenticated transport', async () => {
     const requests: JellyfinConnectorRequest[] = [];
     const provider = new JellyfinProvider('0.1.0', {

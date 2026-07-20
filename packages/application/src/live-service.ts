@@ -152,7 +152,7 @@ export class LiveService {
         this.metrics?.increment('live_publisher_replacements_total', { outcome: 'requested' });
         await this.#recordPublisherStates();
         return {
-          channel: publicLiveChannel(sanitizeLiveChannel(result.record.value)),
+          channel: this.#publicChannel(result.record.value),
           publisher
         };
       }
@@ -268,7 +268,24 @@ export class LiveService {
   async list(filter?: { ownerId: string }): Promise<PublicLiveChannel[]> {
     return (await this.repository.listLiveChannels())
       .filter((channel) => !filter || channel.ownerId === filter.ownerId)
-      .map((channel) => publicLiveChannel(sanitizeLiveChannel(channel)));
+      .map((channel) => this.#publicChannel(channel));
+  }
+
+  #publicChannel(channel: LiveChannel): PublicLiveChannel {
+    const sanitized = sanitizeLiveChannel(channel);
+    const ingestPath = sanitized.ingestPath ?? sanitized.path;
+    return publicLiveChannel({
+      ...sanitized,
+      rtmpUrl: `${this.options.rtmpUrl}/${ingestPath}`,
+      srtUrl: `${this.options.srtUrl}?streamid=publish:${ingestPath}`,
+      whipUrl: `${this.options.whipUrl}/${ingestPath}/whip`,
+      ...(this.options.backupRtmpUrl
+        ? { backupRtmpUrl: `${this.options.backupRtmpUrl}/${ingestPath}` }
+        : {}),
+      ...(this.options.backupSrtUrl
+        ? { backupSrtUrl: `${this.options.backupSrtUrl}?streamid=publish:${ingestPath}` }
+        : {})
+    });
   }
 
   async delete(channelId: string): Promise<void> {

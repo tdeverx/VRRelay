@@ -96,6 +96,7 @@ export class RedisCoordinationStore implements CoordinationStore {
     segmentIndex: number;
     observedAtMs: number;
     windowMs: number;
+    playbackDiscontinuity?: boolean;
   }): Promise<void> {
     const timeKey = `segment-demands:${input.sessionId}:time`;
     const valueKey = `segment-demands:${input.sessionId}:value`;
@@ -108,8 +109,23 @@ export class RedisCoordinationStore implements CoordinationStore {
            redis.call('HDEL', KEYS[2], member)
          end
        end
+       local anchorIndex = ''
+       local anchorAt = ''
+       if ARGV[6] == '1' then
+         anchorIndex = ARGV[3]
+         anchorAt = ARGV[2]
+       else
+         local previous = redis.call('HGET', KEYS[2], ARGV[1])
+         if previous then
+           local _, _, savedIndex, savedAt = string.find(previous, '^[^|]*|([^|]*)|([^|]*)$')
+           if savedAt and savedAt ~= '' and tonumber(savedAt) >= tonumber(ARGV[4]) then
+             anchorIndex = savedIndex
+             anchorAt = savedAt
+           end
+         end
+       end
        redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
-       redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
+       redis.call('HSET', KEYS[2], ARGV[1], ARGV[3] .. '|' .. anchorIndex .. '|' .. anchorAt)
        redis.call('PEXPIRE', KEYS[1], ARGV[5])
        redis.call('PEXPIRE', KEYS[2], ARGV[5])
        return 1`,
@@ -120,14 +136,23 @@ export class RedisCoordinationStore implements CoordinationStore {
       input.observedAtMs,
       input.segmentIndex,
       input.observedAtMs - input.windowMs,
-      retentionMs
+      retentionMs,
+      input.playbackDiscontinuity ? '1' : '0'
     );
   }
   async listSegmentDemands(input: {
     sessionId: string;
     observedAtMs: number;
     windowMs: number;
-  }): Promise<Array<{ viewerHash: string; segmentIndex: number; observedAtMs: number }>> {
+  }): Promise<
+    Array<{
+      viewerHash: string;
+      segmentIndex: number;
+      observedAtMs: number;
+      playbackAnchorSegmentIndex?: number;
+      playbackAnchorObservedAtMs?: number;
+    }>
+  > {
     const timeKey = `segment-demands:${input.sessionId}:time`;
     const valueKey = `segment-demands:${input.sessionId}:value`;
     const cutoff = input.observedAtMs - input.windowMs;
@@ -157,9 +182,24 @@ export class RedisCoordinationStore implements CoordinationStore {
     if (!viewers.length) return [];
     const values = await this.#client.hmget(valueKey, ...viewers);
     return viewers.flatMap((viewerHash, index) => {
-      const segmentIndex = Number(values[index]);
+      const [rawSegmentIndex, rawAnchorIndex, rawAnchorAt] = (values[index] ?? '').split('|');
+      const segmentIndex = Number(rawSegmentIndex);
+      const playbackAnchorSegmentIndex = Number(rawAnchorIndex);
+      const playbackAnchorObservedAtMs = Number(rawAnchorAt);
       return Number.isInteger(segmentIndex) && segmentIndex >= 0
-        ? [{ viewerHash, segmentIndex, observedAtMs: observed.get(viewerHash)! }]
+        ? [
+            {
+              viewerHash,
+              segmentIndex,
+              observedAtMs: observed.get(viewerHash)!,
+              ...(Number.isInteger(playbackAnchorSegmentIndex) &&
+              playbackAnchorSegmentIndex >= 0 &&
+              Number.isFinite(playbackAnchorObservedAtMs) &&
+              playbackAnchorObservedAtMs >= cutoff
+                ? { playbackAnchorSegmentIndex, playbackAnchorObservedAtMs }
+                : {})
+            }
+          ]
         : [];
     });
   }

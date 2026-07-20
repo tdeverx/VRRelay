@@ -6,6 +6,29 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Added configurable 30/60-second low/high HLS VOD producer buffer watermarks. Producers catch up
+  at up to approximately 2×, backpressure the existing Jellyfin connection at the high watermark,
+  and resume only after headroom falls to the low watermark. Session diagnostics now distinguish
+  catching-up and buffered producer states. Headroom follows the producer generation's one-speed
+  playback clock, so eager HLS segment requests no longer pin the displayed lead at zero or prevent
+  the producer from reaching its configured buffer target.
+- Added Jellyfin home rows for Continue Watching, Up Next, and Recently Added, including saved
+  progress metadata. Catalog discovery now excludes virtual, missing, placeholder, and empty
+  movie/show entries that have no playable media file. Administrators can now disable Jellyfin
+  playback reporting globally for signed-in-user VOD sessions; VRRelay viewer and session
+  diagnostics remain active when provider reporting is disabled.
+- Fixed native/standalone OBS publisher details advertising loopback MediaMTX hosts after a public
+  relay hostname was configured. Default RTMP, SRT, and WHIP endpoints now use the public hostname,
+  while explicit non-loopback ingest endpoints remain authoritative and existing channel summaries
+  are re-advertised from current configuration.
+- Added upstream VOD visibility to session diagnostics: active source connections and source request
+  attempts in the last 30 seconds are shown alongside ingress and egress. Added bounded producer
+  admission (global and per-provider) plus a configurable seek-replacement cooldown to protect
+  Jellyfin and prevent rapid source churn. These controls are provider-neutral and apply to every
+  HLS VOD source worker.
+- Added a profile-level default audio language for multi-track VOD. VRRelay selects the preferred
+  language (ISO 639-2 or BCP-47) before the provider's default track, while an explicit track choice
+  always wins.
 - Added live per-session delivery diagnostics to the Sessions dashboard: privacy-preserving viewer
   estimates, producer activity, playback window and buffer lead, transcode realtime factor, source
   ingress, viewer egress, and delivery-cache effectiveness. Runtime snapshots are short-lived and

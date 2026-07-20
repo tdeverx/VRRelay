@@ -82,7 +82,14 @@ export class ProfileService {
         gop: 120,
         bFrames: 0
       },
-      audio: { codec: 'aac', channels: 2, layout: 'stereo', sampleRate: 48_000, bitrateKbps: 192 },
+      audio: {
+        codec: 'aac',
+        channels: 2,
+        layout: 'stereo',
+        sampleRate: 48_000,
+        bitrateKbps: 192,
+        defaultLanguage: 'eng'
+      },
       delivery: {
         method: 'hls',
         container: 'mpegts',

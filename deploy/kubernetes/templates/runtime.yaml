@@ -52,6 +52,11 @@ spec:
             - { name: VRRELAY_LISTEN_ADDR, value: "0.0.0.0:8099" }
             - { name: VRRELAY_VIEWER_REGION_HEADER, value: {{ $root.Values.routing.viewerRegionHeader | quote }} }
             - { name: VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT, value: {{ $root.Values.vodProducer.idleTimeout | quote }} }
+            - { name: VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK, value: {{ $root.Values.vodProducer.bufferLowWatermark | quote }} }
+            - { name: VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK, value: {{ $root.Values.vodProducer.bufferHighWatermark | quote }} }
+            - { name: VRRELAY_VOD_PRODUCER_MAX_CONCURRENT, value: {{ $root.Values.vodProducer.maxConcurrent | quote }} }
+            - { name: VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER, value: {{ $root.Values.vodProducer.maxPerProvider | quote }} }
+            - { name: VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN, value: {{ $root.Values.vodProducer.seekCooldown | quote }} }
             - name: VRRELAY_TRUSTED_PROXY_CIDRS
               valueFrom:
                 secretKeyRef:

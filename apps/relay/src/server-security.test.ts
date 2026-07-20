@@ -518,7 +518,8 @@ describe('unified Jellyfin user experience', () => {
     const configuration = {
       providerId,
       defaultProfileId: 'universal-h264-hls-vod',
-      allowedProfileIds: ['universal-h264-hls-vod', 'h264-live-hls']
+      allowedProfileIds: ['universal-h264-hls-vod', 'h264-live-hls'],
+      reportPlaybackActivity: false
     };
     expect(
       (
@@ -568,6 +569,7 @@ describe('unified Jellyfin user experience', () => {
     });
     expect(createdSession.statusCode).toBe(201);
     const session = createdSession.json();
+    expect(session.reportActivity).toBe(false);
 
     const bob = await jellyfinLogin(app, 'bob');
     const bobSessions = await app.inject({

@@ -141,6 +141,11 @@ paths:
       operationId: browseUserCatalog
       tags: [Catalog]
       parameters:
+        - {
+            name: section,
+            in: query,
+            schema: { type: string, enum: [continue_watching, next_up, recently_added] }
+          }
         - { name: parentId, in: query, schema: { type: string } }
         - { name: search, in: query, schema: { type: string, maxLength: 200 } }
         - { name: kinds, in: query, schema: { type: array, items: { type: string } } }
@@ -1130,11 +1135,12 @@ components:
     SignInConfiguration:
       type: object
       additionalProperties: false
-      required: [providerId, defaultProfileId, allowedProfileIds]
+      required: [providerId, defaultProfileId, allowedProfileIds, reportPlaybackActivity]
       properties:
         providerId: { type: string, minLength: 1 }
         defaultProfileId: { type: string, minLength: 1 }
         allowedProfileIds: { type: array, minItems: 1, items: { type: string, minLength: 1 } }
+        reportPlaybackActivity: { type: boolean, default: true }
     SignInConfigurationState:
       type: object
       required: [configuration]
@@ -1258,6 +1264,8 @@ components:
         overview: { type: string }
         productionYear: { type: integer }
         durationSeconds: { type: number, minimum: 0 }
+        playbackPositionSeconds: { type: number, minimum: 0 }
+        playedPercentage: { type: number, minimum: 0, maximum: 100 }
         imageUrl: { type: string }
         parentId: { type: string }
         seriesName: { type: string }
@@ -1327,6 +1335,13 @@ components:
         layout: { type: string }
         sampleRate: { type: integer, minimum: 8000, maximum: 192000 }
         bitrateKbps: { type: integer, minimum: 32, maximum: 1536 }
+        defaultLanguage:
+          {
+            type: string,
+            minLength: 2,
+            maxLength: 16,
+            pattern: '^[A-Za-z]{2,8}([_-][A-Za-z0-9]{2,8})?$'
+          }
     DeliverySettings:
       type: object
       required: [method, container, segmentType, segmentDuration, playlistType, latencyMode]
@@ -1509,6 +1524,8 @@ components:
           viewers,
           viewerWindowSeconds,
           bufferSeconds,
+          sourceConnectionCount,
+          sourceRequestsLast30s,
           sourceIngressMbps,
           viewerEgressMbps,
           cacheHits,
@@ -1527,9 +1544,12 @@ components:
         generation: { type: integer, minimum: 1 }
         demandedSegmentIndex: { type: integer, minimum: 0 }
         lastPublishedSegmentIndex: { type: integer, minimum: 0 }
+        bufferState: { type: string, enum: [catching_up, buffered] }
         bufferSeconds: { type: number, minimum: 0 }
         demandAgeMs: { type: integer, minimum: 0 }
         transcodeRealtimeFactor: { type: number, minimum: 0 }
+        sourceConnectionCount: { type: integer, minimum: 0 }
+        sourceRequestsLast30s: { type: integer, minimum: 0 }
         sourceIngressMbps: { type: number, minimum: 0 }
         viewerEgressMbps: { type: number, minimum: 0 }
         cacheHits: { type: integer, minimum: 0 }
@@ -1561,6 +1581,7 @@ components:
         demandedSegmentIndex: { type: integer, minimum: 0 }
         startSegmentIndex: { type: integer, minimum: 0 }
         lastPublishedSegmentIndex: { type: integer, minimum: 0 }
+        bufferState: { type: string, enum: [catching_up, buffered] }
         leaseExpiresAt: { type: string, format: date-time }
         lastDemandAt: { type: string, format: date-time }
         idleDeadlineAt: { type: string, format: date-time }
@@ -2061,6 +2082,11 @@ components:
           cacheTtlMs,
           cacheLimitBytes,
           vodProducerIdleTimeoutMs,
+          vodProducerBufferLowWatermarkMs,
+          vodProducerBufferHighWatermarkMs,
+          vodProducerMaxConcurrent,
+          vodProducerMaxPerProvider,
+          vodProducerSeekCooldownMs,
           nodeName,
           nodeRegion
         ]
@@ -2079,6 +2105,13 @@ components:
         cacheTtlMs: { type: integer, minimum: 1000, maximum: 604800000 }
         cacheLimitBytes: { type: integer, minimum: 1, maximum: 10995116277760 }
         vodProducerIdleTimeoutMs: { type: integer, minimum: 15000, maximum: 600000, default: 60000 }
+        vodProducerBufferLowWatermarkMs:
+          { type: integer, minimum: 4000, maximum: 300000, default: 30000 }
+        vodProducerBufferHighWatermarkMs:
+          { type: integer, minimum: 8000, maximum: 600000, default: 60000 }
+        vodProducerMaxConcurrent: { type: integer, minimum: 1, maximum: 32, default: 2 }
+        vodProducerMaxPerProvider: { type: integer, minimum: 1, maximum: 32, default: 2 }
+        vodProducerSeekCooldownMs: { type: integer, minimum: 1000, maximum: 60000, default: 5000 }
         nodeName: { type: string, minLength: 1, maxLength: 100 }
         nodeRegion: { type: string, minLength: 1, maxLength: 100 }
     RuntimeConfigurationState:
