@@ -119,8 +119,9 @@ requests remain demand and seek evidence; an eager player downloading every avai
 not collapse measured playback headroom to zero. It stops after 60 seconds without demand by
 default (configurable from 15–600 seconds).
 Each source worker admits at most the configured global and per-provider producer limits (default
-two, bounded by its worker capacity). A distant playback window must also win the active-viewer
-majority and pass the seek cooldown before a replacement generation is started. Session runtime
+two, bounded by its worker capacity). A distant playback window must win the active-viewer
+majority before a replacement generation is started; replacements are not artificially delayed.
+Session runtime
 snapshots include the upstream connection count and recent source-request attempts, while regional
 edges continue to serve the shared object-store segments without opening another provider connection.
 Segments are written atomically, reused temporarily, and evicted after cache expiry. Pinned

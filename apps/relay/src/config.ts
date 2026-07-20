@@ -134,9 +134,6 @@ const ConfigSchema = z
       .default(60_000),
     vodProducerMaxConcurrent: z.coerce.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.coerce.number().int().min(1).max(32).default(2),
-    vodProducerSeekCooldownMs: duration
-      .pipe(z.number().int().min(1_000).max(60_000))
-      .default(5_000),
     masterKey: z.string().optional(),
     secretBackend: z.enum(['auto', 'keychain', 'dpapi', 'encrypted-file']).default('auto'),
     mediaMtxHlsUrl: z.url().default('http://127.0.0.1:8888'),
@@ -396,8 +393,6 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_VOD_PRODUCER_MAX_CONCURRENT ?? runtime?.vodProducerMaxConcurrent,
     vodProducerMaxPerProvider:
       environment.VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER ?? runtime?.vodProducerMaxPerProvider,
-    vodProducerSeekCooldownMs:
-      environment.VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN ?? runtime?.vodProducerSeekCooldownMs,
     masterKey: optionalEnvironmentValue(environment.VRRELAY_MASTER_KEY),
     secretBackend: environment.VRRELAY_SECRET_BACKEND,
     mediaMtxHlsUrl: environment.VRRELAY_MEDIAMTX_HLS_URL,

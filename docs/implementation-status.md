@@ -272,8 +272,8 @@ pending.
   seconds, and resumes only at the low watermark so normal request jitter does not exhaust the
   playback buffer.
 - Session runtime diagnostics now expose upstream source connection/request activity. Producer
-  admission is bounded globally and per provider, and distant seek replacement has a configurable
-  cooldown to protect provider bandwidth during synchronized playback.
+  admission is bounded globally and per provider. Distant seek replacement remains immediate once
+  the dominant-viewer rule selects a new window, avoiding artificial scrubbing delays.
 - Request diagnostics classify redacted client starts, retries, resumes, seeks, edge selection,
   source-range transitions, and control-plane mutation outcomes. Normal and detailed logging are
   selectable in Runtime settings without exposing raw client addresses, grants, credentials,

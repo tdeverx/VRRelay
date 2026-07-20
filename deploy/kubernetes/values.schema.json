@@ -42,16 +42,14 @@
         "bufferLowWatermark",
         "bufferHighWatermark",
         "maxConcurrent",
-        "maxPerProvider",
-        "seekCooldown"
+        "maxPerProvider"
       ],
       "properties": {
         "idleTimeout": { "type": "string", "pattern": "^[0-9]+(ms|s|m)$" },
         "bufferLowWatermark": { "type": "string", "pattern": "^[0-9]+(ms|s|m)$" },
         "bufferHighWatermark": { "type": "string", "pattern": "^[0-9]+(ms|s|m)$" },
         "maxConcurrent": { "type": "integer", "minimum": 1, "maximum": 32 },
-        "maxPerProvider": { "type": "integer", "minimum": 1, "maximum": 32 },
-        "seekCooldown": { "type": "string", "pattern": "^[0-9]+(ms|s|m)$" }
+        "maxPerProvider": { "type": "integer", "minimum": 1, "maximum": 32 }
       }
     },
     "networkPolicy": {

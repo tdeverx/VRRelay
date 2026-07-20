@@ -2086,7 +2086,6 @@ components:
           vodProducerBufferHighWatermarkMs,
           vodProducerMaxConcurrent,
           vodProducerMaxPerProvider,
-          vodProducerSeekCooldownMs,
           nodeName,
           nodeRegion
         ]
@@ -2111,7 +2110,6 @@ components:
           { type: integer, minimum: 8000, maximum: 600000, default: 60000 }
         vodProducerMaxConcurrent: { type: integer, minimum: 1, maximum: 32, default: 2 }
         vodProducerMaxPerProvider: { type: integer, minimum: 1, maximum: 32, default: 2 }
-        vodProducerSeekCooldownMs: { type: integer, minimum: 1000, maximum: 60000, default: 5000 }
         nodeName: { type: string, minLength: 1, maxLength: 100 }
         nodeRegion: { type: string, minLength: 1, maxLength: 100 }
     RuntimeConfigurationState:

@@ -9,8 +9,7 @@ vodProducer:
     bufferLowWatermark: 30s,
     bufferHighWatermark: 60s,
     maxConcurrent: 2,
-    maxPerProvider: 2,
-    seekCooldown: 5s
+    maxPerProvider: 2
   }
 networkPolicy:
   enabled: true

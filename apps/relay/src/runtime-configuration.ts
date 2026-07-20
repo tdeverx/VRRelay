@@ -36,7 +36,6 @@ export function publicRuntimeConfiguration(
       vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
       vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       nodeName: config.nodeName,
       nodeRegion: config.nodeRegion
     },

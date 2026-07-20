@@ -35,7 +35,7 @@ exposed publicly.
 `GET /api/v1/configuration/runtime` returns an allowlisted, non-secret view of listener and
 advertised URLs, proxy CIDRs, the trusted viewer-region header, agent listener, encoder/cache
 limits, VOD producer idle timeout, low/high producer buffer watermarks, producer concurrency and
-per-provider caps, seek-replacement cooldown, and node labels. Validation and
+per-provider caps, and node labels. Validation and
 updates require administrator authentication plus browser CSRF protection. Updates are writable
 only when the service manager explicitly supplies `VRRELAY_RUNTIME_CONFIG`; explicit deployment
 environment variables retain precedence. `/configuration/runtime/restart` is available only when

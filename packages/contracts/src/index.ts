@@ -327,7 +327,6 @@ export const RuntimeConfigurationSchema = z
     vodProducerBufferHighWatermarkMs: z.number().int().min(8_000).max(600_000).default(60_000),
     vodProducerMaxConcurrent: z.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.number().int().min(1).max(32).default(2),
-    vodProducerSeekCooldownMs: z.number().int().min(1_000).max(60_000).default(5_000),
     nodeName: z.string().trim().min(1).max(100),
     nodeRegion: z.string().trim().min(1).max(100)
   })

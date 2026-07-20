@@ -23,9 +23,9 @@ semantic versioning after the first public release.
   are re-advertised from current configuration.
 - Added upstream VOD visibility to session diagnostics: active source connections and source request
   attempts in the last 30 seconds are shown alongside ingress and egress. Added bounded producer
-  admission (global and per-provider) plus a configurable seek-replacement cooldown to protect
-  Jellyfin and prevent rapid source churn. These controls are provider-neutral and apply to every
-  HLS VOD source worker.
+  admission (global and per-provider) to protect Jellyfin and bound local producer resource use.
+  These controls are provider-neutral and apply to every HLS VOD source worker. Distant seek
+  replacement is deliberately not rate-limited so legitimate scrubbing remains immediate.
 - Added a profile-level default audio language for multi-track VOD. VRRelay selects the preferred
   language (ISO 639-2 or BCP-47) before the provider's default track, while an explicit track choice
   always wins.

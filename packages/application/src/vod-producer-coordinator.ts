@@ -44,7 +44,6 @@ interface ActiveProducer {
   lastDemandAtMs: number;
   placementLocked: boolean;
   pacing: VodProducerSourcePacer;
-  lastSwitchAtMs: number;
   stopState?: 'idle' | 'switching' | 'cancelled';
 }
 
@@ -77,7 +76,6 @@ export interface VodProducerCoordinatorOptions {
   bufferHighWatermarkMs: number;
   maxConcurrentProducers?: number;
   maxConcurrentProducersPerProvider?: number;
-  seekCooldownMs?: number;
   leaseMs?: number;
   leaseRenewMs?: number;
   waitForSegmentMs?: number;
@@ -317,8 +315,7 @@ export class VodProducerCoordinator {
         demandedSegmentIndex: startSegmentIndex,
         lastDemandAtMs: Date.now(),
         placementLocked: session.placementLocked,
-        pacing: new VodProducerSourcePacer(),
-        lastSwitchAtMs: Date.now()
+        pacing: new VodProducerSourcePacer()
       };
       this.#active.set(session.id, active);
       this.#releaseReservation(providerId);
@@ -657,15 +654,7 @@ export class VodProducerCoordinator {
   ): boolean {
     const highWater = (active.lastPublishedSegmentIndex ?? active.startSegmentIndex) + 5;
     const covered = demandedIndex >= active.startSegmentIndex && demandedIndex <= highWater;
-    const distantMajority = !covered && (currentViewers === 0 || demandedViewers > currentViewers);
-    if (!distantMajority) return false;
-    const cooldownMs = this.options.seekCooldownMs ?? 5_000;
-    if (Date.now() - active.lastSwitchAtMs < cooldownMs) {
-      this.metrics?.increment('vod_producer_seek_suppressed_total', { reason: 'cooldown' });
-      return false;
-    }
-    active.lastSwitchAtMs = Date.now();
-    return true;
+    return !covered && (currentViewers === 0 || demandedViewers > currentViewers);
   }
 
   #reconcilePacing(profile: ProfileRevision, active: ActiveProducer): void {

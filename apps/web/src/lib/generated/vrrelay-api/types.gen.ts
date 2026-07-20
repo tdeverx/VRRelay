@@ -730,7 +730,6 @@ export type RuntimeConfiguration = {
     vodProducerBufferHighWatermarkMs: number;
     vodProducerMaxConcurrent: number;
     vodProducerMaxPerProvider: number;
-    vodProducerSeekCooldownMs: number;
     nodeName: string;
     nodeRegion: string;
 };

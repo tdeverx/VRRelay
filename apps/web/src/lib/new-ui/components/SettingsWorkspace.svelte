@@ -1008,25 +1008,6 @@
               /><Field.Description
                 >Catch-up pauses at this level. It must be greater than the refill threshold.</Field.Description
               ></Field.Field
-            ><Field.Field
-              ><Field.Label for="producer-seek-cooldown"
-                >Seek replacement cooldown (seconds)</Field.Label
-              ><Input
-                id="producer-seek-cooldown"
-                type="number"
-                min="1"
-                max="60"
-                value={Math.round(runtimeDraft.vodProducerSeekCooldownMs / 1_000)}
-                disabled={!runtime?.writable}
-                oninput={(event) => {
-                  runtimeDraft!.vodProducerSeekCooldownMs = Math.round(
-                    Number(event.currentTarget.value) * 1_000
-                  );
-                  runtimeValidated = false;
-                }}
-              /><Field.Description
-                >Prevents repeated distant seeks from rapidly replacing the shared producer.</Field.Description
-              ></Field.Field
             ></Field.Group
           ></Card.Content
         >{#if runtime?.restartRequired}<Card.Footer

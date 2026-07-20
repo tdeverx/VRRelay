@@ -213,7 +213,6 @@ export interface SessionServiceOptions {
   vodProducerBufferHighWatermarkMs?: number;
   vodProducerMaxConcurrent?: number;
   vodProducerMaxPerProvider?: number;
-  vodProducerSeekCooldownMs?: number;
 }
 
 export interface SessionServiceInfrastructure {
@@ -322,8 +321,7 @@ export class SessionService {
           maxConcurrentProducersPerProvider: Math.min(
             options.vodProducerMaxPerProvider ?? options.maxWorkers,
             options.maxWorkers
-          ),
-          seekCooldownMs: options.vodProducerSeekCooldownMs ?? 5_000
+          )
         },
         infrastructure.metrics
       );

@@ -104,11 +104,10 @@ while collecting detailed redacted playback traces. Advanced deployments may als
 Pino levels `trace`, `warn`, `error`, `fatal`, or `silent` through the environment; the dashboard
 intentionally exposes only Normal and Detailed. `VRRELAY_VOD_PRODUCER_MAX_CONCURRENT` and
 `VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER` default to `2` and bound source-worker producer admission
-(the effective limit also cannot exceed `VRRELAY_MAX_WORKERS`).
-`VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN` defaults to `5s` and suppresses replacement churn during rapid
-distant seeks. Session diagnostics expose the active upstream source connection count and source
-request attempts over the last 30 seconds so operators can distinguish provider pressure from edge
-delivery pressure. Then run:
+(the effective limit also cannot exceed `VRRELAY_MAX_WORKERS`). Session diagnostics expose the active
+upstream source connection count and source request attempts over the last 30 seconds so operators
+can distinguish provider pressure from edge delivery pressure. Distant producer replacements are
+not rate-limited, so legitimate seeks are not artificially delayed. Then run:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.cluster.yml up --build

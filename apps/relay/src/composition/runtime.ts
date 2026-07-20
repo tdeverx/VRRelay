@@ -393,7 +393,6 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
       vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
@@ -610,7 +609,6 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
       vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
       vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
@@ -813,7 +811,6 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
       vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
       vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      vodProducerSeekCooldownMs: config.vodProducerSeekCooldownMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },

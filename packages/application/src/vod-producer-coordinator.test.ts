@@ -134,8 +134,6 @@ async function fixture(
     bufferHighWatermarkMs?: number;
     maxConcurrentProducers?: number;
     maxConcurrentProducersPerProvider?: number;
-    seekCooldownMs?: number;
-    waitForSegmentMs?: number;
   } = {}
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'vrrelay-producer-'));
@@ -180,9 +178,6 @@ async function fixture(
       idleTimeoutMs,
       bufferLowWatermarkMs: 30_000,
       bufferHighWatermarkMs: 60_000,
-      // Existing coordination tests exercise immediate majority seeks. Production
-      // uses the configured cooldown; tests that cover it opt in explicitly.
-      seekCooldownMs: 0,
       ...timing
     }
   );
@@ -315,46 +310,6 @@ describe('durable VOD producer coordination', () => {
       'source worker has reached its VOD producer capacity'
     );
 
-    await coordinator.close();
-    repository.close();
-  });
-
-  it('suppresses seek churn during the configured replacement cooldown', async () => {
-    const { coordinator, coordination, repository, starts } = await fixture(60_000, undefined, {
-      seekCooldownMs: 5_000
-    });
-    const selectedSession = session('session-seek-cooldown');
-    await coordination.recordSegmentDemand({
-      sessionId: selectedSession.id,
-      viewerHash: 'viewer-current',
-      segmentIndex: 0,
-      observedAtMs: Date.now(),
-      windowMs: 30_000
-    });
-    await coordinator.ensure(selectedSession, profile, 0);
-    for (const viewerHash of ['viewer-seek-a', 'viewer-seek-b', 'viewer-seek-c'])
-      await coordination.recordSegmentDemand({
-        sessionId: selectedSession.id,
-        viewerHash,
-        segmentIndex: 10,
-        observedAtMs: Date.now(),
-        windowMs: 30_000
-      });
-
-    const controller = new AbortController();
-    const seeking = coordinator.ensure(selectedSession, profile, 10, controller.signal);
-    const abortTimer = setTimeout(
-      () => controller.abort(new Error('seek cooldown test aborted')),
-      100
-    );
-    await expect(seeking).rejects.toThrow('seek cooldown test aborted');
-    clearTimeout(abortTimer);
-    expect(starts).toEqual([0]);
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({
-      generation: 1,
-      state: 'running',
-      demandedSegmentIndex: 10
-    });
     await coordinator.close();
     repository.close();
   });

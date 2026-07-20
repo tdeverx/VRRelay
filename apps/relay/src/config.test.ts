@@ -31,7 +31,6 @@ describe('relay configuration', () => {
       vodProducerBufferHighWatermarkMs: current.vodProducerBufferHighWatermarkMs,
       vodProducerMaxConcurrent: current.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: current.vodProducerMaxPerProvider,
-      vodProducerSeekCooldownMs: current.vodProducerSeekCooldownMs,
       nodeName: current.nodeName,
       nodeRegion: current.nodeRegion
     };
@@ -69,7 +68,6 @@ describe('relay configuration', () => {
         vodProducerBufferHighWatermarkMs: 60_000,
         vodProducerMaxConcurrent: 2,
         vodProducerMaxPerProvider: 2,
-        vodProducerSeekCooldownMs: 5_000,
         nodeName: 'Configured node',
         nodeRegion: 'studio'
       })
@@ -125,8 +123,7 @@ describe('relay configuration', () => {
         VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '30s',
         VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK: '60s',
         VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '4',
-        VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '3',
-        VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN: '12s'
+        VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '3'
       })
     ).toMatchObject({
       viewerRegionHeader: 'x-vrrelay-region',
@@ -134,8 +131,7 @@ describe('relay configuration', () => {
       vodProducerBufferLowWatermarkMs: 30_000,
       vodProducerBufferHighWatermarkMs: 60_000,
       vodProducerMaxConcurrent: 4,
-      vodProducerMaxPerProvider: 3,
-      vodProducerSeekCooldownMs: 12_000
+      vodProducerMaxPerProvider: 3
     });
     expect(() => loadConfig({ VRRELAY_VIEWER_REGION_HEADER: 'invalid header' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '14s' })).toThrow();
@@ -143,8 +139,6 @@ describe('relay configuration', () => {
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '0' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '33' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '0' })).toThrow();
-    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN: '999ms' })).toThrow();
-    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_SEEK_COOLDOWN: '61s' })).toThrow();
     expect(() =>
       loadConfig({
         VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '60s',
