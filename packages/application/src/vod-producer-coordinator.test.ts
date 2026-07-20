@@ -283,10 +283,7 @@ describe('durable VOD producer coordination', () => {
   });
 
   it('does not reject producer shutdown when best-effort lease release is unavailable', async () => {
-    const { coordinator, repository } = await fixture(
-      60_000,
-      new ReleaseFailingCoordination()
-    );
+    const { coordinator, repository } = await fixture(60_000, new ReleaseFailingCoordination());
     await coordinator.ensure(session('session-release-outage'), profile, 0);
     await expect(coordinator.close()).resolves.toBeUndefined();
     expect(await coordinator.get('session-release-outage')).toMatchObject({ state: 'idle' });
