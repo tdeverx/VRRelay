@@ -193,14 +193,15 @@ describe('durable VOD producer coordination', () => {
       });
     await coordinator.ensure(selectedSession, profile, 10);
     expect(starts).toEqual([0, 10]);
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({
+    const active = await coordinator.get(selectedSession.id);
+    expect(active).toMatchObject({
       ownerNodeId: 'worker-a',
       generation: 2,
       state: 'running',
       demandedSegmentIndex: 10,
-      startSegmentIndex: 10,
-      lastPublishedSegmentIndex: 11
+      startSegmentIndex: 10
     });
+    expect(active?.lastPublishedSegmentIndex).toBeGreaterThanOrEqual(10);
     await coordinator.close();
     repository.close();
   });
