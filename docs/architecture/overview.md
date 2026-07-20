@@ -12,12 +12,14 @@ An OBS live request follows this path:
 OBS (RTMP/SRT/WHIP) → ingest origin / one normalizer → one pull per active edge → HLS viewers
 ```
 
-One VOD session has one durable source producer generation. Its assigned source worker keeps one
-continuous Jellyfin connection, publishes atomically completed segments to shared object storage,
-and serves every regional edge from that shared output. Adjacent and simultaneous demand joins the
-current playback window. A distant position replaces it only when it has more active viewers, or
-when the old window has gone quiet; ties retain the current producer. Viewers never connect to one
-another, so this is CDN-style edge fan-out rather than peer-to-peer delivery.
+One VOD session has one durable source producer generation. Its assigned source worker owns one
+logical Jellyfin source pull, publishes atomically completed segments to shared object storage, and
+serves every regional edge from that shared output. A seekable container may require a short
+metadata HTTP range followed by one positioned media range; those requests are sequential on the
+same worker and never represent concurrent producer owners. Adjacent and simultaneous demand joins
+the current playback window. A distant position replaces it only when it has more active viewers,
+or when the old window has gone quiet; ties retain the current producer. Viewers never connect to
+one another, so this is CDN-style edge fan-out rather than peer-to-peer delivery.
 
 ## Boundaries
 
@@ -116,7 +118,12 @@ permanently running worker.
 
 The durable producer applies to HLS VOD profiles, including MPEG-TS and fMP4-segmented HLS.
 Experimental direct fragmented-MP4 delivery is still request-oriented and does not yet provide the
-one-provider-connection-per-session guarantee. A future shared CMAF/fMP4 delivery path must isolate
+one-active-producer-source-per-session guarantee. A future shared CMAF/fMP4 delivery path must isolate
 viewer backpressure and late joins while reusing one upstream producer.
+
+Producer generations keep timestamps on the manifest's absolute media timeline. A distant seek is
+performed against the seekable opaque loopback source, and the replacement producer offsets both
+MPEG-TS and fMP4 output timestamps to its requested start. Deterministic cache identity includes a
+pipeline epoch so segments produced under an incompatible timestamp policy are never mixed.
 
 See the [code map](code-map.md) for entry points and change boundaries.

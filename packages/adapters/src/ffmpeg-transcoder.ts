@@ -168,8 +168,9 @@ export class FFmpegTranscoder implements Transcoder {
       '-loglevel',
       'warning',
       '-nostdin',
-      '-ss',
-      request.startSeconds.toFixed(3),
+      ...(request.source.positionedAtSeconds === request.startSeconds
+        ? []
+        : ['-ss', request.startSeconds.toFixed(3)]),
       '-readrate',
       '1',
       '-readrate_initial_burst',
@@ -183,6 +184,8 @@ export class FFmpegTranscoder implements Transcoder {
       request.audioTrack === undefined ? '0:a:0?' : `0:${request.audioTrack}?`,
       ...this.#videoArgs(request.profile, request.source, request.subtitleTrack),
       ...this.#audioArgs(request.profile),
+      '-output_ts_offset',
+      request.startSeconds.toFixed(3),
       '-f',
       'hls',
       '-hls_time',

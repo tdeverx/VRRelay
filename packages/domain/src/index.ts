@@ -465,6 +465,31 @@ export const VodProducerSchema = z.object({
 });
 export type VodProducer = z.infer<typeof VodProducerSchema>;
 
+export const SessionRuntimeActivitySchema = z.enum(['ready', 'streaming', 'stopped', 'error']);
+export type SessionRuntimeActivity = z.infer<typeof SessionRuntimeActivitySchema>;
+
+export const SessionRuntimeStatsSchema = z.object({
+  sessionId: z.string().min(1),
+  activity: SessionRuntimeActivitySchema,
+  viewers: z.number().int().nonnegative(),
+  viewerWindowSeconds: z.number().int().positive(),
+  producerState: VodProducerStateSchema.optional(),
+  sourceWorkerId: z.string().min(1).optional(),
+  generation: z.number().int().positive().optional(),
+  demandedSegmentIndex: z.number().int().nonnegative().optional(),
+  lastPublishedSegmentIndex: z.number().int().nonnegative().optional(),
+  bufferSeconds: z.number().min(0),
+  demandAgeMs: z.number().int().nonnegative().optional(),
+  transcodeRealtimeFactor: z.number().min(0).optional(),
+  sourceIngressMbps: z.number().min(0),
+  viewerEgressMbps: z.number().min(0),
+  cacheHits: z.number().int().nonnegative(),
+  cacheMisses: z.number().int().nonnegative(),
+  cacheHitRatio: z.number().min(0).max(1).nullable(),
+  observedAt: z.iso.datetime()
+});
+export type SessionRuntimeStats = z.infer<typeof SessionRuntimeStatsSchema>;
+
 export const JobLogEntrySchema = z.object({
   id: z.string(),
   jobId: z.string(),

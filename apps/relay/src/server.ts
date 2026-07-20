@@ -113,6 +113,61 @@ export function placementNodeConnectivity(
   return agentConnected;
 }
 
+export function registerStandaloneInternalRoutes(
+  app: FastifyInstance,
+  config: RelayConfig,
+  services: Pick<ServerServices, 'live' | 'sessions'>
+): void {
+  app.post('/internal/mediamtx/auth', async (request, reply) => {
+    if (!isInternalPeer(request.raw.socket.remoteAddress))
+      return reply.status(403).send({
+        error: {
+          code: 'forbidden',
+          message: 'Internal MediaMTX auth is private-network or loopback-only'
+        }
+      });
+    const body = parse(
+      z.object({
+        action: z.string(),
+        path: z.string(),
+        protocol: z.string().optional(),
+        user: z.string().optional(),
+        password: z.string().optional(),
+        token: z.string().optional()
+      }),
+      request.body
+    );
+    return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
+      ? reply.status(204).send()
+      : reply.status(401).send();
+  });
+
+  app.get('/internal/source/:token', async (request, reply) => {
+    if (!isLoopbackPeer(request.raw.socket.remoteAddress))
+      return reply.status(403).send({
+        error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
+      });
+    const controller = new AbortController();
+    reply.raw.once('close', () => controller.abort());
+    const source = await services.sessions.openSourceProxy(
+      (request.params as { token: string }).token,
+      request.headers.range,
+      controller.signal
+    );
+    reply.status(source.status);
+    for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
+    return reply
+      .type(source.headers['content-type'] ?? 'application/octet-stream')
+      .send(
+        source.sessionId
+          ? meteredReadable(source.stream, (bytes) =>
+              services.sessions.recordIngress(bytes, source.sessionId)
+            )
+          : source.stream
+      );
+  });
+}
+
 export function isLoopbackPeer(address: string | undefined): boolean {
   if (!address) return false;
   const normalized = address.toLowerCase();
@@ -1319,9 +1374,10 @@ export async function createServer(
     const systemWide =
       principal.kind === 'personal_token' ||
       principal.roles.some((role) => role === 'operator' || role === 'admin' || role === 'owner');
-    return {
-      items: systemWide ? items : items.filter((session) => session.ownerId === principal.id)
-    };
+    const visible = systemWide
+      ? items
+      : items.filter((session) => session.ownerId === principal.id);
+    return { items: visible, runtime: await services.sessions.listRuntimeStats(visible) };
   });
   app.get('/api/v1/sessions/:sessionId', async (request) => {
     const principal = await authenticate(request, ['sessions:read']);
@@ -1699,51 +1755,7 @@ export async function createServer(
       .catch(() => socket.close(1008, 'Authentication required'));
   });
 
-  if (surface === 'standalone') {
-    app.post('/internal/mediamtx/auth', async (request, reply) => {
-      if (!isInternalPeer(request.raw.socket.remoteAddress))
-        return reply.status(403).send({
-          error: {
-            code: 'forbidden',
-            message: 'Internal MediaMTX auth is private-network or loopback-only'
-          }
-        });
-      const body = parse(
-        z.object({
-          action: z.string(),
-          path: z.string(),
-          protocol: z.string().optional(),
-          user: z.string().optional(),
-          password: z.string().optional(),
-          token: z.string().optional()
-        }),
-        request.body
-      );
-      return (await services.live.authorizeMediaMtx(body, config.mediaMtxReadToken))
-        ? reply.status(204).send()
-        : reply.status(401).send();
-    });
-
-    app.get('/internal/source/:token', async (request, reply) => {
-      if (!isLoopbackPeer(request.raw.socket.remoteAddress)) {
-        return reply.status(403).send({
-          error: { code: 'forbidden', message: 'Internal source grants are loopback-only' }
-        });
-      }
-      const controller = new AbortController();
-      reply.raw.once('close', () => controller.abort());
-      const source = await services.sessions.openSourceProxy(
-        (request.params as { token: string }).token,
-        request.headers.range,
-        controller.signal
-      );
-      reply.status(source.status);
-      for (const [name, value] of Object.entries(source.headers)) reply.header(name, value);
-      return reply
-        .type(source.headers['content-type'] ?? 'application/octet-stream')
-        .send(source.stream);
-    });
-  }
+  if (surface === 'standalone') registerStandaloneInternalRoutes(app, config, services);
 
   app.get('/play/:token/index.m3u8', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');

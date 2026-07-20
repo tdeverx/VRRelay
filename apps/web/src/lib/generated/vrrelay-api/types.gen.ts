@@ -355,6 +355,28 @@ export type RelaySession = {
 
 export type SessionList = {
     items: Array<RelaySession>;
+    runtime: Array<SessionRuntimeStats>;
+};
+
+export type SessionRuntimeStats = {
+    sessionId: string;
+    activity: 'ready' | 'streaming' | 'stopped' | 'error';
+    viewers: number;
+    viewerWindowSeconds: number;
+    producerState?: 'idle' | 'starting' | 'running' | 'switching' | 'complete' | 'failed' | 'cancelled';
+    sourceWorkerId?: string;
+    generation?: number;
+    demandedSegmentIndex?: number;
+    lastPublishedSegmentIndex?: number;
+    bufferSeconds: number;
+    demandAgeMs?: number;
+    transcodeRealtimeFactor?: number;
+    sourceIngressMbps: number;
+    viewerEgressMbps: number;
+    cacheHits: number;
+    cacheMisses: number;
+    cacheHitRatio: number | null;
+    observedAt: string;
 };
 
 export type VodProducer = {

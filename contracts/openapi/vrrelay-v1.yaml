@@ -1493,9 +1493,49 @@ components:
     SessionList:
       {
         type: object,
-        required: [items],
-        properties: { items: { type: array, items: { $ref: '#/components/schemas/RelaySession' } } }
+        required: [items, runtime],
+        properties:
+          {
+            items: { type: array, items: { $ref: '#/components/schemas/RelaySession' } },
+            runtime: { type: array, items: { $ref: '#/components/schemas/SessionRuntimeStats' } }
+          }
       }
+    SessionRuntimeStats:
+      type: object
+      required:
+        [
+          sessionId,
+          activity,
+          viewers,
+          viewerWindowSeconds,
+          bufferSeconds,
+          sourceIngressMbps,
+          viewerEgressMbps,
+          cacheHits,
+          cacheMisses,
+          cacheHitRatio,
+          observedAt
+        ]
+      properties:
+        sessionId: { type: string }
+        activity: { type: string, enum: [ready, streaming, stopped, error] }
+        viewers: { type: integer, minimum: 0 }
+        viewerWindowSeconds: { type: integer, minimum: 1 }
+        producerState:
+          { type: string, enum: [idle, starting, running, switching, complete, failed, cancelled] }
+        sourceWorkerId: { type: string }
+        generation: { type: integer, minimum: 1 }
+        demandedSegmentIndex: { type: integer, minimum: 0 }
+        lastPublishedSegmentIndex: { type: integer, minimum: 0 }
+        bufferSeconds: { type: number, minimum: 0 }
+        demandAgeMs: { type: integer, minimum: 0 }
+        transcodeRealtimeFactor: { type: number, minimum: 0 }
+        sourceIngressMbps: { type: number, minimum: 0 }
+        viewerEgressMbps: { type: number, minimum: 0 }
+        cacheHits: { type: integer, minimum: 0 }
+        cacheMisses: { type: integer, minimum: 0 }
+        cacheHitRatio: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        observedAt: { type: string, format: date-time }
     VodProducer:
       type: object
       required:

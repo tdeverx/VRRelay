@@ -418,20 +418,26 @@ async function run() {
     'Dominant seek did not create exactly one replacement producer generation'
   );
   const sourceAfterSeek = await jellyfinStats();
+  const seekSourceRequests = sourceAfterSeek.sourceRequests - sourceAfterSequential.sourceRequests;
   assert(
-    sourceAfterSeek.sourceRequests === sourceAfterSequential.sourceRequests + 1,
-    `Dominant seek did not replace the Jellyfin source connection exactly once (${JSON.stringify(sourceAfterSeek.sourceRequestRanges)})`
+    seekSourceRequests === 2,
+    `Dominant seek did not use one metadata probe and one positioned range (${JSON.stringify(sourceAfterSeek.sourceRequestRanges)})`
   );
   assert(
-    sourceAfterSeek.sourceStartTimeTicks.at(-1) === '480000000',
-    'Replacement producer did not request a provider-positioned Jellyfin stream'
+    sourceAfterSeek.sourceRequestRanges.at(-2) === 'bytes=0-' &&
+      /^bytes=[1-9]\d*-$/.test(sourceAfterSeek.sourceRequestRanges.at(-1) ?? ''),
+    'Replacement producer did not seek through a positioned Jellyfin byte range'
+  );
+  assert(
+    sourceAfterSeek.sourceStartTimeTicks.slice(-2).every((value) => value === null),
+    'Static Jellyfin source incorrectly claimed StartTimeTicks positioning'
   );
   assert(
     sourceAfterSeek.maximumConcurrentSourceRequests <= 1,
-    'Replacement overlapped an accepted old Jellyfin source connection'
+    'Replacement overlapped an accepted old Jellyfin source request'
   );
 
-  log('Creating a distinct session and verifying it may consume an additional source connection');
+  log('Creating a distinct session and verifying it may consume an additional source pull');
   const secondSession = (
     await api('/api/v1/sessions', {
       method: 'POST',
@@ -460,7 +466,7 @@ async function run() {
   });
   assert(
     (await jellyfinStats()).sourceRequests === sourceAfterSeek.sourceRequests + 1,
-    'A distinct session did not receive its own permitted Jellyfin connection'
+    'A distinct session did not receive its own permitted Jellyfin source pull'
   );
 
   compose([

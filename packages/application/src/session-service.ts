@@ -14,6 +14,7 @@ import type {
   ProviderConnection,
   RelaySession,
   SegmentJob,
+  SessionRuntimeStats,
   VodProducer
 } from '@vrrelay/domain';
 import type { CreateSessionRequest } from '@vrrelay/contracts';
@@ -43,6 +44,9 @@ import { VodProducerCoordinator } from './vod-producer-coordinator.js';
 
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
 const VIEWER_WINDOW_MS = 30_000;
+const RUNTIME_TRAFFIC_WINDOW_MS = 30_000;
+const RUNTIME_SNAPSHOT_TTL_MS = 90_000;
+const RUNTIME_ACTIVE_SNAPSHOT_MS = 10_000;
 const EDGE_GRANT_PREFIX = 'eg1';
 const EDGE_GRANT_SIGNING_KEY = 'playback.edge_grant_signing_key';
 
@@ -54,6 +58,38 @@ interface EdgePlaybackGrantPayload {
   edgeNodeId: string;
   issuedAt: string;
   expiresAt: string | null;
+}
+
+interface RuntimeSample {
+  value: number;
+  observedAtMs: number;
+}
+
+interface LocalSessionRuntime {
+  ingress: RuntimeSample[];
+  egress: RuntimeSample[];
+  production: Array<RuntimeSample & { wallSeconds: number }>;
+  cacheHits: number;
+  cacheMisses: number;
+  lastSegmentPublishedAtMs?: number;
+  lastSnapshotAtMs: number;
+}
+
+interface SessionRuntimeSnapshot {
+  v: 1;
+  sessionId: string;
+  nodeId: string;
+  observedAtMs: number;
+  sourceIngressMbps: number;
+  viewerEgressMbps: number;
+  cacheHits: number;
+  cacheMisses: number;
+  transcodeRealtimeFactor?: number;
+}
+
+interface ActiveSourceRequest {
+  controller: AbortController;
+  completed: Promise<void>;
 }
 
 function hmacBase64Url(secret: string, value: string): string {
@@ -137,6 +173,9 @@ export class SessionService {
   readonly #viewers = new Map<string, Map<string, number>>();
   readonly #activity = new Map<string, number>();
   readonly #egressSamples: Array<{ bytes: number; observedAt: number }> = [];
+  readonly #sessionRuntime = new Map<string, LocalSessionRuntime>();
+  readonly #sourceOpenQueues = new Map<string, Promise<void>>();
+  readonly #activeSourceRequests = new Map<string, ActiveSourceRequest>();
   readonly #cache: SessionCache;
   readonly #jobs: SessionJobCoordinator;
   readonly #producers?: VodProducerCoordinator;
@@ -191,7 +230,9 @@ export class SessionService {
             this.#release();
             this.#ephemeralSourceCredentials.delete(sessionId);
             this.#deleteSourceGrants(sessionId);
-          }
+          },
+          published: (sessionId, _segmentIndex, mediaDurationSeconds, observedAtMs) =>
+            this.#recordProduction(sessionId, mediaDurationSeconds, observedAtMs)
         },
         {
           cacheDir: options.cacheDir,
@@ -362,6 +403,88 @@ export class SessionService {
 
   async list(): Promise<RelaySession[]> {
     return this.repository.listSessions();
+  }
+
+  async listRuntimeStats(sessions?: RelaySession[]): Promise<SessionRuntimeStats[]> {
+    const listed = sessions ?? (await this.list());
+    return Promise.all(listed.map((session) => this.runtimeStats(session)));
+  }
+
+  async runtimeStats(session: RelaySession): Promise<SessionRuntimeStats> {
+    const now = Date.now();
+    const producer = await this.#producers?.get(session.id);
+    const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
+    let viewerCount = session.viewers;
+    if (this.infrastructure.coordination)
+      viewerCount = await this.infrastructure.coordination
+        .countViewers({
+          sessionId: session.id,
+          observedAtMs: now,
+          windowMs: VIEWER_WINDOW_MS
+        })
+        .then((viewers) => viewers.totalViewers)
+        .catch(() => session.viewers);
+    const snapshots = await this.#runtimeSnapshots(session.id);
+    const activeSnapshots = snapshots.filter(
+      (snapshot) => now - snapshot.observedAtMs <= RUNTIME_ACTIVE_SNAPSHOT_MS
+    );
+    const sourceIngressMbps = activeSnapshots.reduce(
+      (total, snapshot) => total + snapshot.sourceIngressMbps,
+      0
+    );
+    const viewerEgressMbps = activeSnapshots.reduce(
+      (total, snapshot) => total + snapshot.viewerEgressMbps,
+      0
+    );
+    const cacheHits = snapshots.reduce((total, snapshot) => total + snapshot.cacheHits, 0);
+    const cacheMisses = snapshots.reduce((total, snapshot) => total + snapshot.cacheMisses, 0);
+    const transcodeRealtimeFactor = activeSnapshots
+      .map((snapshot) => snapshot.transcodeRealtimeFactor)
+      .find((factor): factor is number => factor !== undefined);
+    const demanded = producer?.demandedSegmentIndex;
+    const published = producer?.lastPublishedSegmentIndex;
+    const segmentDuration = profile?.delivery.segmentDuration ?? 0;
+    const bufferSeconds =
+      demanded === undefined || published === undefined
+        ? 0
+        : Math.max(0, published - demanded) * segmentDuration;
+    const producerActive =
+      producer && ['starting', 'running', 'switching'].includes(producer.state);
+    const activity: SessionRuntimeStats['activity'] =
+      session.state === 'stopped'
+        ? 'stopped'
+        : session.state === 'error' || producer?.state === 'failed'
+          ? 'error'
+          : viewerCount > 0 || producerActive
+            ? 'streaming'
+            : 'ready';
+    const cacheRequests = cacheHits + cacheMisses;
+    return {
+      sessionId: session.id,
+      activity,
+      viewers: viewerCount,
+      viewerWindowSeconds: VIEWER_WINDOW_MS / 1_000,
+      ...(producer
+        ? {
+            producerState: producer.state,
+            ...(producer.ownerNodeId ? { sourceWorkerId: producer.ownerNodeId } : {}),
+            generation: producer.generation,
+            demandedSegmentIndex: producer.demandedSegmentIndex,
+            ...(producer.lastPublishedSegmentIndex === undefined
+              ? {}
+              : { lastPublishedSegmentIndex: producer.lastPublishedSegmentIndex }),
+            demandAgeMs: Math.max(0, now - Date.parse(producer.lastDemandAt))
+          }
+        : {}),
+      bufferSeconds,
+      ...(transcodeRealtimeFactor === undefined ? {} : { transcodeRealtimeFactor }),
+      sourceIngressMbps,
+      viewerEgressMbps,
+      cacheHits,
+      cacheMisses,
+      cacheHitRatio: cacheRequests ? cacheHits / cacheRequests : null,
+      observedAt: new Date(now).toISOString()
+    };
   }
 
   async get(id: string): Promise<RelaySession> {
@@ -539,29 +662,34 @@ export class SessionService {
       const now = new Date();
       await utimes(destination, now, now);
       this.#recordCacheRequest('disk', 'hit');
+      this.#recordSessionCache(session.id, true);
       this.events.publish(event('cache.hit', { segment: index }, session.id));
       return destination;
     } catch {
       this.#recordCacheRequest('disk', 'miss');
     }
     if (await this.#cache.restoreObject(contentKey, destination)) {
+      this.#recordSessionCache(session.id, true);
       this.events.publish(
         event('cache.hit', { segment: index, layer: 'object-store' }, session.id)
       );
       return destination;
     }
     if (this.#isEdgeOnly()) {
+      this.#recordSessionCache(session.id, false);
       await this.#requestOrigin(token, index, signal);
       if (await this.#cache.restoreObject(contentKey, destination)) return destination;
       throw new Error('Origin completed the segment request but no object was published');
     }
     const roles = this.options.roles ?? ['controller', 'source-worker', 'ingest-origin', 'edge'];
     if (this.#producers && roles.includes('source-worker')) {
+      this.#recordSessionCache(session.id, false);
       await this.#producers.ensure(session, profile, index, signal);
       if (await this.#cache.restoreObject(contentKey, destination)) return destination;
       throw new Error('Persistent producer completed the segment request without publishing it');
     }
     const key = destination;
+    this.#recordSessionCache(session.id, false);
     const existing = this.#inflight.get(key);
     if (existing) return existing;
     const job = this.#jobs
@@ -640,7 +768,16 @@ export class SessionService {
       this.#sourceGrants.delete(token);
       throw new NotFoundError('Source grant was not found');
     }
-    return grant.provider.openSource(grant.source, range, signal);
+    const source = grant.sessionId
+      ? await this.#openSerializedSource(
+          grant.sessionId,
+          grant.provider,
+          grant.source,
+          range,
+          signal
+        )
+      : await grant.provider.openSource(grant.source, range, signal);
+    return { ...source, ...(grant.sessionId ? { sessionId: grant.sessionId } : {}) };
   }
 
   async resolveLive(token: string): Promise<LiveChannel> {
@@ -821,12 +958,18 @@ export class SessionService {
     return session;
   }
 
-  recordEgress(bytes: number, _sessionId?: string): void {
+  recordIngress(bytes: number, sessionId?: string): void {
+    if (!Number.isFinite(bytes) || bytes <= 0 || !sessionId) return;
+    this.#recordRuntimeTraffic(sessionId, 'ingress', bytes);
+  }
+
+  recordEgress(bytes: number, sessionId?: string): void {
     if (!Number.isFinite(bytes) || bytes <= 0) return;
     this.#egressSamples.push({ bytes, observedAt: Date.now() });
     this.#pruneEgressSamples(Date.now());
     this.infrastructure.metrics?.increment('egress_bytes_total', {}, bytes);
     this.infrastructure.metrics?.gauge('egress_mbps', this.egressMbps(), { window: '30s' });
+    if (sessionId) this.#recordRuntimeTraffic(sessionId, 'egress', bytes);
   }
 
   egressMbps(now = Date.now(), windowMs = 30_000): number {
@@ -1218,6 +1361,147 @@ export class SessionService {
     this.infrastructure.metrics?.increment('cache_requests_total', { layer, outcome });
   }
 
+  #localRuntime(sessionId: string): LocalSessionRuntime {
+    const existing = this.#sessionRuntime.get(sessionId);
+    if (existing) return existing;
+    const created: LocalSessionRuntime = {
+      ingress: [],
+      egress: [],
+      production: [],
+      cacheHits: 0,
+      cacheMisses: 0,
+      lastSnapshotAtMs: 0
+    };
+    this.#sessionRuntime.set(sessionId, created);
+    return created;
+  }
+
+  #recordRuntimeTraffic(sessionId: string, direction: 'ingress' | 'egress', bytes: number): void {
+    const now = Date.now();
+    const runtime = this.#localRuntime(sessionId);
+    runtime[direction].push({ value: bytes, observedAtMs: now });
+    this.#pruneRuntime(runtime, now);
+    this.#publishRuntimeSnapshot(sessionId, runtime, now);
+  }
+
+  #recordSessionCache(sessionId: string, hit: boolean): void {
+    const roles = this.options.roles ?? ['controller', 'source-worker', 'ingest-origin', 'edge'];
+    if (!roles.includes('edge')) return;
+    const now = Date.now();
+    const runtime = this.#localRuntime(sessionId);
+    if (hit) runtime.cacheHits += 1;
+    else runtime.cacheMisses += 1;
+    this.#publishRuntimeSnapshot(sessionId, runtime, now);
+  }
+
+  #recordProduction(sessionId: string, mediaSeconds: number, observedAtMs: number): void {
+    const runtime = this.#localRuntime(sessionId);
+    if (runtime.lastSegmentPublishedAtMs !== undefined) {
+      const wallSeconds = Math.max(
+        0.001,
+        (observedAtMs - runtime.lastSegmentPublishedAtMs) / 1_000
+      );
+      if (wallSeconds * 1_000 <= RUNTIME_TRAFFIC_WINDOW_MS)
+        runtime.production.push({ value: mediaSeconds, wallSeconds, observedAtMs });
+    }
+    runtime.lastSegmentPublishedAtMs = observedAtMs;
+    this.#pruneRuntime(runtime, observedAtMs);
+    this.#publishRuntimeSnapshot(sessionId, runtime, observedAtMs);
+  }
+
+  #pruneRuntime(runtime: LocalSessionRuntime, now: number): void {
+    const cutoff = now - RUNTIME_TRAFFIC_WINDOW_MS;
+    for (const samples of [runtime.ingress, runtime.egress, runtime.production])
+      while (samples[0] && samples[0].observedAtMs <= cutoff) samples.shift();
+  }
+
+  #runtimeSnapshot(
+    sessionId: string,
+    runtime: LocalSessionRuntime,
+    now: number
+  ): SessionRuntimeSnapshot {
+    this.#pruneRuntime(runtime, now);
+    const mbps = (samples: RuntimeSample[]) =>
+      (samples.reduce((total, sample) => total + sample.value, 0) * 8) /
+      (RUNTIME_TRAFFIC_WINDOW_MS / 1_000) /
+      1_000_000;
+    const mediaSeconds = runtime.production.reduce((total, sample) => total + sample.value, 0);
+    const wallSeconds = runtime.production.reduce((total, sample) => total + sample.wallSeconds, 0);
+    return {
+      v: 1,
+      sessionId,
+      nodeId: this.options.nodeId ?? 'standalone',
+      observedAtMs: now,
+      sourceIngressMbps: mbps(runtime.ingress),
+      viewerEgressMbps: mbps(runtime.egress),
+      cacheHits: runtime.cacheHits,
+      cacheMisses: runtime.cacheMisses,
+      ...(wallSeconds > 0 ? { transcodeRealtimeFactor: mediaSeconds / wallSeconds } : {})
+    };
+  }
+
+  #publishRuntimeSnapshot(sessionId: string, runtime: LocalSessionRuntime, now: number): void {
+    if (!this.infrastructure.coordination || now - runtime.lastSnapshotAtMs < 1_000) return;
+    runtime.lastSnapshotAtMs = now;
+    const snapshot = this.#runtimeSnapshot(sessionId, runtime, now);
+    void this.infrastructure.coordination
+      .set(
+        `session-runtime:${sessionId}:${snapshot.nodeId}`,
+        JSON.stringify(snapshot),
+        RUNTIME_SNAPSHOT_TTL_MS
+      )
+      .catch(() => undefined);
+  }
+
+  async #runtimeSnapshots(sessionId: string): Promise<SessionRuntimeSnapshot[]> {
+    const now = Date.now();
+    const local = this.#sessionRuntime.get(sessionId);
+    const localNodeId = this.options.nodeId ?? 'standalone';
+    const snapshots = local ? [this.#runtimeSnapshot(sessionId, local, now)] : [];
+    if (!this.infrastructure.coordination || !this.infrastructure.clusterRepository)
+      return snapshots;
+    const nodes = await this.infrastructure.clusterRepository.listNodes().catch(() => undefined);
+    if (!nodes) return snapshots;
+    const nodeIds = new Set(
+      nodes.map((node) => node.id).filter((nodeId) => nodeId !== localNodeId)
+    );
+    const stored = await Promise.all(
+      [...nodeIds].map((nodeId) =>
+        this.infrastructure
+          .coordination!.get(`session-runtime:${sessionId}:${nodeId}`)
+          .catch(() => undefined)
+      )
+    );
+    for (const value of stored) {
+      if (!value) continue;
+      try {
+        const parsed = JSON.parse(value) as SessionRuntimeSnapshot;
+        if (
+          parsed.v === 1 &&
+          parsed.sessionId === sessionId &&
+          typeof parsed.nodeId === 'string' &&
+          parsed.nodeId.length > 0 &&
+          Number.isFinite(parsed.observedAtMs) &&
+          Number.isFinite(parsed.sourceIngressMbps) &&
+          parsed.sourceIngressMbps >= 0 &&
+          Number.isFinite(parsed.viewerEgressMbps) &&
+          parsed.viewerEgressMbps >= 0 &&
+          Number.isInteger(parsed.cacheHits) &&
+          parsed.cacheHits >= 0 &&
+          Number.isInteger(parsed.cacheMisses) &&
+          parsed.cacheMisses >= 0 &&
+          (parsed.transcodeRealtimeFactor === undefined ||
+            (Number.isFinite(parsed.transcodeRealtimeFactor) &&
+              parsed.transcodeRealtimeFactor >= 0))
+        )
+          snapshots.push(parsed);
+      } catch {
+        // Runtime snapshots are short-lived hints; malformed entries are ignored.
+      }
+    }
+    return snapshots;
+  }
+
   #recordWorkerMetrics(): void {
     const active = this.#activeWorkers;
     const limit = Math.max(1, this.options.maxWorkers);
@@ -1228,6 +1512,59 @@ export class SessionService {
     this.infrastructure.metrics?.gauge('worker_pressure_ratio', active / limit, {
       kind: 'transcode'
     });
+  }
+
+  async #openSerializedSource(
+    sessionId: string,
+    provider: MediaProvider,
+    source: ResolvedSource,
+    range: string | undefined,
+    signal: AbortSignal | undefined
+  ): Promise<SourceResponse> {
+    const previousOpen = this.#sourceOpenQueues.get(sessionId) ?? Promise.resolve();
+    let releaseOpen!: () => void;
+    const currentOpen = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const queued = previousOpen.catch(() => undefined).then(() => currentOpen);
+    this.#sourceOpenQueues.set(sessionId, queued);
+    void queued.then(() => {
+      if (this.#sourceOpenQueues.get(sessionId) === queued)
+        this.#sourceOpenQueues.delete(sessionId);
+    });
+    await previousOpen.catch(() => undefined);
+    try {
+      const active = this.#activeSourceRequests.get(sessionId);
+      if (active) {
+        active.controller.abort(new Error('Source request was repositioned'));
+        await active.completed;
+      }
+      const controller = new AbortController();
+      const combinedSignal = signal
+        ? AbortSignal.any([signal, controller.signal])
+        : controller.signal;
+      const response = await provider.openSource(source, range, combinedSignal);
+      let released = false;
+      let releaseRequest!: () => void;
+      const completed = new Promise<void>((resolve) => {
+        releaseRequest = resolve;
+      });
+      const request: ActiveSourceRequest = { controller, completed };
+      const finish = () => {
+        if (released) return;
+        released = true;
+        if (this.#activeSourceRequests.get(sessionId) === request)
+          this.#activeSourceRequests.delete(sessionId);
+        releaseRequest();
+      };
+      this.#activeSourceRequests.set(sessionId, request);
+      response.stream.once('end', finish);
+      response.stream.once('close', finish);
+      response.stream.once('error', finish);
+      return response;
+    } finally {
+      releaseOpen();
+    }
   }
 
   async #updateSession(

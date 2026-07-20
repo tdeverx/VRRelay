@@ -718,7 +718,10 @@ function mediaProviderContract(harness: MediaProviderContractHarness): void {
       expect(source.url).toContain(encodeURIComponent('version-remux'));
       expect(Object.keys(source.headers).length).toBeGreaterThan(0);
 
-      if (fixture.provider.resolveSourceAt) {
+      if (harness.name === 'Jellyfin') {
+        expect(fixture.provider.resolveSourceAt).toBeUndefined();
+        expect(new URL(source.url).searchParams.has('StartTimeTicks')).toBe(false);
+      } else if (fixture.provider.resolveSourceAt) {
         const positioned = await fixture.provider.resolveSourceAt(
           fixture.connection,
           fixture.secret,

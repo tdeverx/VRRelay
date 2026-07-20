@@ -6,8 +6,19 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Added live per-session delivery diagnostics to the Sessions dashboard: privacy-preserving viewer
+  estimates, producer activity, playback window and buffer lead, transcode realtime factor, source
+  ingress, viewer egress, and delivery-cache effectiveness. Runtime snapshots are short-lived and
+  do not add session IDs to Prometheus labels.
+- Fixed distant VOD seeks freezing. Jellyfin static streams now remain seekable through HTTP Range,
+  per-session source ranges are serialized without overlap, replacement HLS producers preserve
+  absolute MPEG-TS and fMP4 timestamps, and the cache pipeline epoch prevents reuse of older
+  reset-timestamp segments.
+- Fixed explicit LAN listener configurations failing local source grants by starting a private
+  loopback companion for internal media routes. Clarified in the macOS menu that quitting the menu
+  app leaves the supervised relay service running.
 - Replaced per-segment HLS transcoding with one durable, fenced VOD producer per session. The
-  assigned source worker now keeps one playback-rate Jellyfin connection, publishes completed
+  assigned source worker now owns one playback-rate Jellyfin source pull, publishes completed
   segments to shared object storage, survives controller recovery through schema v9 state, and
   switches playback windows only for dominant seeks or quiet demand. Added explicit producer agent
   commands/capabilities, in-memory signed-in-user credential transfer, idle shutdown, drain/failover

@@ -120,6 +120,7 @@ export class SessionCache {
   contentKey(session: RelaySession, profile: ProfileRevision, index: number): string {
     const source = session.source!;
     const identity = JSON.stringify({
+      pipelineEpoch: 2,
       providerId: source.providerId,
       itemId: source.itemId,
       versionId: source.versionId,

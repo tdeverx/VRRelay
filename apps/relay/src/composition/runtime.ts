@@ -34,7 +34,8 @@ import { BackendService, resolveConfiguredObjectStore } from '../backend-service
 import type { RelayConfig } from '../config.js';
 import { parseListenAddress } from '../config.js';
 import { ManagedMediaMtx } from '../media-runtime.js';
-import { createServer } from '../server.js';
+import { createServer, registerStandaloneInternalRoutes } from '../server.js';
+import { startLoopbackCompanion } from '../loopback-companion.js';
 import {
   createBootstrapObjectStores,
   createCoordinationStore,
@@ -43,7 +44,7 @@ import {
 } from './infrastructure.js';
 import { createRepository } from './repository.js';
 import { ROLE_PLANS, type RolePlan } from './role-plan.js';
-import { createRoleServer } from './role-server.js';
+import { createRoleServer, registerRoleInternalRoutes } from './role-server.js';
 import { repositorySchemaStartupMethod } from './schema-startup.js';
 import { createShutdownSequence } from './shutdown.js';
 
@@ -425,6 +426,12 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     },
     plan.kind === 'controller' ? 'controller' : 'standalone'
   );
+  const loopbackApp =
+    plan.kind === 'standalone'
+      ? await startLoopbackCompanion(listen, (internal) =>
+          registerStandaloneInternalRoutes(internal, config, { live, sessions })
+        )
+      : undefined;
   const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
     locallyAvailableProviderIds(repository, secrets)
   );
@@ -441,7 +448,12 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     });
   }
 
-  await app.listen(listen);
+  try {
+    await app.listen(listen);
+  } catch (error) {
+    await loopbackApp?.close();
+    throw error;
+  }
   // Assigned after the managed runtime exists; its exit callback closes over this hook.
   // eslint-disable-next-line prefer-const
   let shutdown: (() => Promise<void>) | undefined;
@@ -519,7 +531,10 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     { name: 'agent-controller', stop: () => agentController?.stop() },
     { name: 'backend-service', stop: () => backends.close() },
     { name: 'vod-producers', stop: () => sessions.close() },
-    { name: 'http-server', stop: () => app.close() },
+    {
+      name: 'http-server',
+      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+    },
     { name: 'repository', stop: () => repository.close() }
   ]);
   shutdown = () => shutdownSequence.run();
@@ -585,13 +600,22 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
   const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
     locallyAvailableProviderIds(repository, secrets)
   );
-  const app = await createRoleServer(config, {
+  const roleServices = {
     kind: 'source-worker',
     sessions,
     capabilities,
     metrics
-  });
-  await app.listen(listen);
+  } as const;
+  const app = await createRoleServer(config, roleServices);
+  const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
+    registerRoleInternalRoutes(internal, config, roleServices)
+  );
+  try {
+    await app.listen(listen);
+  } catch (error) {
+    await loopbackApp?.close();
+    throw error;
+  }
   const nodeAgent = configuredNodeAgent(
     config,
     secrets,
@@ -619,7 +643,10 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     { name: 'background-timers', stop: () => clearInterval(cleanup) },
     { name: 'node-agent', stop: () => nodeAgent?.stop() },
     { name: 'vod-producers', stop: () => sessions.close() },
-    { name: 'http-server', stop: () => app.close() },
+    {
+      name: 'http-server',
+      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+    },
     { name: 'repository', stop: () => repository.close() }
   ]);
   bindShutdown(() => shutdown.run());
@@ -641,13 +668,22 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
   const live = liveService(config, repository, events, normalizer, metrics);
   await live.scrubPersistedPublisherCredentials();
   const currentNodeCapabilities = nodeCapabilities(config, capabilities);
-  const app = await createRoleServer(config, {
+  const roleServices = {
     kind: 'ingest-origin',
     live,
     capabilities,
     metrics
-  });
-  await app.listen(listen);
+  } as const;
+  const app = await createRoleServer(config, roleServices);
+  const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
+    registerRoleInternalRoutes(internal, config, roleServices)
+  );
+  try {
+    await app.listen(listen);
+  } catch (error) {
+    await loopbackApp?.close();
+    throw error;
+  }
 
   // Assigned after the managed runtime exists; its exit callback closes over this hook.
   // eslint-disable-next-line prefer-const
@@ -706,7 +742,10 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
     { name: 'live-service', stop: () => live.stop() },
     { name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() },
     { name: 'node-agent', stop: () => nodeAgent?.stop() },
-    { name: 'http-server', stop: () => app.close() },
+    {
+      name: 'http-server',
+      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+    },
     { name: 'repository', stop: () => repository.close() }
   ]);
   shutdown = () => shutdownSequence.run();
@@ -767,13 +806,22 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
     }
   );
   const currentNodeCapabilities = nodeCapabilities(config, EDGE_CAPABILITIES, sessions);
-  const app = await createRoleServer(config, {
+  const roleServices = {
     kind: 'edge',
     sessions,
     capabilities: EDGE_CAPABILITIES,
     metrics
-  });
-  await app.listen(listen);
+  } as const;
+  const app = await createRoleServer(config, roleServices);
+  const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
+    registerRoleInternalRoutes(internal, config, roleServices)
+  );
+  try {
+    await app.listen(listen);
+  } catch (error) {
+    await loopbackApp?.close();
+    throw error;
+  }
   nodeAgent = configuredNodeAgent(config, secrets, currentNodeCapabilities, {
     onSegment: async () => {
       throw new Error('Segment transcoding is unavailable on an edge');
@@ -796,7 +844,10 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
     { name: 'background-timers', stop: () => clearInterval(cleanup) },
     { name: 'node-agent', stop: () => nodeAgent?.stop() },
     { name: 'vod-producers', stop: () => sessions.close() },
-    { name: 'http-server', stop: () => app.close() },
+    {
+      name: 'http-server',
+      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+    },
     { name: 'repository', stop: () => repository.close() }
   ]);
   bindShutdown(() => shutdown.run());
