@@ -12,7 +12,8 @@ import type {
   PublicProviderBinding,
   PublicProviderConnection,
   RelaySession,
-  SegmentJob
+  SegmentJob,
+  VodProducer
 } from '@vrrelay/domain';
 import type {
   BackendActivationRequest,
@@ -60,6 +61,7 @@ import {
   getReadiness,
   getRuntimeConfiguration,
   getSession,
+  getVodProducer,
   getSetupStatus,
   initializeAdmin,
   listBackendHealth,
@@ -78,6 +80,7 @@ import {
   listRecentEvents,
   listSegmentJobs,
   listSessions,
+  listVodProducers,
   login as loginOperation,
   logout as logoutOperation,
   previewPlacement,
@@ -435,6 +438,9 @@ export const api = {
   activateBackend: (body: BackendActivationRequest) =>
     result<BackendStatus>(activateBackend({ ...required, body })),
   segmentJobs: () => result<{ items: SegmentJob[] }>(listSegmentJobs(required)),
+  vodProducers: () => result<{ items: VodProducer[] }>(listVodProducers(required)),
+  vodProducer: (sessionId: string) =>
+    result<VodProducer>(getVodProducer({ ...required, path: { sessionId } })),
   createNodeJoinToken: (body: CreateNodeJoinTokenRequest) =>
     result<{ token: string; expiresAt: string }>(createNodeJoinToken({ ...required, body })),
   drainNode: (nodeId: string, draining: boolean) =>

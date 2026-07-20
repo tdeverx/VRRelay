@@ -382,6 +382,24 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
     );
   }
 
+  async dispatchProducer(
+    nodeId: string,
+    command: RemoteSegmentCommand,
+    signal?: AbortSignal
+  ): Promise<void> {
+    await this.request(
+      nodeId,
+      'producer.start',
+      command as unknown as Record<string, unknown>,
+      REQUEST_TIMEOUT_MS,
+      signal
+    );
+  }
+
+  async stopProducer(nodeId: string, sessionId: string): Promise<void> {
+    await this.request(nodeId, 'producer.stop', { sessionId }, 30_000).catch(() => undefined);
+  }
+
   async cancel(nodeId: string, jobId: string): Promise<void> {
     await this.request(nodeId, 'job.cancel', { jobId }, 10_000).catch(() => undefined);
   }
@@ -523,7 +541,7 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
         reject,
         timer,
         ...(signal ? { signal } : {}),
-        ...(kind === 'job.offer' && typeof payload.jobId === 'string'
+        ...((kind === 'job.offer' || kind === 'producer.start') && typeof payload.jobId === 'string'
           ? { jobId: payload.jobId }
           : {})
       };
@@ -697,7 +715,7 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
     if (!message.replyTo) throw new Error('Agent response is missing its correlation identifier');
     const pending = connection.pending.get(message.replyTo);
     if (!pending) return;
-    if (pending.kind === 'job.offer') {
+    if (pending.kind === 'job.offer' || pending.kind === 'producer.start') {
       if (
         ['job.accept', 'job.progress', 'job.complete', 'job.reject', 'job.fail'].includes(
           message.kind
@@ -1106,6 +1124,9 @@ export interface NodeAgentOptions {
   capabilities: () => Promise<NodeCapability>;
   onSegment: (command: RemoteSegmentCommand, signal: AbortSignal) => Promise<void>;
   onCancel: (jobId: string) => Promise<void>;
+  onProducerStop?: (sessionId: string) => Promise<void>;
+  onDrain?: (draining: boolean) => Promise<void>;
+  onDisconnect?: () => Promise<void>;
   onProvider: (
     operation:
       | 'provider.bind'
@@ -1400,6 +1421,12 @@ export class NodeAgent {
       this.#preferActiveIdentity = true;
     else if (connection.identitySlot === 'active' && !connection.opened)
       this.#preferActiveIdentity = false;
+    if (connection.opened)
+      await this.options
+        .onDisconnect?.()
+        .catch((error) =>
+          this.#log(connection, 'warn', errorMessage(error, 'Disconnect cleanup failed'))
+        );
     this.#scheduleReconnect();
   }
 
@@ -1545,8 +1572,8 @@ export class NodeAgent {
   }
 
   async #message(connection: NodeAgentConnection, message: AgentEnvelope): Promise<void> {
-    if (message.kind === 'job.offer') {
-      const { jobId, sessionId, contentKey, segmentIndex } = message.payload;
+    if (message.kind === 'job.offer' || message.kind === 'producer.start') {
+      const { jobId, sessionId, contentKey, segmentIndex, sourceCredential } = message.payload;
       if (this.#state?.draining) {
         this.#send(
           connection,
@@ -1581,7 +1608,13 @@ export class NodeAgent {
         );
         return;
       }
-      const command: RemoteSegmentCommand = { jobId, sessionId, contentKey, segmentIndex };
+      const command: RemoteSegmentCommand = {
+        jobId,
+        sessionId,
+        contentKey,
+        segmentIndex,
+        ...(sourceCredential ? { sourceCredential } : {})
+      };
       const controller = new AbortController();
       this.#jobs.set(command.jobId, controller);
       this.#send(connection, 'job.accept', { ok: true, jobId }, { replyTo: message.id });
@@ -1603,8 +1636,15 @@ export class NodeAgent {
       return;
     }
 
+    if (message.kind === 'producer.stop') {
+      await this.options.onProducerStop?.(message.payload.sessionId);
+      this.#replySuccess(connection, message);
+      return;
+    }
+
     if (message.kind === 'drain') {
       await this.#mutateState((state) => ({ ...state, draining: message.payload.draining }));
+      await this.options.onDrain?.(message.payload.draining);
       this.#replySuccess(connection, message);
       return;
     }
@@ -1839,7 +1879,7 @@ function redactValue(value: unknown, depth = 0): unknown {
       .slice(0, 100)
       .map(([key, item]) => [
         key,
-        /authorization|password|token|secret|private.?key|api.?key/i.test(key)
+        /authorization|credential|password|token|secret|private.?key|api.?key/i.test(key)
           ? '[REDACTED]'
           : redactValue(item, depth + 1)
       ])

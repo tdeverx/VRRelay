@@ -222,7 +222,14 @@ export class SessionCache {
             await rm(child, { force: true });
           }
         } else {
-          const info = await stat(child);
+          let info;
+          try {
+            info = await stat(child);
+          } catch {
+            // Concurrent restores atomically rename their unique .part files. A directory
+            // entry observed above may therefore disappear before it is inspected.
+            continue;
+          }
           if (!protectedSet.has(child) && now - info.mtimeMs > this.options.cacheTtlMs) {
             await this.#removeLocalObject(child);
             removed += 1;

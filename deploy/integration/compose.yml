@@ -81,7 +81,7 @@ services:
       - -ec
       - |
         ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=30 \
-          -f lavfi -i sine=frequency=880:sample_rate=48000 -t 12 -c:v libx264 -preset ultrafast \
+          -f lavfi -i sine=frequency=880:sample_rate=48000 -t 80 -c:v libx264 -preset ultrafast \
           -pix_fmt yuv420p -g 120 -c:a aac -ac 2 -b:a 128k -movflags +faststart \
           -y /tmp/fixture.mp4
         exec node /fixture/jellyfin-fixture.mjs
@@ -91,6 +91,7 @@ services:
       FIXTURE_ACCESS_TOKEN: fixture-access-token
     volumes:
       - ./jellyfin-fixture.mjs:/fixture/jellyfin-fixture.mjs:ro
+    ports: [18096:8096]
     healthcheck:
       test:
         [
@@ -132,6 +133,8 @@ services:
       VRRELAY_PUBLIC_URL: http://127.0.0.1:18100
       VRRELAY_AGENT_LISTEN_ADDR: 0.0.0.0:8100
       VRRELAY_AGENT_TLS_NAMES: controller
+      VRRELAY_TRUSTED_PROXY_CIDRS: 127.0.0.1/32,172.16.0.0/12,192.168.0.0/16
+      VRRELAY_VIEWER_REGION_HEADER: x-vrrelay-region
       VRRELAY_MEDIAMTX_RTMP_URL: rtmp://mediamtx-origin:1935
       VRRELAY_MEDIAMTX_SRT_URL: srt://mediamtx-origin:8890
       VRRELAY_MEDIAMTX_WHIP_URL: http://mediamtx-origin:8889
@@ -151,7 +154,7 @@ services:
     environment:
       <<: *relay-environment
       VRRELAY_NODE_NAME: Acceptance worker A
-      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_REGION: london
       VRRELAY_NODE_ROLES: source-worker
       VRRELAY_PUBLIC_URL: http://source-worker-a:8099
       VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
@@ -167,7 +170,7 @@ services:
     environment:
       <<: *relay-environment
       VRRELAY_NODE_NAME: Acceptance worker B
-      VRRELAY_NODE_REGION: backup
+      VRRELAY_NODE_REGION: new-york
       VRRELAY_NODE_ROLES: source-worker
       VRRELAY_PUBLIC_URL: http://source-worker-b:8099
       VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
@@ -183,7 +186,7 @@ services:
     environment:
       <<: *relay-environment
       VRRELAY_NODE_NAME: Acceptance ingest origin
-      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_REGION: london
       VRRELAY_NODE_ROLES: ingest-origin
       VRRELAY_PUBLIC_URL: http://ingest-origin:8099
       VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
@@ -202,7 +205,7 @@ services:
     environment:
       <<: *relay-environment
       VRRELAY_NODE_NAME: Acceptance edge A
-      VRRELAY_NODE_REGION: home
+      VRRELAY_NODE_REGION: london
       VRRELAY_NODE_ROLES: edge
       VRRELAY_PUBLIC_URL: http://127.0.0.1:18201
       VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect
@@ -234,7 +237,7 @@ services:
     environment:
       <<: *relay-environment
       VRRELAY_NODE_NAME: Acceptance edge B
-      VRRELAY_NODE_REGION: backup
+      VRRELAY_NODE_REGION: new-york
       VRRELAY_NODE_ROLES: edge
       VRRELAY_PUBLIC_URL: http://127.0.0.1:18202
       VRRELAY_CONTROLLER_AGENT_URL: wss://controller:8100/api/v1/nodes/connect

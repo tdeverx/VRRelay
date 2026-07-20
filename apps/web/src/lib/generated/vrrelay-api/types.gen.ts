@@ -357,6 +357,36 @@ export type SessionList = {
     items: Array<RelaySession>;
 };
 
+export type VodProducer = {
+    id: string;
+    sessionId: string;
+    ownerNodeId?: string;
+    generation: number;
+    state: 'idle' | 'starting' | 'running' | 'switching' | 'complete' | 'failed' | 'cancelled';
+    demandedSegmentIndex: number;
+    startSegmentIndex: number;
+    lastPublishedSegmentIndex?: number;
+    leaseExpiresAt?: string;
+    lastDemandAt: string;
+    idleDeadlineAt?: string;
+    errorMessage?: string;
+    workerHistory: Array<{
+        generation: number;
+        nodeId: string;
+        state: 'running' | 'complete' | 'failed' | 'cancelled';
+        startSegmentIndex: number;
+        startedAt: string;
+        completedAt?: string;
+        errorMessage?: string;
+    }>;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type VodProducerList = {
+    items: Array<VodProducer>;
+};
+
 export type CreateLiveChannelRequest = {
     name: string;
     preferredRegion?: string;
@@ -480,6 +510,7 @@ export type NodeCapability = {
      */
     egressMbps: number;
     providerIds: Array<string>;
+    vodProducerVersion: number;
 };
 
 export type ClusterNode = {
@@ -658,10 +689,12 @@ export type RuntimeConfiguration = {
     adminUrl: string;
     playbackUrl: string;
     trustedProxyCidrs: Array<string>;
+    viewerRegionHeader: string;
     agentListenAddr: string;
     maxWorkers: number;
     cacheTtlMs: number;
     cacheLimitBytes: number;
+    vodProducerIdleTimeoutMs: number;
     nodeName: string;
     nodeRegion: string;
 };
@@ -1607,6 +1640,49 @@ export type ControlSessionResponses = {
 };
 
 export type ControlSessionResponse = ControlSessionResponses[keyof ControlSessionResponses];
+
+export type ListVodProducersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/vod-producers';
+};
+
+export type ListVodProducersResponses = {
+    /**
+     * Redacted durable VOD producer states
+     */
+    200: VodProducerList;
+};
+
+export type ListVodProducersResponse = ListVodProducersResponses[keyof ListVodProducersResponses];
+
+export type GetVodProducerData = {
+    body?: never;
+    path: {
+        sessionId: string;
+    };
+    query?: never;
+    url: '/vod-producers/{sessionId}';
+};
+
+export type GetVodProducerErrors = {
+    /**
+     * Request failed
+     */
+    404: ApiError;
+};
+
+export type GetVodProducerError = GetVodProducerErrors[keyof GetVodProducerErrors];
+
+export type GetVodProducerResponses = {
+    /**
+     * Redacted durable VOD producer state
+     */
+    200: VodProducer;
+};
+
+export type GetVodProducerResponse = GetVodProducerResponses[keyof GetVodProducerResponses];
 
 export type ListLiveChannelsData = {
     body?: never;

@@ -25,10 +25,12 @@ export function publicRuntimeConfiguration(
       adminUrl: config.adminUrl,
       playbackUrl: config.playbackUrl,
       trustedProxyCidrs: config.trustedProxyCidrs,
+      viewerRegionHeader: config.viewerRegionHeader,
       agentListenAddr: config.agentListenAddr,
       maxWorkers: config.maxWorkers,
       cacheTtlMs: config.cacheTtlMs,
       cacheLimitBytes: config.cacheLimitBytes,
+      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
       nodeName: config.nodeName,
       nodeRegion: config.nodeRegion
     },

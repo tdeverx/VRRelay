@@ -340,7 +340,8 @@ export const NodeCapabilitySchema = z.object({
   cacheBytes: z.number().int().min(0),
   cacheLimitBytes: z.number().int().min(0).nullable(),
   egressMbps: z.number().min(0),
-  providerIds: z.array(z.string())
+  providerIds: z.array(z.string()),
+  vodProducerVersion: z.number().int().min(0).optional()
 });
 export type NodeCapability = z.infer<typeof NodeCapabilitySchema>;
 
@@ -422,6 +423,47 @@ export const SegmentJobSchema = z.object({
   updatedAt: z.iso.datetime()
 });
 export type SegmentJob = z.infer<typeof SegmentJobSchema>;
+
+export const VodProducerStateSchema = z.enum([
+  'idle',
+  'starting',
+  'running',
+  'switching',
+  'complete',
+  'failed',
+  'cancelled'
+]);
+export type VodProducerState = z.infer<typeof VodProducerStateSchema>;
+
+export const VodProducerAttemptSchema = z.object({
+  generation: z.number().int().positive(),
+  nodeId: z.string().min(1),
+  state: z.enum(['running', 'complete', 'failed', 'cancelled']),
+  startSegmentIndex: z.number().int().nonnegative(),
+  startedAt: z.iso.datetime(),
+  completedAt: z.iso.datetime().optional(),
+  errorMessage: z.string().max(2_000).optional()
+});
+export type VodProducerAttempt = z.infer<typeof VodProducerAttemptSchema>;
+
+export const VodProducerSchema = z.object({
+  id: z.string().min(1),
+  sessionId: z.string().min(1),
+  ownerNodeId: z.string().min(1).optional(),
+  generation: z.number().int().positive(),
+  state: VodProducerStateSchema,
+  demandedSegmentIndex: z.number().int().nonnegative(),
+  startSegmentIndex: z.number().int().nonnegative(),
+  lastPublishedSegmentIndex: z.number().int().nonnegative().optional(),
+  leaseExpiresAt: z.iso.datetime().optional(),
+  lastDemandAt: z.iso.datetime(),
+  idleDeadlineAt: z.iso.datetime().optional(),
+  errorMessage: z.string().max(2_000).optional(),
+  workerHistory: z.array(VodProducerAttemptSchema).default([]),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime()
+});
+export type VodProducer = z.infer<typeof VodProducerSchema>;
 
 export const JobLogEntrySchema = z.object({
   id: z.string(),

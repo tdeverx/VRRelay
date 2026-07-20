@@ -11,7 +11,8 @@ const capabilities = {
   cacheBytes: 0,
   cacheLimitBytes: null,
   egressMbps: 0,
-  providerIds: []
+  providerIds: [],
+  vodProducerVersion: 1
 };
 
 const certificate = {
@@ -30,6 +31,17 @@ const payloads: Array<readonly [AgentEnvelope['kind'], Record<string, unknown>]>
     'job.offer',
     { jobId: 'job-1', sessionId: 'session-1', contentKey: 'vod/0.ts', segmentIndex: 0 }
   ],
+  [
+    'producer.start',
+    {
+      jobId: 'job-1',
+      sessionId: 'session-1',
+      contentKey: 'vod/0.ts',
+      segmentIndex: 0,
+      sourceCredential: { accessToken: 'sensitive-token', providerUserId: 'user-1' }
+    }
+  ],
+  ['producer.stop', { sessionId: 'session-1' }],
   ['job.accept', { ok: true, jobId: 'job-1' }],
   [
     'job.reject',
@@ -122,6 +134,23 @@ function envelope(kind: AgentEnvelope['kind'], payload: Record<string, unknown>)
 }
 
 describe('strict agent protocol', () => {
+  it('accepts non-producer roles while requiring an explicit zero capability version', () => {
+    expect(
+      AgentEnvelopeSchema.parse({
+        version: 1,
+        id: 'edge-hello',
+        sequence: 1,
+        kind: 'hello',
+        sentAt: new Date().toISOString(),
+        payload: {
+          nodeId: 'edge-1',
+          capabilities: { ...capabilities, vodProducerVersion: 0 },
+          draining: false
+        }
+      })
+    ).toBeTruthy();
+  });
+
   it.each(payloads)('accepts the current %s payload', (kind, payload) => {
     expect(AgentEnvelopeSchema.safeParse(envelope(kind, payload)).success).toBe(true);
   });

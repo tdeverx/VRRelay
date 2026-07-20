@@ -10,6 +10,7 @@
   import * as Card from '#lib/new-ui/components/ui/card';
 
   let jobs = $state<Awaited<ReturnType<typeof api.segmentJobs>>['items']>([]);
+  let producers = $state<Awaited<ReturnType<typeof api.vodProducers>>['items']>([]);
   let cacheItems = $state<Awaited<ReturnType<typeof api.cacheInventory>>['items']>([]);
   let totalBytes = $state(0);
   let loading = $state(true);
@@ -18,8 +19,13 @@
   async function load() {
     loading = true;
     try {
-      const [jobResult, cacheResult] = await Promise.all([api.segmentJobs(), api.cacheInventory()]);
+      const [jobResult, producerResult, cacheResult] = await Promise.all([
+        api.segmentJobs(),
+        api.vodProducers(),
+        api.cacheInventory()
+      ]);
       jobs = jobResult.items;
+      producers = producerResult.items;
       cacheItems = cacheResult.items;
       totalBytes = cacheResult.totalBytes;
       error = '';
@@ -60,6 +66,33 @@
         ></Card.Header
       ></Card.Root
     >
+    <div class="grid gap-3">
+      {#each producers as producer}
+        <Card.Root
+          ><Card.Header class="sm:flex-row sm:items-center"
+            ><div class="min-w-0 flex-1">
+              <Card.Title class="truncate">VOD producer · {producer.sessionId}</Card.Title
+              ><Card.Description
+                >Source worker {producer.ownerNodeId ?? 'unassigned'} · generation
+                {producer.generation} · window {producer.startSegmentIndex}–{producer.lastPublishedSegmentIndex ??
+                  'waiting'}
+                · demand {new Date(
+                  producer.lastDemandAt
+                ).toLocaleString()}{#if producer.errorMessage}
+                  · {producer.errorMessage}{/if}</Card.Description
+              >
+            </div>
+            <StatusBadge value={producer.state} /></Card.Header
+          ></Card.Root
+        >
+      {:else}<Card.Root
+          ><Card.Header
+            ><Card.Title>No VOD producers</Card.Title><Card.Description
+              >A durable source producer appears after the first uncached VOD segment demand.</Card.Description
+            ></Card.Header
+          ></Card.Root
+        >{/each}
+    </div>
     <div class="grid gap-3">
       {#each jobs as job}
         <Card.Root

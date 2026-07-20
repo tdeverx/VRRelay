@@ -12,7 +12,12 @@ An OBS live request follows this path:
 OBS (RTMP/SRT/WHIP) → ingest origin / one normalizer → one pull per active edge → HLS viewers
 ```
 
-One session/profile/window shares the same encoder jobs and segment cache. A simultaneous request for an identical segment joins the existing job. Independent seeks into different uncached windows can require separate bounded workers. Viewers never connect to one another; the relay host carries viewer egress.
+One VOD session has one durable source producer generation. Its assigned source worker keeps one
+continuous Jellyfin connection, publishes atomically completed segments to shared object storage,
+and serves every regional edge from that shared output. Adjacent and simultaneous demand joins the
+current playback window. A distant position replaces it only when it has more active viewers, or
+when the old window has gone quiet; ties retain the current producer. Viewers never connect to one
+another, so this is CDN-style edge fan-out rather than peer-to-peer delivery.
 
 ## Boundaries
 
@@ -35,11 +40,11 @@ One session/profile/window shares the same encoder jobs and segment cache. A sim
 
 Standalone mode implements the same ports with SQLite, memory coordination, and the local filesystem. Cluster mode substitutes PostgreSQL, Valkey, and any configured object-store adapter without changing domain models.
 
-Only controller and standalone startup may run migrations. Dedicated source-worker, ingest-origin, and edge processes perform a read-only schema-current assertion and fail closed on missing, incomplete, future, gapped, or tampered history.
+Only controller and standalone startup may run migrations. Dedicated source-worker, ingest-origin, and edge processes perform a read-only schema-current assertion and fail closed on missing, incomplete, future, gapped, or tampered history. Source workers reconcile expired producer leases after schema validation but never mutate the migration history.
 
 ## Persistence and concurrency
 
-SQLite and PostgreSQL share the same provider-neutral repository contract. Migration definitions have fixed version, name, and SHA-256 metadata through v7. Existing v1/v2 databases are the only accepted metadata-free legacy history; their known metadata is backfilled inside the locked v3 migration transaction after the configured backup gate. Immutable v4 adds live-channel revisions, v5 adds provider revisions plus a durable deletion-pending marker, v6 adds durable provider-binding deletion, and v7 adds bounded segment-job logs. Changed definitions, future versions, gaps, partial metadata, and name/checksum tampering are rejected at startup.
+SQLite and PostgreSQL share the same provider-neutral repository contract. Migration definitions have fixed version, name, and SHA-256 metadata through v9. Existing v1/v2 databases are the only accepted metadata-free legacy history; their known metadata is backfilled inside the locked v3 migration transaction after the configured backup gate. Immutable v4 adds live-channel revisions, v5 adds provider revisions plus a durable deletion-pending marker, v6 adds durable provider-binding deletion, v7 adds bounded segment-job logs, v8 adds unified user identities, and v9 adds fenced durable VOD producer state and indexes. Changed definitions, future versions, gaps, partial metadata, and name/checksum tampering are rejected at startup.
 
 History alone is not considered sufficient. Both adapters verify the complete expected schema shape, including every required table and column, primary keys, required unique constraints, and named index column order.
 
@@ -48,6 +53,7 @@ The runtime uses insert-only creation and revisioned compare-and-set operations 
 - session state/viewer updates;
 - node heartbeat, drain, offline, certificate rotation, and terminal revocation;
 - segment-job lease and terminal completion/cancellation;
+- VOD producer ownership, generation, demand window, lease, and stale-generation fencing;
 - provider-binding state while binding ownership remains immutable;
 - live-channel publisher polling and guarded deletion;
 - provider validation/metadata and terminal deletion;
@@ -66,10 +72,12 @@ Provider setup is a transient credential exchange, not a claim that the controll
 Interactive sign-in uses one selected delegated provider connection that contains endpoint metadata
 but no shared administrator credential. Each Jellyfin user authenticates through the provider
 adapter and sees only that account's catalog. The provider/user identity hash is persisted with
-explicit local roles and profile entitlements. User-created VOD sessions remain local: the session
-copies the user's provider token into a session-owned secret, records the stable owner identity in
-provider-neutral metadata, and removes the secret with the session. Remote per-user credential
-staging is not inferred from administrator bindings.
+explicit local roles and profile entitlements. User-created VOD sessions copy the user's provider
+token into a controller-side session-owned secret, record only the stable owner identity in
+provider-neutral metadata, and remove the secret with the session. In a cluster the controller
+sends that token only in the typed sensitive `producer.start` payload over mTLS to the selected
+compatible source worker. The worker holds it in memory for the producer lifetime and discards it
+on stop, lease loss, disconnect, or process exit.
 
 Jellyfin users may also create OBS channels and live playback sessions. Live-channel ownership is
 assigned from the authenticated principal on the server: users can list, rotate, and delete only
@@ -99,6 +107,16 @@ Activated object-store/backend configuration records per-node application state 
 
 The HLS manifest is finite on its first response: it declares `PLAYLIST-TYPE:VOD`, every planned segment duration, and `ENDLIST`. This gives a compatible player a finite duration and seekable segment timeline. The player maintains its own current position; that value is not supplied by the manifest. VRRelay does not synchronize viewers. A VRChat world distributes the URL and playback time and seeks clients as needed.
 
-No permanent alternate rendition is generated. Segments are created on demand, written atomically, reused temporarily, and evicted after idle expiry. Pinned sessions keep their playback URL and configuration, not media data or workers.
+No permanent alternate rendition is generated. The producer starts at the demanded segment, builds
+a three-segment-duration buffer (bounded to 6–30 seconds), then reads at approximately playback
+rate. It stops after 60 seconds without demand by default (configurable from 15–600 seconds).
+Segments are written atomically, reused temporarily, and evicted after cache expiry. Pinned
+sessions keep their playback URL and durable producer recovery metadata, not permanent media or a
+permanently running worker.
+
+The durable producer applies to HLS VOD profiles, including MPEG-TS and fMP4-segmented HLS.
+Experimental direct fragmented-MP4 delivery is still request-oriented and does not yet provide the
+one-provider-connection-per-session guarantee. A future shared CMAF/fMP4 delivery path must isolate
+viewer backpressure and late joins while reusing one upstream producer.
 
 See the [code map](code-map.md) for entry points and change boundaries.

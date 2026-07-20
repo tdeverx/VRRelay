@@ -20,10 +20,12 @@ describe('relay configuration', () => {
       adminUrl: current.adminUrl,
       playbackUrl: current.playbackUrl,
       trustedProxyCidrs: current.trustedProxyCidrs,
+      viewerRegionHeader: current.viewerRegionHeader,
       agentListenAddr: current.agentListenAddr,
       maxWorkers: current.maxWorkers,
       cacheTtlMs: current.cacheTtlMs,
       cacheLimitBytes: current.cacheLimitBytes,
+      vodProducerIdleTimeoutMs: current.vodProducerIdleTimeoutMs,
       nodeName: current.nodeName,
       nodeRegion: current.nodeRegion
     };
@@ -51,10 +53,12 @@ describe('relay configuration', () => {
         adminUrl: 'http://127.0.0.1:9000',
         playbackUrl: 'http://127.0.0.1:9000',
         trustedProxyCidrs: [],
+        viewerRegionHeader: 'x-vrrelay-region',
         agentListenAddr: '127.0.0.1:9100',
         maxWorkers: 4,
         cacheTtlMs: 60_000,
         cacheLimitBytes: 1_000_000,
+        vodProducerIdleTimeoutMs: 60_000,
         nodeName: 'Configured node',
         nodeRegion: 'studio'
       })
@@ -100,6 +104,21 @@ describe('relay configuration', () => {
       expect(() => loadConfig({ VRRELAY_TRUST_PROXY: value })).toThrow(
         /VRRELAY_TRUST_PROXY no longer enables proxy trust/
       );
+  });
+
+  it('validates regional routing and persistent producer runtime bounds', () => {
+    expect(
+      loadConfig({
+        VRRELAY_VIEWER_REGION_HEADER: 'X-VRRelay-Region',
+        VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '15s'
+      })
+    ).toMatchObject({
+      viewerRegionHeader: 'x-vrrelay-region',
+      vodProducerIdleTimeoutMs: 15_000
+    });
+    expect(() => loadConfig({ VRRELAY_VIEWER_REGION_HEADER: 'invalid header' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '14s' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '601s' })).toThrow();
   });
 
   it.each(['false', '0', 'no', 'off', ' FALSE '])(

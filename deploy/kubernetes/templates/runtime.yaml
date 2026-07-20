@@ -50,6 +50,8 @@ spec:
           env:
             - { name: VRRELAY_ENVIRONMENT, value: production }
             - { name: VRRELAY_LISTEN_ADDR, value: "0.0.0.0:8099" }
+            - { name: VRRELAY_VIEWER_REGION_HEADER, value: {{ $root.Values.routing.viewerRegionHeader | quote }} }
+            - { name: VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT, value: {{ $root.Values.vodProducer.idleTimeout | quote }} }
             - name: VRRELAY_TRUSTED_PROXY_CIDRS
               valueFrom:
                 secretKeyRef:

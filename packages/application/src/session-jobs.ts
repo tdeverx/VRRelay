@@ -110,6 +110,12 @@ export interface SessionJobCallbacks {
     destination: string,
     signal?: AbortSignal
   ): Promise<string>;
+  remoteCommand?(
+    jobId: string,
+    session: RelaySession,
+    contentKey: string,
+    segmentIndex: number
+  ): Promise<RemoteSegmentCommand>;
 }
 
 function finishLatestAttempt(
@@ -429,11 +435,13 @@ export class SessionJobCoordinator {
               source: 'automatic'
             });
           try {
-            await this.infrastructure.dispatcher!.dispatch(
-              remoteNode,
-              { jobId: job.id, sessionId: session.id, contentKey, segmentIndex: index },
-              leaseController.signal
-            );
+            const command = this.callbacks.remoteCommand
+              ? await this.callbacks.remoteCommand(job.id, session, contentKey, index)
+              : { jobId: job.id, sessionId: session.id, contentKey, segmentIndex: index };
+            const dispatcher = this.infrastructure.dispatcher!;
+            if (profile.delivery.method === 'hls' && dispatcher.dispatchProducer)
+              await dispatcher.dispatchProducer(remoteNode, command, leaseController.signal);
+            else await dispatcher.dispatch(remoteNode, command, leaseController.signal);
             if (!(await this.cache.restoreObject(contentKey, destination)))
               throw new Error('Worker completed without publishing the segment object');
             job = await this.#transitionActiveJob(job, (current) => ({
@@ -570,7 +578,10 @@ export class SessionJobCoordinator {
     } finally {
       if (renew) clearInterval(renew);
       signal?.removeEventListener('abort', forwardAbort);
-      await coordination?.release(leaseKey, owner);
+      // Expiry safely releases the lease if coordination is temporarily down.
+      // Do not mask the segment outcome or crash a background request while
+      // Valkey is restarting.
+      await coordination?.release(leaseKey, owner).catch(() => undefined);
     }
   }
 
@@ -746,6 +757,7 @@ export class SessionJobCoordinator {
         node.roles.includes('source-worker') &&
         node.state === 'online' &&
         node.capabilities.encoders.includes(profile.video.encoder) &&
+        (profile.delivery.method !== 'hls' || (node.capabilities.vodProducerVersion ?? 0) >= 1) &&
         bindings.some(
           (binding) =>
             binding.nodeId === node.id && binding.state === 'healthy' && !binding.deletionPending

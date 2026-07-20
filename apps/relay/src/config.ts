@@ -120,6 +120,9 @@ const ConfigSchema = z
       .int()
       .positive()
       .default(20 * 1024 * 1024 * 1024),
+    vodProducerIdleTimeoutMs: duration
+      .pipe(z.number().int().min(15_000).max(600_000))
+      .default(60_000),
     masterKey: z.string().optional(),
     secretBackend: z.enum(['auto', 'keychain', 'dpapi', 'encrypted-file']).default('auto'),
     mediaMtxHlsUrl: z.url().default('http://127.0.0.1:8888'),
@@ -137,6 +140,12 @@ const ConfigSchema = z
     mediaMtxAllowInternalRead: environmentBoolean.default(false),
     mediaMtxReadToken: z.string().min(16).default('development-read-token-change-me'),
     trustedProxyCidrs: z.array(trustedProxyCidr).default([]),
+    viewerRegionHeader: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[a-z0-9][a-z0-9-]{0,62}$/)
+      .default('x-vrrelay-region'),
     nodeId: z.string().default('standalone'),
     nodeName: z.string().default('VRRelay node'),
     nodeRegion: z.string().default('local'),
@@ -353,6 +362,8 @@ export function loadConfig(environment = process.env): RelayConfig {
     maxWorkers: environment.VRRELAY_MAX_WORKERS ?? runtime?.maxWorkers,
     cacheTtlMs: environment.VRRELAY_CACHE_TTL ?? runtime?.cacheTtlMs,
     cacheLimitBytes: environment.VRRELAY_CACHE_LIMIT_BYTES ?? runtime?.cacheLimitBytes,
+    vodProducerIdleTimeoutMs:
+      environment.VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT ?? runtime?.vodProducerIdleTimeoutMs,
     masterKey: optionalEnvironmentValue(environment.VRRELAY_MASTER_KEY),
     secretBackend: environment.VRRELAY_SECRET_BACKEND,
     mediaMtxHlsUrl: environment.VRRELAY_MEDIAMTX_HLS_URL,
@@ -373,6 +384,9 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_TRUSTED_PROXY_CIDRS?.split(',')
         .map((value) => value.trim())
         .filter(Boolean) ?? runtime?.trustedProxyCidrs,
+    viewerRegionHeader:
+      optionalEnvironmentValue(environment.VRRELAY_VIEWER_REGION_HEADER) ??
+      runtime?.viewerRegionHeader,
     nodeId: environment.VRRELAY_NODE_ID,
     nodeName: environment.VRRELAY_NODE_NAME ?? runtime?.nodeName,
     nodeRegion: environment.VRRELAY_NODE_REGION ?? runtime?.nodeRegion,

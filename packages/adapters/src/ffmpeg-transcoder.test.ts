@@ -110,7 +110,8 @@ describe('FFmpeg adapter', () => {
       createdAt: new Date().toISOString()
     };
 
-    await new FFmpegTranscoder({ ffmpegPath }).generateSegment(
+    const transcoder = new FFmpegTranscoder({ ffmpegPath });
+    await transcoder.generateSegment(
       {
         source: { url: source, headers: {}, durationSeconds: 1, fingerprint: 'fixture' },
         profile,
@@ -122,5 +123,22 @@ describe('FFmpeg adapter', () => {
     );
 
     expect((await stat(destination)).size).toBeGreaterThan(0);
+
+    const produced: number[] = [];
+    await transcoder.produceVod(
+      {
+        source: { url: source, headers: {}, durationSeconds: 1, fingerprint: 'fixture' },
+        profile,
+        startSegmentIndex: 7,
+        startSeconds: 0,
+        duration: 1
+      },
+      join(directory, 'producer'),
+      async (segment) => {
+        expect((await stat(segment.path)).size).toBeGreaterThan(0);
+        produced.push(segment.index);
+      }
+    );
+    expect(produced).toEqual([7]);
   }, 20_000);
 });

@@ -24,9 +24,12 @@ not release evidence by themselves.
 - Jellyfin authentication, catalog/source mapping, ranged source access, and
   playback activity reporting on the implemented happy paths.
 - Finite just-in-time HLS VOD, FFmpeg capability discovery, temporary segment
-  caching, job coalescing, and MPEG-TS output as the intended production
+  caching, one fenced continuous producer per session, regional edge routing, durable producer
+  recovery state, and MPEG-TS output as the intended production
   default. fMP4, fragmented MP4, H.265, AV1, and other experimental paths are
-  not supported release claims.
+  not supported release claims. The single-producer guarantee covers HLS VOD
+  only; direct fragmented MP4 remains request-oriented and may open one
+  provider connection per request.
 - MediaMTX-backed RTMP, SRT, and WHIP ingest plus live HLS fan-out foundations.
 - Outbound mTLS agent transport, node enrollment, role metadata, PostgreSQL,
   Valkey, filesystem/S3-compatible/Azure/GCS adapters, and a distributed
@@ -50,9 +53,10 @@ pinned-runtime repository gate are green.
   through distinct composition roots with explicit dependency graphs,
   role-owned HTTP surfaces, schema-startup policy, and ordered shutdown tests.
 - SQLite and PostgreSQL migrations now have immutable version/name/SHA-256
-  metadata through v7. V4 adds live-channel revisions, v5 adds provider
+  metadata through v9. V4 adds live-channel revisions, v5 adds provider
   revisions/deletion state, v6 adds crash-safe binding deletion, and v7 adds
-  bounded segment job logs. Startup
+  bounded segment job logs, v8 adds unified user identities, and v9 adds durable fenced VOD
+  producers. Startup
   validates exact columns, storage types, JSON/JSONB and timestamp shape,
   nullability, runtime-critical defaults, boolean checks, keys, unique
   constraints, and named indexes rather than trusting the migration number.

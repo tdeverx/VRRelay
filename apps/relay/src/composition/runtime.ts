@@ -77,6 +77,9 @@ const EDGE_PROVIDERS: ProviderRegistry = {
 
 const EDGE_TRANSCODER: Transcoder = {
   discover: async () => EDGE_CAPABILITIES,
+  produceVod: async () => {
+    throw new Error('Transcoding is unavailable on an edge');
+  },
   generateSegment: async () => {
     throw new Error('Transcoding is unavailable on an edge');
   },
@@ -131,7 +134,8 @@ function nodeCapabilities(
     cacheBytes: sessions ? await sessions.cacheUsageBytes() : 0,
     cacheLimitBytes: sessions ? config.cacheLimitBytes : 0,
     egressMbps: sessions?.egressMbps() ?? 0,
-    providerIds: await providerIds()
+    providerIds: await providerIds(),
+    vodProducerVersion: config.nodeRoles.includes('source-worker') ? 1 : 0
   });
 }
 
@@ -237,7 +241,16 @@ export function configuredNodeAgentOptions(
   config: RelayConfig,
   secrets: NodeAgentOptions['secretStore'],
   capabilities: () => Promise<NodeCapability>,
-  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider' | 'onCache'>,
+  handlers: Pick<
+    NodeAgentOptions,
+    | 'onSegment'
+    | 'onCancel'
+    | 'onProducerStop'
+    | 'onDrain'
+    | 'onDisconnect'
+    | 'onProvider'
+    | 'onCache'
+  >,
   internalUrl?: string
 ): NodeAgentOptions | undefined {
   if (!config.controllerAgentUrl || !config.controllerEnrollmentUrl) return undefined;
@@ -258,7 +271,16 @@ function configuredNodeAgent(
   config: RelayConfig,
   secrets: NodeAgentOptions['secretStore'],
   capabilities: () => Promise<NodeCapability>,
-  handlers: Pick<NodeAgentOptions, 'onSegment' | 'onCancel' | 'onProvider' | 'onCache'>,
+  handlers: Pick<
+    NodeAgentOptions,
+    | 'onSegment'
+    | 'onCancel'
+    | 'onProducerStop'
+    | 'onDrain'
+    | 'onDisconnect'
+    | 'onProvider'
+    | 'onCache'
+  >,
   internalUrl?: string
 ): NodeAgent | undefined {
   const options = configuredNodeAgentOptions(config, secrets, capabilities, handlers, internalUrl);
@@ -355,6 +377,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       maxWorkers: config.maxWorkers,
       nodeId: config.nodeId,
       roles: config.nodeRoles,
+      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
@@ -495,6 +518,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     { name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() },
     { name: 'agent-controller', stop: () => agentController?.stop() },
     { name: 'backend-service', stop: () => backends.close() },
+    { name: 'vod-producers', stop: () => sessions.close() },
     { name: 'http-server', stop: () => app.close() },
     { name: 'repository', stop: () => repository.close() }
   ]);
@@ -551,11 +575,13 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
       maxWorkers: config.maxWorkers,
       nodeId: config.nodeId,
       roles: ['source-worker'],
+      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
     { objectStore, coordination, clusterRepository: repository, metrics }
   );
+  await sessions.recover();
   const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
     locallyAvailableProviderIds(repository, secrets)
   );
@@ -573,6 +599,9 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     {
       onSegment: (command, signal) => sessions.executeRemoteSegment(command, signal),
       onCancel: (jobId) => sessions.cancelJob(jobId),
+      onProducerStop: (sessionId) => sessions.stopProducer(sessionId),
+      onDrain: (draining) => (draining ? sessions.drainProducers() : Promise.resolve()),
+      onDisconnect: () => sessions.close(),
       onProvider: providerAgentHandler(providers),
       onCache: cacheAgentHandler(sessions)
     },
@@ -589,6 +618,7 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
   const shutdown = createShutdownSequence([
     { name: 'background-timers', stop: () => clearInterval(cleanup) },
     { name: 'node-agent', stop: () => nodeAgent?.stop() },
+    { name: 'vod-producers', stop: () => sessions.close() },
     { name: 'http-server', stop: () => app.close() },
     { name: 'repository', stop: () => repository.close() }
   ]);
@@ -645,6 +675,8 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
       throw new Error('Segment jobs are unavailable on an ingest origin');
     },
     onCancel: async () => undefined,
+    onProducerStop: async () => undefined,
+    onDrain: async () => undefined,
     onProvider: async () => {
       throw new Error('Provider operations are unavailable on an ingest origin');
     },
@@ -717,6 +749,7 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
       maxWorkers: config.maxWorkers,
       nodeId: config.nodeId,
       roles: ['edge'],
+      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
       jobLogRetentionRows: config.jobLogRetentionRows,
       jobLogQueryLimit: config.jobLogQueryLimit
     },
@@ -762,6 +795,7 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
   const shutdown = createShutdownSequence([
     { name: 'background-timers', stop: () => clearInterval(cleanup) },
     { name: 'node-agent', stop: () => nodeAgent?.stop() },
+    { name: 'vod-producers', stop: () => sessions.close() },
     { name: 'http-server', stop: () => app.close() },
     { name: 'repository', stop: () => repository.close() }
   ]);

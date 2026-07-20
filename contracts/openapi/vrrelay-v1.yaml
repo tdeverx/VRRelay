@@ -308,6 +308,21 @@ paths:
       responses:
         '204': { description: Session deleted }
 
+  /vod-producers:
+    get:
+      operationId: listVodProducers
+      tags: [Operations]
+      responses:
+        '200': { $ref: '#/components/responses/VodProducerList' }
+  /vod-producers/{sessionId}:
+    get:
+      operationId: getVodProducer
+      tags: [Operations]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200': { $ref: '#/components/responses/VodProducerResult' }
+        '404': { $ref: '#/components/responses/Error' }
+
   /live-channels:
     get:
       operationId: listLiveChannels
@@ -816,6 +831,12 @@ components:
         description: Relay sessions,
         content: { application/json: { schema: { $ref: '#/components/schemas/SessionList' } } }
       }
+    VodProducerResult:
+      description: Redacted durable VOD producer state
+      content: { application/json: { schema: { $ref: '#/components/schemas/VodProducer' } } }
+    VodProducerList:
+      description: Redacted durable VOD producer states
+      content: { application/json: { schema: { $ref: '#/components/schemas/VodProducerList' } } }
     LiveChannelList:
       {
         description: Live ingest channels without stored token hashes,
@@ -1475,6 +1496,55 @@ components:
         required: [items],
         properties: { items: { type: array, items: { $ref: '#/components/schemas/RelaySession' } } }
       }
+    VodProducer:
+      type: object
+      required:
+        [
+          id,
+          sessionId,
+          generation,
+          state,
+          demandedSegmentIndex,
+          startSegmentIndex,
+          lastDemandAt,
+          workerHistory,
+          createdAt,
+          updatedAt
+        ]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        ownerNodeId: { type: string }
+        generation: { type: integer, minimum: 1 }
+        state:
+          { type: string, enum: [idle, starting, running, switching, complete, failed, cancelled] }
+        demandedSegmentIndex: { type: integer, minimum: 0 }
+        startSegmentIndex: { type: integer, minimum: 0 }
+        lastPublishedSegmentIndex: { type: integer, minimum: 0 }
+        leaseExpiresAt: { type: string, format: date-time }
+        lastDemandAt: { type: string, format: date-time }
+        idleDeadlineAt: { type: string, format: date-time }
+        errorMessage: { type: string, maxLength: 2000 }
+        workerHistory:
+          type: array
+          items:
+            type: object
+            required: [generation, nodeId, state, startSegmentIndex, startedAt]
+            properties:
+              generation: { type: integer, minimum: 1 }
+              nodeId: { type: string }
+              state: { type: string, enum: [running, complete, failed, cancelled] }
+              startSegmentIndex: { type: integer, minimum: 0 }
+              startedAt: { type: string, format: date-time }
+              completedAt: { type: string, format: date-time }
+              errorMessage: { type: string, maxLength: 2000 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    VodProducerList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/VodProducer' } }
     CreateLiveChannelRequest:
       type: object
       additionalProperties: false
@@ -1643,7 +1713,8 @@ components:
           cacheBytes,
           cacheLimitBytes,
           egressMbps,
-          providerIds
+          providerIds,
+          vodProducerVersion
         ]
       properties:
         encoders: { type: array, items: { type: string } }
@@ -1658,6 +1729,7 @@ components:
           minimum: 0
           description: Average media payload egress over the trailing 30 seconds.
         providerIds: { type: array, items: { type: string } }
+        vodProducerVersion: { type: integer, minimum: 0, default: 0 }
     ClusterNode:
       type: object
       required:
@@ -1942,10 +2014,12 @@ components:
           adminUrl,
           playbackUrl,
           trustedProxyCidrs,
+          viewerRegionHeader,
           agentListenAddr,
           maxWorkers,
           cacheTtlMs,
           cacheLimitBytes,
+          vodProducerIdleTimeoutMs,
           nodeName,
           nodeRegion
         ]
@@ -1956,10 +2030,13 @@ components:
         playbackUrl: { type: string, format: uri }
         trustedProxyCidrs:
           { type: array, maxItems: 32, items: { type: string, minLength: 1, maxLength: 100 } }
+        viewerRegionHeader:
+          { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$', default: x-vrrelay-region }
         agentListenAddr: { type: string, minLength: 3, maxLength: 260 }
         maxWorkers: { type: integer, minimum: 1, maximum: 32 }
         cacheTtlMs: { type: integer, minimum: 1000, maximum: 604800000 }
         cacheLimitBytes: { type: integer, minimum: 1, maximum: 10995116277760 }
+        vodProducerIdleTimeoutMs: { type: integer, minimum: 15000, maximum: 600000, default: 60000 }
         nodeName: { type: string, minLength: 1, maxLength: 100 }
         nodeRegion: { type: string, minLength: 1, maxLength: 100 }
     RuntimeConfigurationState:

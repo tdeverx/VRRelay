@@ -36,10 +36,11 @@ records.
 - Node 26 TypeScript relay API with an embedded SvelteKit operator dashboard.
 - Jellyfin authentication, movie/show filtering, series/season/episode browsing,
   source mapping, and playback activity.
-- Finite, seekable, just-in-time HLS VOD with structured FFmpeg profiles.
+- Finite, seekable HLS VOD with one durable, fenced producer per session and
+  structured FFmpeg profiles.
 - MediaMTX-backed OBS live ingest and live HLS fan-out.
 - Standalone and role-separated controller, source-worker, ingest-origin, and
-  edge runtimes with outbound mTLS agents.
+  region-aware edge runtimes with outbound mTLS agents.
 - SQLite/PostgreSQL persistence, memory/Valkey coordination, and local,
   S3-compatible, Azure Blob, and Google Cloud Storage adapters.
 - Docker Compose, Helm, provider-neutral OpenTofu, backup/restore, a native
@@ -47,6 +48,30 @@ records.
 
 H.264 8-bit `yuv420p`, AAC-LC stereo, MPEG-TS HLS, and HTTPS remain the intended
 production defaults. Experimental formats are not compatibility claims.
+
+## Distributed VOD behavior
+
+Regional routing changes only the delivery edge. The first uncached request for
+a VOD session starts one continuous producer on its assigned source-worker;
+every edge restores the resulting deterministic segments from shared object
+storage. Viewers in London, New York, and Sydney can therefore use nearby edges
+without opening duplicate Jellyfin producers for the same session. A separate
+session may start its own producer and consume another Jellyfin source stream.
+
+Recent privacy-preserving viewer demand controls the shared playback window. A
+dominant distant seek creates one fenced replacement generation, while adjacent
+requests join the current producer. Idle producers stop after 60 seconds by
+default and can resume from cached segments. Trusted proxies may supply the
+configured viewer-region header; direct or malformed client values are ignored.
+See the [architecture overview](docs/architecture/overview.md) and
+[deployment guide](docs/deployment.md) for placement, failover, and rollout
+requirements.
+
+> [!NOTE]
+> The one-producer guarantee currently covers HLS VOD, including MPEG-TS and
+> fMP4-segmented HLS. Experimental direct fragmented-MP4 streaming remains
+> request-oriented and can open more than one provider connection; do not use
+> that profile when the upstream single-connection guarantee is required.
 
 ## Requirements
 

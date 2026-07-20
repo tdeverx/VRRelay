@@ -300,6 +300,12 @@ export const RuntimeConfigurationSchema = z.object({
   adminUrl: z.url(),
   playbackUrl: z.url(),
   trustedProxyCidrs: z.array(z.string().min(1).max(100)).max(32),
+  viewerRegionHeader: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9][a-z0-9-]{0,62}$/)
+    .default('x-vrrelay-region'),
   agentListenAddr: ListenerAddressSchema,
   maxWorkers: z.number().int().min(1).max(32),
   cacheTtlMs: z
@@ -312,6 +318,7 @@ export const RuntimeConfigurationSchema = z.object({
     .int()
     .positive()
     .max(10 * 1024 * 1024 * 1024 * 1024),
+  vodProducerIdleTimeoutMs: z.number().int().min(15_000).max(600_000).default(60_000),
   nodeName: z.string().trim().min(1).max(100),
   nodeRegion: z.string().trim().min(1).max(100)
 });

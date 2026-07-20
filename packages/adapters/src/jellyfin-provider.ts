@@ -311,6 +311,20 @@ export class JellyfinProvider implements MediaProvider {
     };
   }
 
+  async resolveSourceAt(
+    connection: ProviderConnection,
+    secret: string,
+    source: MediaSourceRef,
+    startSeconds: number,
+    signal?: AbortSignal
+  ): Promise<ResolvedSource> {
+    const resolved = await this.resolveSource(connection, secret, source, signal);
+    if (startSeconds <= 0) return resolved;
+    const url = new URL(resolved.url);
+    url.searchParams.set('StartTimeTicks', String(Math.round(startSeconds * 10_000_000)));
+    return { ...resolved, url: url.toString(), positionedAtSeconds: startSeconds };
+  }
+
   async openSource(source: ResolvedSource, range?: string, signal?: AbortSignal) {
     const response = await this.#send(source.url, {
       headers: { ...source.headers, ...(range ? { Range: range } : {}) },

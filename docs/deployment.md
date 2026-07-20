@@ -92,7 +92,10 @@ URLs, set `VRRELAY_CONTROLLER_ENROLLMENT_URL` to the controller's externally
 trusted HTTPS origin, and set `VRRELAY_TRUSTED_PROXY_CIDRS` to only the actual
 TLS proxy source ranges. The cluster manifest defaults to
 `VRRELAY_ENVIRONMENT=production` and fails closed when those transport settings
-or production secrets are unsafe. Then run:
+or production secrets are unsafe. Configure the proxy to send one
+`X-VRRelay-Region` value matching the target node labels, or change the header name with
+`VRRELAY_VIEWER_REGION_HEADER`. `VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT` defaults to `60s` and accepts
+15 seconds through 10 minutes. Then run:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.cluster.yml up --build
@@ -103,6 +106,11 @@ This topology bundles PostgreSQL, Valkey, MinIO, and separate controller, source
 PostgreSQL 18 stores its versioned data directory below `/var/lib/postgresql`. Upgrade an existing PostgreSQL 17 cluster with `pg_upgrade` or a dump/restore before starting the refreshed Compose stack; do not attach the old PostgreSQL 17 volume directly to the PostgreSQL 18 service.
 
 The clustered topology accepts the same media-port overrides plus `VRRELAY_CONTROLLER_HTTP_PORT`, `VRRELAY_CONTROLLER_AGENT_PORT`, and `VRRELAY_EDGE_HTTP_PORT`; their defaults remain 8099, 8101, and 8100 respectively.
+
+Roll this schema/protocol change out as a coordinated cluster upgrade: stop all roles, start the
+matching controller to apply schema v9, then restart every source worker and edge on the same
+version. Old source workers do not advertise `vodProducerVersion: 1` and are excluded from HLS
+placement.
 
 ## Kubernetes and generic VMs
 

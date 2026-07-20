@@ -20,7 +20,6 @@ import {
   SqliteRepository
 } from '@vrrelay/adapters';
 import { BuiltinTrafficDirector, ClusterService, InMemoryEventBus } from '@vrrelay/application';
-import type { NodeCapability } from '@vrrelay/domain';
 import { AgentEnvelopeSchema, type AgentEnvelope } from '@vrrelay/contracts';
 
 const directories: string[] = [];
@@ -37,7 +36,14 @@ describe('agent log redaction', () => {
       redactAgentContext({
         request: {
           headers: { authorization: 'Bearer abc.def.ghi' },
-          body: { password: 'fixture-password', nested: [{ apiKey: 'fixture-api-key' }] }
+          body: {
+            password: 'fixture-password',
+            nested: [{ apiKey: 'fixture-api-key' }],
+            sourceCredential: {
+              accessToken: 'sensitive-user-token',
+              providerUserId: 'provider-user-1'
+            }
+          }
         },
         message:
           'failed token=vrr_join_reusable-secret https://private.invalid/media /internal/source/source-grant /play/playback-grant'
@@ -45,14 +51,18 @@ describe('agent log redaction', () => {
     ).toEqual({
       request: {
         headers: { authorization: '[REDACTED]' },
-        body: { password: '[REDACTED]', nested: [{ apiKey: '[REDACTED]' }] }
+        body: {
+          password: '[REDACTED]',
+          nested: [{ apiKey: '[REDACTED]' }],
+          sourceCredential: '[REDACTED]'
+        }
       },
       message: 'failed token=[REDACTED] [REDACTED_URL] /internal/source/[REDACTED] /play/[REDACTED]'
     });
   });
 });
 
-const capabilities: NodeCapability = {
+const capabilities = {
   encoders: ['libx264'],
   hardwareDevices: [],
   maxWorkers: 2,
@@ -61,7 +71,8 @@ const capabilities: NodeCapability = {
   cacheBytes: 0,
   cacheLimitBytes: null,
   egressMbps: 0,
-  providerIds: []
+  providerIds: [],
+  vodProducerVersion: 1
 };
 
 describe('mTLS node agent transport', () => {

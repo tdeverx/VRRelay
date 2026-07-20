@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { BackendStatus, ClusterNode } from '@vrrelay/domain';
-import type { TrafficDirector } from '@vrrelay/application';
+import type { EdgeSelectionContext, TrafficDirector } from '@vrrelay/application';
 
 interface WebhookTrafficDirectorOptions {
   endpoint: string;
@@ -23,16 +23,26 @@ export class WebhookTrafficDirector implements TrafficDirector {
   }
 
   async selectEdge(
-    sessionId: string,
+    contextInput: EdgeSelectionContext | string,
     nodes: readonly ClusterNode[],
-    preferredRegion?: string
+    legacyPreferredRegion?: string
   ): Promise<ClusterNode | undefined> {
+    const context: EdgeSelectionContext =
+      typeof contextInput === 'string'
+        ? {
+            sessionId: contextInput,
+            affinityKey: contextInput,
+            ...(legacyPreferredRegion ? { preferredRegion: legacyPreferredRegion } : {})
+          }
+        : contextInput;
     const eligible = nodes.filter((node) => node.roles.includes('edge') && node.state === 'online');
     if (!eligible.length) return undefined;
     const response = await this.#request({
       type: 'select-edge',
-      sessionId,
-      ...(preferredRegion ? { preferredRegion } : {}),
+      sessionId: context.sessionId,
+      affinityKey: context.affinityKey,
+      ...(context.viewerRegion ? { viewerRegion: context.viewerRegion } : {}),
+      ...(context.preferredRegion ? { preferredRegion: context.preferredRegion } : {}),
       candidates: eligible.map((node) => ({
         id: node.id,
         region: node.region,
