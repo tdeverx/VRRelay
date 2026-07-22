@@ -65,6 +65,10 @@ export interface SourceResponse {
   headers: Record<string, string>;
   /** Present only for the relay's opaque loopback source proxy. */
   sessionId?: string;
+  /** Present only for the relay's opaque loopback source proxy diagnostics. */
+  sourceRequestId?: string;
+  /** The durable VOD producer generation that owns this source request. */
+  producerGeneration?: number;
 }
 
 export interface PlaybackEvent {

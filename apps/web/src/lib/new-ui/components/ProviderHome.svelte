@@ -38,6 +38,7 @@
   let loadingSeasons = $state(false);
   let loadingEpisodes = $state(false);
   let recovery = $state(false);
+  let searchRequestId = 0;
   let selectedSeason = $derived(seasons.find((season) => season.id === selectedSeasonId) ?? null);
 
   onMount(load);
@@ -78,10 +79,12 @@
 
   async function runSearch(event?: SubmitEvent) {
     event?.preventDefault();
+    const requestId = ++searchRequestId;
     const query = search.trim();
     if (!query) {
       items = [];
       hasSearched = false;
+      searching = false;
       return;
     }
     searching = true;
@@ -90,13 +93,18 @@
     seasons = [];
     episodes = [];
     try {
-      items = (await api.userCatalog({ search: query, kinds: ['Movie', 'Series'], limit: 48 }))
-        .items;
+      const result = await api.userCatalog({
+        search: query,
+        kinds: ['Movie', 'Series'],
+        limit: 48
+      });
+      if (requestId === searchRequestId) items = result.items;
     } catch (reason) {
+      if (requestId !== searchRequestId) return;
       items = [];
       toast.error(reason instanceof Error ? reason.message : 'Search failed.');
     } finally {
-      searching = false;
+      if (requestId === searchRequestId) searching = false;
     }
   }
 
@@ -220,89 +228,103 @@
         >
       </form>
 
-      <div class="space-y-8 pt-2">
-        <ProviderMediaRow
-          id="continue-watching"
-          title="Continue Watching"
-          description="Pick up something already in progress on Jellyfin."
-          items={continueWatching}
-          loading={loadingRows}
-          {creatingItemId}
-          onChoose={chooseRowItem}
-        />
-        <ProviderMediaRow
-          id="up-next"
-          title="Up Next"
-          description="The next episodes Jellyfin has lined up for you."
-          items={upNext}
-          loading={loadingRows}
-          {creatingItemId}
-          onChoose={chooseRowItem}
-        />
-        <ProviderMediaRow
-          id="recently-added"
-          title="Recently Added"
-          description="New movies and episodes from your libraries."
-          items={recentlyAdded}
-          loading={loadingRows}
-          {creatingItemId}
-          onChoose={chooseRowItem}
-        />
-      </div>
+      {#if !searching && !hasSearched}
+        <div class="space-y-8 pt-2">
+          <ProviderMediaRow
+            id="continue-watching"
+            title="Continue Watching"
+            description="Pick up something already in progress on Jellyfin."
+            items={continueWatching}
+            loading={loadingRows}
+            {creatingItemId}
+            onChoose={chooseRowItem}
+          />
+          <ProviderMediaRow
+            id="up-next"
+            title="Up Next"
+            description="The next episodes Jellyfin has lined up for you."
+            items={upNext}
+            loading={loadingRows}
+            {creatingItemId}
+            onChoose={chooseRowItem}
+          />
+          <ProviderMediaRow
+            id="recently-added"
+            title="Recently Added"
+            description="New movies and episodes from your libraries."
+            items={recentlyAdded}
+            loading={loadingRows}
+            {creatingItemId}
+            onChoose={chooseRowItem}
+          />
+        </div>
+      {/if}
 
       {#if searching}
         <LoadState loading label="catalog results" variant="media" count={8} />
       {:else if hasSearched && items.length === 0}
-        <Empty.Root>
-          <Empty.Header
-            ><Empty.Media variant="icon"><Search /></Empty.Media><Empty.Title
-              >No movies or shows found</Empty.Title
-            ></Empty.Header
-          >
-          <Empty.Content
-            ><Empty.Description>Try a different title.</Empty.Description></Empty.Content
-          >
-        </Empty.Root>
+        <section class="space-y-4" aria-live="polite">
+          <div>
+            <h2 class="text-lg font-semibold">Search results</h2>
+            <p class="text-muted-foreground text-sm">No matches for “{search.trim()}”.</p>
+          </div>
+          <Empty.Root>
+            <Empty.Header
+              ><Empty.Media variant="icon"><Search /></Empty.Media><Empty.Title
+                >No movies or shows found</Empty.Title
+              ></Empty.Header
+            >
+            <Empty.Content
+              ><Empty.Description>Try a different title.</Empty.Description></Empty.Content
+            >
+          </Empty.Root>
+        </section>
       {:else if hasSearched}
-        <div
-          class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-          data-testid="catalog-search-results"
-        >
-          {#each items as item}
-            <Card.Root class="overflow-hidden" style="padding-top: 0">
-              <ProviderArtwork {item} />
-              <Card.Header>
-                <Card.Title>{item.name}</Card.Title>
-                <Card.Description>
-                  {[item.productionYear, item.kind === 'Series' ? 'Show' : 'Movie']
-                    .filter(Boolean)
-                    .join(' · ')}
-                </Card.Description>
-              </Card.Header>
-              <Card.Content class="text-muted-foreground line-clamp-3 text-sm">
-                {item.overview ??
-                  (item.kind === 'Series'
-                    ? 'Choose a season and episode to create a relay link.'
-                    : 'Ready to create a relay link.')}
-              </Card.Content>
-              <Card.Footer>
-                {#if item.kind === 'Series'}
-                  <Button class="w-full" variant="outline" onclick={() => chooseShow(item)}>
-                    <Tv />Choose episode
-                  </Button>
-                {:else}
-                  <Button
-                    class="w-full"
-                    disabled={creatingItemId === item.id}
-                    onclick={() => createLink(item)}
-                  >
-                    <Link2 />{creatingItemId === item.id ? 'Creating…' : 'Create link'}
-                  </Button>
-                {/if}
-              </Card.Footer>
-            </Card.Root>
-          {/each}
-        </div>
+        <section class="space-y-4" aria-live="polite">
+          <div>
+            <h2 class="text-lg font-semibold">Search results</h2>
+            <p class="text-muted-foreground text-sm">Matches for “{search.trim()}”.</p>
+          </div>
+          <div
+            class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            data-testid="catalog-search-results"
+          >
+            {#each items as item}
+              <Card.Root class="overflow-hidden" style="padding-top: 0">
+                <ProviderArtwork {item} />
+                <Card.Header>
+                  <Card.Title>{item.name}</Card.Title>
+                  <Card.Description>
+                    {[item.productionYear, item.kind === 'Series' ? 'Show' : 'Movie']
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Card.Description>
+                </Card.Header>
+                <Card.Content class="text-muted-foreground line-clamp-3 text-sm">
+                  {item.overview ??
+                    (item.kind === 'Series'
+                      ? 'Choose a season and episode to create a relay link.'
+                      : 'Ready to create a relay link.')}
+                </Card.Content>
+                <Card.Footer>
+                  {#if item.kind === 'Series'}
+                    <Button class="w-full" variant="outline" onclick={() => chooseShow(item)}>
+                      <Tv />Choose episode
+                    </Button>
+                  {:else}
+                    <Button
+                      class="w-full"
+                      disabled={creatingItemId === item.id}
+                      onclick={() => createLink(item)}
+                    >
+                      <Link2 />{creatingItemId === item.id ? 'Creating…' : 'Create link'}
+                    </Button>
+                  {/if}
+                </Card.Footer>
+              </Card.Root>
+            {/each}
+          </div>
+        </section>
       {/if}
     </section>
   {/if}

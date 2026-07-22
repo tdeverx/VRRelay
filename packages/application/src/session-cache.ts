@@ -95,7 +95,10 @@ export class SessionCache {
         const initPath = join(dirname(destination), 'init.mp4');
         protectedPaths.push(initPath);
         const initSha256 = await this.#fileSha256(initPath);
-        const initKey = contentKey.replace(/\.m4s$/, '.init.mp4');
+        // The manifest always restores one initialization object.  It must not
+        // inherit the first requested media segment index (a direct seek may
+        // begin at any index).
+        const initKey = this.contentKey(session, profile, 0).replace(/\.m4s$/, '.init.mp4');
         await this.#objectOperation('put', () =>
           this.objectStore!.put(initKey, createReadStream(initPath), {
             contentType: 'video/mp4',

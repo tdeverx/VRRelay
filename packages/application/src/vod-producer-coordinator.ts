@@ -19,15 +19,7 @@ const LEASE_MS = 120_000;
 const LEASE_RENEW_MS = 30_000;
 const DEMAND_WINDOW_MS = 30_000;
 const WAIT_FOR_SEGMENT_MS = 125_000;
-const ALL_STATES: readonly VodProducer['state'][] = [
-  'idle',
-  'starting',
-  'running',
-  'switching',
-  'complete',
-  'failed',
-  'cancelled'
-];
+const ACTIVE_STATES: readonly VodProducer['state'][] = ['starting', 'running', 'switching'];
 
 interface ActiveProducer {
   generation: number;
@@ -88,7 +80,8 @@ export interface VodProducerCallbacks {
     profile: ProfileRevision,
     startSegmentIndex: number,
     signal: AbortSignal,
-    pacing: VodProducerSourcePacing
+    pacing: VodProducerSourcePacing,
+    generation: number
   ): Promise<VodProducerRequest>;
   released?(sessionId: string): void;
   published?(
@@ -135,12 +128,14 @@ export class VodProducerCoordinator {
         await this.#stopActive(session.id, 'switching');
         active = undefined;
       }
-      active ??= await this.#start(session, profile, dominant.index, signal);
+      // An HTTP client may leave while the producer warms.  Its signal must
+      // only detach that waiter, never cancel the shared producer.
+      active ??= await this.#start(session, profile, dominant.index);
       if (!active) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         continue;
       }
-      const demandedAt = Date.now();
+      const demandedAt = Math.max(active.lastDemandAtMs, dominant.observedAtMs ?? 0);
       active.lastDemandAtMs = demandedAt;
       this.#applyPlaybackAnchor(active, dominant);
       active.demandedSegmentIndex = dominant.index;
@@ -179,11 +174,11 @@ export class VodProducerCoordinator {
   async recoverExpired(now = Date.now()): Promise<number> {
     let recovered = 0;
     for (const listed of await this.repository.listVodProducers(1_000)) {
-      if (!['starting', 'running', 'switching'].includes(listed.state)) continue;
+      if (!ACTIVE_STATES.includes(listed.state)) continue;
       if (listed.leaseExpiresAt && Date.parse(listed.leaseExpiresAt) > now) continue;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const current = await this.repository.getVersionedVodProducer(listed.sessionId);
-        if (!current || !['starting', 'running', 'switching'].includes(current.value.state)) break;
+        if (!current || !ACTIVE_STATES.includes(current.value.state)) break;
         if (current.value.leaseExpiresAt && Date.parse(current.value.leaseExpiresAt) > now) break;
         const updated: VodProducer = {
           ...this.#finishAttempt(current.value, 'failed', 'Recovered expired producer lease'),
@@ -194,11 +189,11 @@ export class VodProducerCoordinator {
           errorMessage: undefined,
           updatedAt: new Date().toISOString()
         };
-        const result = await this.repository.compareAndSetVodProducer(updated, current.revision, [
-          'starting',
-          'running',
-          'switching'
-        ]);
+        const result = await this.repository.compareAndSetVodProducer(
+          updated,
+          current.revision,
+          ACTIVE_STATES
+        );
         if (result.applied) {
           recovered += 1;
           break;
@@ -227,11 +222,11 @@ export class VodProducerCoordinator {
     session: RelaySession,
     profile: ProfileRevision,
     startSegmentIndex: number,
-    signal?: AbortSignal
+    _signal?: AbortSignal
   ): Promise<ActiveProducer | undefined> {
     const existing = this.#starting.get(session.id);
     if (existing) return existing;
-    const start = this.#startExclusive(session, profile, startSegmentIndex, signal).finally(() => {
+    const start = this.#startExclusive(session, profile, startSegmentIndex).finally(() => {
       this.#starting.delete(session.id);
     });
     this.#starting.set(session.id, start);
@@ -242,7 +237,7 @@ export class VodProducerCoordinator {
     session: RelaySession,
     profile: ProfileRevision,
     startSegmentIndex: number,
-    signal?: AbortSignal
+    _signal?: AbortSignal
   ): Promise<ActiveProducer | undefined> {
     const providerId = session.source?.providerId;
     if (!providerId) throw new CapacityError('The VOD session has no provider source');
@@ -262,9 +257,6 @@ export class VodProducerCoordinator {
     const leaseMs = this.options.leaseMs ?? LEASE_MS;
     if (!(await this.coordination.acquire(leaseKey, owner, leaseMs))) return undefined;
     const controller = new AbortController();
-    const forwardAbort = () =>
-      controller.abort(signal?.reason ?? new Error('Producer start aborted'));
-    signal?.addEventListener('abort', forwardAbort, { once: true });
     try {
       const current = await this.repository.getVersionedVodProducer(session.id);
       const generation = (current?.value.generation ?? 0) + 1;
@@ -298,7 +290,13 @@ export class VodProducerCoordinator {
         updatedAt: now
       };
       const stored = current
-        ? await this.repository.compareAndSetVodProducer(producer, current.revision, ALL_STATES)
+        ? await this.repository.compareAndSetVodProducer(producer, current.revision, [
+            'idle',
+            'switching',
+            'complete',
+            'failed',
+            'cancelled'
+          ])
         : await this.repository.createVodProducer(producer);
       if ('applied' in stored && !stored.applied)
         throw new ConflictError('Producer ownership changed during start');
@@ -327,7 +325,6 @@ export class VodProducerCoordinator {
       throw error;
     } finally {
       if (reserved) this.#releaseReservation(providerId);
-      signal?.removeEventListener('abort', forwardAbort);
     }
   }
 
@@ -384,7 +381,8 @@ export class VodProducerCoordinator {
         profile,
         active.startSegmentIndex,
         active.controller.signal,
-        active.pacing
+        active.pacing,
+        active.generation
       );
       await this.#transition(initial.sessionId, active.generation, (current) => ({
         ...current,
@@ -405,10 +403,15 @@ export class VodProducerCoordinator {
           .catch((error) => active.controller.abort(error));
       }, this.options.leaseRenewMs ?? LEASE_RENEW_MS);
       renewal.unref();
+      let refreshing = false;
       idleCheck = setInterval(() => {
-        void this.#refreshDemand(session, profile, active).catch((error) =>
-          active.controller.abort(error)
-        );
+        if (refreshing) return;
+        refreshing = true;
+        void this.#refreshDemand(session, profile, active)
+          .catch((error) => active.controller.abort(error))
+          .finally(() => {
+            refreshing = false;
+          });
       }, 2_000);
       idleCheck.unref();
       this.metrics?.increment('vod_producers_started_total');
@@ -573,6 +576,7 @@ export class VodProducerCoordinator {
     index: number;
     viewers: number;
     currentViewers: number;
+    observedAtMs: number;
     playbackAnchorSegmentIndex?: number;
     playbackAnchorObservedAtMs?: number;
   }> {
@@ -582,9 +586,13 @@ export class VodProducerCoordinator {
       observedAtMs: now,
       windowMs: DEMAND_WINDOW_MS
     });
-    if (!demands.length) return { index: requestedIndex, viewers: 1, currentViewers: 0 };
+    if (!demands.length)
+      return { index: requestedIndex, viewers: 1, currentViewers: 0, observedAtMs: now };
     const radius = Math.min(5, Math.max(2, Math.ceil(10 / profile.delivery.segmentDuration)));
-    const currentIndex = active?.lastPublishedSegmentIndex ?? active?.startSegmentIndex;
+    // The encoded head is deliberately ahead while buffering.  Use the
+    // accepted demand window as the audience position so a healthy buffer is
+    // not mistaken for an abandoned audience.
+    const currentIndex = active?.demandedSegmentIndex ?? active?.startSegmentIndex;
     const scored = demands.map((candidate) => ({
       index: candidate.segmentIndex,
       viewers: demands.filter(
@@ -618,6 +626,7 @@ export class VodProducerCoordinator {
     return {
       ...winner,
       currentViewers,
+      observedAtMs: Math.max(...demands.map((demand) => demand.observedAtMs)),
       ...(playbackAnchor?.playbackAnchorSegmentIndex === undefined ||
       playbackAnchor.playbackAnchorObservedAtMs === undefined
         ? {}
@@ -652,7 +661,14 @@ export class VodProducerCoordinator {
     currentViewers: number,
     demandedViewers: number
   ): boolean {
-    const highWater = (active.lastPublishedSegmentIndex ?? active.startSegmentIndex) + 5;
+    // A player can request ahead of the current file while the producer fills
+    // its low watermark.  Those requests join the same generation.
+    const forwardJoinSegments = Math.max(
+      2,
+      Math.ceil(Math.min(this.options.bufferLowWatermarkMs, 10_000) / 2_000)
+    );
+    const highWater =
+      (active.lastPublishedSegmentIndex ?? active.startSegmentIndex) + forwardJoinSegments;
     const covered = demandedIndex >= active.startSegmentIndex && demandedIndex <= highWater;
     return !covered && (currentViewers === 0 || demandedViewers > currentViewers);
   }
@@ -682,7 +698,7 @@ export class VodProducerCoordinator {
       const result = await this.repository.compareAndSetVodProducer(
         update(current.value),
         current.revision,
-        ALL_STATES
+        ACTIVE_STATES
       );
       if (result.applied || result.reason === 'not-found' || result.reason === 'invalid-state')
         return;
@@ -704,6 +720,6 @@ export class VodProducerCoordinator {
         completedAt: new Date().toISOString(),
         ...(errorMessage ? { errorMessage } : {})
       };
-    return { ...producer, workerHistory };
+    return { ...producer, workerHistory: workerHistory.slice(-100) };
   }
 }

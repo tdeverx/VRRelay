@@ -106,6 +106,10 @@ export function registerRoleInternalRoutes(
             event: 'source.range.opened',
             nodeId: config.nodeId,
             ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+            ...(source.sourceRequestId ? { sourceRequestId: source.sourceRequestId } : {}),
+            ...(source.producerGeneration !== undefined
+              ? { producerGeneration: source.producerGeneration }
+              : {}),
             range: safeRangeHeader(request.headers.range),
             status: source.status
           }
@@ -128,6 +132,10 @@ export function registerRoleInternalRoutes(
               event: 'source.range.completed',
               nodeId: config.nodeId,
               ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+              ...(source.sourceRequestId ? { sourceRequestId: source.sourceRequestId } : {}),
+              ...(source.producerGeneration !== undefined
+                ? { producerGeneration: source.producerGeneration }
+                : {}),
               range: safeRangeHeader(request.headers.range),
               transferredBytes
             }

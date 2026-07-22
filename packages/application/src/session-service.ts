@@ -93,8 +93,10 @@ interface SessionRuntimeSnapshot {
 }
 
 interface ActiveSourceRequest {
-  controller: AbortController;
-  completed: Promise<void>;
+  id: string;
+  range?: string;
+  producerGeneration?: number;
+  startedAtMs: number;
 }
 
 function hmacBase64Url(secret: string, value: string): string {
@@ -105,6 +107,14 @@ function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function combineAbortSignals(
+  requestSignal: AbortSignal | undefined,
+  producerSignal: AbortSignal | undefined
+): AbortSignal | undefined {
+  if (requestSignal && producerSignal) return AbortSignal.any([requestSignal, producerSignal]);
+  return requestSignal ?? producerSignal;
 }
 
 function encodeEdgeGrant(payload: EdgePlaybackGrantPayload, secret: string): string {
@@ -241,6 +251,8 @@ export class SessionService {
       expiresAt: number;
       sessionId?: string;
       pacing?: VodProducerSourcePacing;
+      producerSignal?: AbortSignal;
+      producerGeneration?: number;
     }
   >();
   readonly #waiters: Array<() => void> = [];
@@ -248,8 +260,7 @@ export class SessionService {
   readonly #activity = new Map<string, number>();
   readonly #egressSamples: Array<{ bytes: number; observedAt: number }> = [];
   readonly #sessionRuntime = new Map<string, LocalSessionRuntime>();
-  readonly #sourceOpenQueues = new Map<string, Promise<void>>();
-  readonly #activeSourceRequests = new Map<string, ActiveSourceRequest>();
+  readonly #activeSourceRequests = new Map<string, Map<string, ActiveSourceRequest>>();
   readonly #cache: SessionCache;
   readonly #jobs: SessionJobCoordinator;
   readonly #producers?: VodProducerCoordinator;
@@ -298,8 +309,15 @@ export class SessionService {
         this.#cache,
         {
           acquire: (signal) => this.#acquire(signal),
-          prepare: (session, profile, startSegmentIndex, signal, pacing) =>
-            this.#prepareVodProducer(session, profile, startSegmentIndex, signal, pacing),
+          prepare: (session, profile, startSegmentIndex, signal, pacing, generation) =>
+            this.#prepareVodProducer(
+              session,
+              profile,
+              startSegmentIndex,
+              signal,
+              pacing,
+              generation
+            ),
           released: (sessionId) => {
             this.#release();
             this.#ephemeralSourceCredentials.delete(sessionId);
@@ -626,8 +644,16 @@ export class SessionService {
     );
     const updated = result.session;
     if (!updated) throw new NotFoundError('Session was not found');
-    if (input.state === 'stopped')
-      await this.#reportActivity(updated, 0, 'stop').catch(() => undefined);
+    if (input.state === 'stopped') {
+      // Stop must fence the durable HLS producer immediately.  Keeping the
+      // session credential permits an explicit VOD resume to create one fresh
+      // generation, but a stopped session must not continue sourcing media.
+      await this.#producers?.stop(id);
+      this.#ephemeralSourceCredentials.delete(id);
+      this.#deleteSourceGrants(id);
+      if (this.#activity.has(id))
+        await this.#reportActivity(updated, 0, 'stop').catch(() => undefined);
+    }
     this.events.publish(
       event('session.updated', { pinned: updated.pinned, state: updated.state }, id)
     );
@@ -662,18 +688,28 @@ export class SessionService {
   async delete(id: string): Promise<void> {
     const session = await this.repository.getSession(id);
     if (!session) throw new NotFoundError('Session was not found');
-    if (session.assignedNodeId)
-      await this.infrastructure.dispatcher
-        ?.stopProducer?.(session.assignedNodeId, session.id)
-        .catch(() => undefined);
-    await this.#reportActivity(session, session.durationSeconds ?? 0, 'stop').catch(
-      () => undefined
-    );
-    if (session.ownerId) await this.secrets.delete(this.#sessionSourceSecretRef(id));
+    // Read durable ownership before stopping or deleting credentials.  A
+    // failed-over producer is not necessarily on the assigned worker.
+    const producer = await this.#producers?.get(id);
     await this.#producers?.stop(id);
+    const ownerNodeId = producer?.ownerNodeId ?? session.assignedNodeId;
+    if (ownerNodeId && ownerNodeId !== this.options.nodeId)
+      await this.infrastructure.dispatcher
+        ?.stopProducer?.(ownerNodeId, session.id)
+        .catch(() => undefined);
+    if (this.#activity.has(id))
+      await this.#reportActivity(session, 0, 'stop').catch(() => undefined);
     this.#ephemeralSourceCredentials.delete(id);
+    this.#deleteSourceGrants(id);
+    // A producer is fenced/stopped before revoking its session-owned secret,
+    // preventing an in-flight prepare from starting a missing-secret loop.
+    if (session.ownerId) await this.secrets.delete(this.#sessionSourceSecretRef(id));
     await this.repository.deleteSessionAndRevokePlaybackGrants(id);
     await rm(join(this.options.cacheDir, 'vod', id), { recursive: true, force: true });
+    this.#activity.delete(id);
+    this.#sessionRuntime.delete(id);
+    this.#activeSourceRequests.delete(id);
+    this.#viewers.delete(id);
     this.events.publish(event('session.deleted', { name: session.name }, id));
   }
 
@@ -879,18 +915,22 @@ export class SessionService {
       this.#sourceGrants.delete(token);
       throw new NotFoundError('Source grant was not found');
     }
+    const effectiveSignal = combineAbortSignals(signal, grant.producerSignal);
     const source = grant.sessionId
-      ? await this.#openSerializedSource(
+      ? await this.#openTrackedSource(
           grant.sessionId,
           grant.provider,
           grant.source,
           range,
-          signal
+          effectiveSignal,
+          grant.producerGeneration
         )
-      : await grant.provider.openSource(grant.source, range, signal);
+      : await grant.provider.openSource(grant.source, range, effectiveSignal);
     return {
       ...source,
-      ...(grant.pacing ? { stream: pacedReadable(source.stream, grant.pacing, signal) } : {}),
+      ...(grant.pacing
+        ? { stream: pacedReadable(source.stream, grant.pacing, effectiveSignal) }
+        : {}),
       ...(grant.sessionId ? { sessionId: grant.sessionId } : {})
     };
   }
@@ -1177,7 +1217,8 @@ export class SessionService {
     profile: ProfileRevision,
     startSegmentIndex: number,
     signal: AbortSignal,
-    pacing: VodProducerSourcePacing
+    pacing: VodProducerSourcePacing,
+    producerGeneration: number
   ) {
     if (!session.source || !session.durationSeconds)
       throw new NotFoundError('VOD source was not found');
@@ -1202,7 +1243,7 @@ export class SessionService {
           signal
         );
     return {
-      source: this.#proxySource(source, provider, session.id, pacing),
+      source: this.#proxySource(source, provider, session.id, pacing, signal, producerGeneration),
       profile,
       startSegmentIndex,
       startSeconds,
@@ -1416,15 +1457,22 @@ export class SessionService {
     source: ResolvedSource,
     provider: MediaProvider,
     sessionId?: string,
-    pacing?: VodProducerSourcePacing
+    pacing?: VodProducerSourcePacing,
+    producerSignal?: AbortSignal,
+    producerGeneration?: number
   ): ResolvedSource {
     const token = opaqueToken();
     this.#sourceGrants.set(token, {
       source,
       provider,
-      expiresAt: Date.now() + 15 * 60_000,
+      // A persistent producer may legitimately outlive an ordinary source
+      // grant. Its opaque loopback grant is instead bounded by the producer
+      // signal and removed on release/lease loss.
+      expiresAt: producerSignal ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000,
       ...(sessionId ? { sessionId } : {}),
-      ...(pacing ? { pacing } : {})
+      ...(pacing ? { pacing } : {}),
+      ...(producerSignal ? { producerSignal } : {}),
+      ...(producerGeneration !== undefined ? { producerGeneration } : {})
     });
     return { ...source, url: `${this.options.internalUrl}/internal/source/${token}`, headers: {} };
   }
@@ -1668,59 +1716,48 @@ export class SessionService {
     });
   }
 
-  async #openSerializedSource(
+  async #openTrackedSource(
     sessionId: string,
     provider: MediaProvider,
     source: ResolvedSource,
     range: string | undefined,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    producerGeneration?: number
   ): Promise<SourceResponse> {
-    const previousOpen = this.#sourceOpenQueues.get(sessionId) ?? Promise.resolve();
-    let releaseOpen!: () => void;
-    const currentOpen = new Promise<void>((resolve) => {
-      releaseOpen = resolve;
-    });
-    const queued = previousOpen.catch(() => undefined).then(() => currentOpen);
-    this.#sourceOpenQueues.set(sessionId, queued);
-    void queued.then(() => {
-      if (this.#sourceOpenQueues.get(sessionId) === queued)
-        this.#sourceOpenQueues.delete(sessionId);
-    });
-    await previousOpen.catch(() => undefined);
+    const sourceRequestId = randomUUID();
+    const request: ActiveSourceRequest = {
+      id: sourceRequestId,
+      ...(range ? { range } : {}),
+      ...(producerGeneration !== undefined ? { producerGeneration } : {}),
+      startedAtMs: Date.now()
+    };
+    const requests =
+      this.#activeSourceRequests.get(sessionId) ?? new Map<string, ActiveSourceRequest>();
+    requests.set(sourceRequestId, request);
+    this.#activeSourceRequests.set(sessionId, requests);
+    this.#recordSourceRequest(sessionId);
+    this.#setSourceConnectionCount(sessionId, requests.size);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      requests.delete(sourceRequestId);
+      if (requests.size === 0) this.#activeSourceRequests.delete(sessionId);
+      this.#setSourceConnectionCount(sessionId, requests.size);
+    };
     try {
-      const active = this.#activeSourceRequests.get(sessionId);
-      if (active) {
-        active.controller.abort(new Error('Source request was repositioned'));
-        await active.completed;
-      }
-      const controller = new AbortController();
-      const combinedSignal = signal
-        ? AbortSignal.any([signal, controller.signal])
-        : controller.signal;
-      this.#recordSourceRequest(sessionId);
-      const response = await provider.openSource(source, range, combinedSignal);
-      let released = false;
-      let releaseRequest!: () => void;
-      const completed = new Promise<void>((resolve) => {
-        releaseRequest = resolve;
-      });
-      const request: ActiveSourceRequest = { controller, completed };
-      const finish = () => {
-        if (released) return;
-        released = true;
-        if (this.#activeSourceRequests.get(sessionId) === request)
-          this.#activeSourceRequests.delete(sessionId);
-        this.#setSourceConnectionCount(sessionId, 0);
-        releaseRequest();
-      };
-      this.#activeSourceRequests.set(sessionId, request);
-      this.#setSourceConnectionCount(sessionId, 1);
+      const response = await provider.openSource(source, range, signal);
       response.stream.once('end', finish);
       response.stream.once('close', finish);
       response.stream.once('error', finish);
-      return response;
-    } finally {
-      releaseOpen();
+      return {
+        ...response,
+        sourceRequestId,
+        ...(producerGeneration !== undefined ? { producerGeneration } : {})
+      };
+    } catch (error) {
+      finish();
+      throw error;
     }
   }
 

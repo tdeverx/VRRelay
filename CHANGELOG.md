@@ -6,6 +6,14 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Stabilized persistent HLS VOD after seeks. Producers no longer make an initial FFmpeg read-rate
+  burst that stalls at the throttle boundary; demand selection now uses the active playback window
+  rather than the deliberately buffered encoded head; individual client disconnects no longer cancel
+  a warming shared producer; fMP4 initialization is stored under one deterministic key even for a
+  direct nonzero seek; and terminal producer history is capped to protect the runtime and dashboard.
+
+- Fixed Jellyfin catalog search presentation so discovery rows are hidden while a search is active,
+  results are clearly labeled, and stale responses cannot replace the latest query.
 - Added configurable 30/60-second low/high HLS VOD producer buffer watermarks. Producers catch up
   at up to approximately 2×, backpressure the existing Jellyfin connection at the high watermark,
   and resume only after headroom falls to the low watermark. Session diagnostics now distinguish
@@ -34,9 +42,10 @@ semantic versioning after the first public release.
   ingress, viewer egress, and delivery-cache effectiveness. Runtime snapshots are short-lived and
   do not add session IDs to Prometheus labels.
 - Fixed distant VOD seeks freezing. Jellyfin static streams now remain seekable through HTTP Range,
-  per-session source ranges are serialized without overlap, replacement HLS producers preserve
-  absolute MPEG-TS and fMP4 timestamps, and the cache pipeline epoch prevents reuse of older
-  reset-timestamp segments.
+  FFmpeg probe and media ranges are tracked independently instead of aborting one another,
+  replacement HLS producers preserve absolute MPEG-TS and fMP4 timestamps, and the cache pipeline
+  epoch prevents reuse of older reset-timestamp segments. Source-range logs now include a request
+  identifier and producer generation so probe failures can be distinguished from real seeks.
 - Fixed explicit LAN listener configurations failing local source grants by starting a private
   loopback companion for internal media routes. Quitting the macOS menu or Windows tray now waits
   for the managed relay runtime to stop before the controller exits.

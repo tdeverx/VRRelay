@@ -163,7 +163,6 @@ export class FFmpegTranscoder implements Transcoder {
     const playlist = join(directory, 'producer.m3u8');
     const pattern = join(directory, `segment-%d.${extension}`);
     const initPath = fmp4 ? join(directory, 'init.mp4') : undefined;
-    const initialBurst = Math.min(30, Math.max(6, request.profile.delivery.segmentDuration * 3));
     const args = [
       '-hide_banner',
       '-loglevel',
@@ -174,8 +173,9 @@ export class FFmpegTranscoder implements Transcoder {
         : ['-ss', request.startSeconds.toFixed(3)]),
       '-readrate',
       '2',
-      '-readrate_initial_burst',
-      initialBurst.toFixed(3),
+      // The producer's watermark pacer owns buffering.  Avoid an initial
+      // unthrottled burst: its transition back to the steady read rate creates
+      // a visible gap in short HLS segments after seeks.
       ...this.#inputArgs(request.source, request.profile),
       '-t',
       request.duration.toFixed(3),

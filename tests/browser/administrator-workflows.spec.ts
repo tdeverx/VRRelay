@@ -301,6 +301,9 @@ test('serves one role-aware dashboard for recovery and Jellyfin users', async ({
   await expect(recentRow.getByText('Browser Movie', { exact: true })).toBeVisible();
   await freshUserPage.getByLabel('Search movies and shows').fill('Browser');
   await freshUserPage.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(continueRow).toHaveCount(0);
+  await expect(nextRow).toHaveCount(0);
+  await expect(recentRow).toHaveCount(0);
   const searchResults = freshUserPage.getByTestId('catalog-search-results');
   const movie = searchResults.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
   const series = searchResults.locator('[data-slot="card"]').filter({ hasText: 'Browser Series' });

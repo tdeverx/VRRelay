@@ -14,11 +14,15 @@ OBS (RTMP/SRT/WHIP) → ingest origin / one normalizer → one pull per active e
 
 One VOD session has one durable source producer generation. Its assigned source worker owns one
 logical Jellyfin source pull, publishes atomically completed segments to shared object storage, and
-serves every regional edge from that shared output. A seekable container may require a short
-metadata HTTP range followed by one positioned media range; those requests are sequential on the
-same worker and never represent concurrent producer owners. Adjacent and simultaneous demand joins
+serves every regional edge from that shared output. A seekable container may issue several
+overlapping metadata and media HTTP ranges while FFmpeg probes the source; those requests are
+tracked independently and are all fenced by the producer generation signal. Only an explicit
+generation stop, failover, or dominant seek cancels them. Adjacent and simultaneous demand joins
 the current playback window. A distant position replaces it only when it has more active viewers,
-or when the old window has gone quiet; ties retain the current producer. Viewers never connect to
+or when the old window has gone quiet; ties retain the current producer. The coordinator compares
+viewer demand with the accepted playback window rather than the encoded head, because the latter is
+intentionally ahead while the low-watermark buffer fills. Viewer disconnects detach only their
+segment wait; they never cancel the shared producer. Viewers never connect to
 one another, so this is CDN-style edge fan-out rather than peer-to-peer delivery.
 
 ## Boundaries

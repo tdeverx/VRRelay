@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Readable, Writable } from 'node:stream';
+import { PassThrough, Readable, Writable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
@@ -727,6 +727,116 @@ describe('VOD relay service', () => {
     await expect(service.runtimeStats(session)).resolves.toMatchObject({
       sourceConnectionCount: 0,
       sourceRequestsLast30s: 1
+    });
+  });
+
+  it('keeps concurrent source ranges alive until their own request or producer signal ends', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-source-ranges-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p-source-ranges',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'source-ranges-secret',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('source-ranges-secret', 'token');
+    const opened: Array<{ range?: string; signal?: AbortSignal }> = [];
+    const streams: PassThrough[] = [];
+    const sourceProvider: MediaProvider = {
+      ...provider,
+      openSource: async (_source, range, signal) => {
+        const stream = new PassThrough();
+        opened.push({ ...(range ? { range } : {}), ...(signal ? { signal } : {}) });
+        streams.push(stream);
+        signal?.addEventListener('abort', () => stream.destroy(signal.reason), { once: true });
+        return { status: 206, headers: {}, stream };
+      }
+    };
+    const registry = new DefaultProviderRegistry();
+    registry.register(sourceProvider);
+    const selectedProfile = await new ProfileService(repo).createRevision(
+      profileInput({
+        profileId: 'source-ranges-profile',
+        delivery: { method: 'fragmented_mp4', container: 'mp4', segmentType: 'none' }
+      })
+    );
+    let service!: SessionService;
+    let nextRange = 0;
+    const transcoder: Transcoder = {
+      discover: async () => ({
+        ffmpegVersion: 'test',
+        encoders: [],
+        muxers: [],
+        filters: [],
+        pixelFormats: []
+      }),
+      generateSegment: async () => {},
+      streamFragmentedMp4: async (source, _profile, output, signal) => {
+        const grantToken = source.url.split('/internal/source/')[1];
+        if (!grantToken) throw new Error('Missing source grant');
+        const response = await service.openSourceProxy(
+          grantToken,
+          `bytes=${nextRange++ * 10}-`,
+          signal
+        );
+        expect(response.sourceRequestId).toMatch(/^[0-9a-f-]{36}$/);
+        await new Promise<void>((resolve, reject) => {
+          response.stream.on('data', (chunk) => output.write(chunk));
+          response.stream.once('end', () => {
+            output.end();
+            resolve();
+          });
+          response.stream.once('error', reject);
+        });
+      }
+    };
+    service = new SessionService(repo, secrets, registry, transcoder, new InMemoryEventBus(), {
+      publicUrl: 'https://relay.example',
+      internalUrl: 'http://127.0.0.1:8099',
+      cacheDir: join(dir, 'cache'),
+      cacheTtlMs: 1_000,
+      maxWorkers: 2
+    });
+    const session = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p-source-ranges', itemId: 'movie' },
+      profileId: selectedProfile.profileId,
+      profileRevision: selectedProfile.revision,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
+    const firstOutput = new Writable({ write: (_chunk, _encoding, callback) => callback() });
+    const secondOutput = new Writable({ write: (_chunk, _encoding, callback) => callback() });
+    const first = service.streamFragmentedMp4(token, firstOutput, new AbortController().signal);
+    for (let attempt = 0; attempt < 100 && streams.length < 1; attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = service.streamFragmentedMp4(token, secondOutput, new AbortController().signal);
+    for (let attempt = 0; attempt < 100 && streams.length < 2; attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(streams).toHaveLength(2);
+    expect(opened[0]?.signal?.aborted).toBe(false);
+    expect(opened[1]?.signal?.aborted).toBe(false);
+    streams[0]!.end(Buffer.from('first range'));
+    streams[1]!.end(Buffer.from('second range'));
+    await Promise.all([first, second]);
+    await expect(service.runtimeStats(session)).resolves.toMatchObject({
+      sourceConnectionCount: 0,
+      sourceRequestsLast30s: 2
     });
   });
 
