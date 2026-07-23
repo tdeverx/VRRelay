@@ -18,10 +18,10 @@
   "dependencies": {
     "@vrrelay/domain": "*",
     "@vrrelay/application": "*",
-    "@aws-sdk/client-s3": "^3.1090.0",
+    "@aws-sdk/client-s3": "^3.1094.0",
     "@azure/storage-blob": "^12.33.0",
     "@google-cloud/storage": "^7.21.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.1",
     "ioredis": "^5.11.1",
     "node-forge": "^1.4.0",
     "pg": "^8.22.0",
