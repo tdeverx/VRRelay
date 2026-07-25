@@ -2,7 +2,7 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { Readable, Transform } from 'node:stream';
 import Fastify, { LogController, type FastifyInstance, type FastifyRequest } from 'fastify';
@@ -59,7 +59,12 @@ import {
 } from '@vrrelay/contracts';
 import { isPrivateAddress, validateProviderUrl } from '@vrrelay/adapters';
 import { requiresSetupToken, validateRuntimeConfiguration, type RelayConfig } from './config.js';
-import { publicProviderBinding, type AuditEvent, type ClusterNode } from '@vrrelay/domain';
+import {
+  publicProviderBinding,
+  type AuditEvent,
+  type BackendStatus,
+  type ClusterNode
+} from '@vrrelay/domain';
 import { AuthService, type Principal } from './auth.js';
 import type { AgentController } from './agent-transport.js';
 import type { BackendService } from './backend-service.js';
@@ -74,8 +79,16 @@ import {
   type AuditWriteFailure
 } from './audited-operation.js';
 import { PlaybackRequestTracker, logPlaybackRequest, safeRangeHeader } from './request-logging.js';
+import {
+  frameworkClientError,
+  shouldRateLimitRequest,
+  SIGNED_GRANT_MAX_PARAMETER_LENGTH
+} from './request-policy.js';
+import { LiveEdgePathManager } from './live-edge-path-manager.js';
 
 export { auditActor, auditedOperation } from './audited-operation.js';
+export { shouldRateLimitRequest } from './request-policy.js';
+export { liveOriginSourceUrl } from './live-origin.js';
 
 export interface ServerServices {
   repository: Repository;
@@ -92,7 +105,11 @@ export interface ServerServices {
   metrics: MetricsSink;
   audit: AuditService;
   backends: BackendService;
+  readiness?: () => Promise<
+    Array<Pick<BackendStatus, 'category' | 'kind' | 'healthy' | 'checkedAt' | 'restartRequired'>>
+  >;
   agentController?: AgentController;
+  refreshLocalNodeCapabilities?: () => Promise<void>;
 }
 
 export interface ProviderBindingDeletionOutcome {
@@ -112,6 +129,13 @@ export function placementNodeConnectivity(
   if (surface === 'standalone')
     return (nodeId) => nodeId === localNodeId || Boolean(agentConnected?.(nodeId));
   return agentConnected;
+}
+
+export async function refreshStandalonePlacementCapabilities(
+  surface: ControlPlaneHttpSurface,
+  refresh?: () => Promise<void>
+): Promise<void> {
+  if (surface === 'standalone') await refresh?.();
 }
 
 export function registerStandaloneInternalRoutes(
@@ -212,13 +236,6 @@ export function isLoopbackPeer(address: string | undefined): boolean {
   const hexadecimalMapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
   return Boolean(
     hexadecimalMapped && (Number.parseInt(hexadecimalMapped[1]!, 16) & 0xff00) === 0x7f00
-  );
-}
-
-export function shouldRateLimitRequest(url: string): boolean {
-  const path = url.split('?', 1)[0] ?? url;
-  return ['/api', '/internal', '/play'].some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`)
   );
 }
 
@@ -421,14 +438,6 @@ function tokenFromPath(request: FastifyRequest): string {
   return (request.params as { token: string }).token;
 }
 
-function viewerIdentity(request: FastifyRequest, key: Buffer): string {
-  return createHmac('sha256', key)
-    .update(request.ip)
-    .update('\0')
-    .update(String(request.headers['user-agent'] ?? 'unknown').slice(0, 256))
-    .digest('hex');
-}
-
 export function trustedViewerRegion(
   request: Pick<FastifyRequest, 'headers' | 'raw'>,
   headerName: string,
@@ -482,26 +491,6 @@ export function redactRequestUrl(url: string): string {
   return url
     .replace(/(\/play\/)[^/?]+/g, '$1[REDACTED]')
     .replace(/(\/internal\/source\/)[^/?]+/g, '$1[REDACTED]');
-}
-
-export function liveOriginSourceUrl(
-  baseUrl: string,
-  path: string,
-  readToken: string,
-  srtPassphrase?: string
-): string {
-  if (!/^live-[A-Za-z0-9_-]+$/.test(path)) throw new Error('Invalid live path');
-  if (baseUrl.startsWith('srt://')) {
-    const separator = baseUrl.includes('?') ? '&' : '?';
-    const encryption = srtPassphrase ? `passphrase=${encodeURIComponent(srtPassphrase)}&` : '';
-    return `${baseUrl}${separator}${encryption}streamid=read:${path}:vrrelay-read:${readToken}`;
-  }
-  const source = new URL(baseUrl);
-  if (source.protocol !== 'rtsp:') throw new Error('Live origin must use RTSP or SRT');
-  source.username = 'vrrelay-read';
-  source.password = readToken;
-  source.pathname = `${source.pathname.replace(/\/$/, '')}/${path}`;
-  return source.toString();
 }
 
 const forwardedLiveHlsQueryKeys = new Set(['session', '_HLS_msn', '_HLS_part', '_HLS_skip']);
@@ -593,7 +582,7 @@ export async function createServer(
     bodyLimit: 1_048_576,
     // Signed edge playback grants include bounded session and node metadata and
     // therefore exceed Fastify's 100-character default parameter limit.
-    routerOptions: { maxParamLength: 1_024 },
+    routerOptions: { maxParamLength: SIGNED_GRANT_MAX_PARAMETER_LENGTH },
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID()
   });
@@ -624,8 +613,8 @@ export async function createServer(
       : undefined
   );
   const isTrustedRegionPeer = compileProxyTrust(config.trustedProxyCidrs);
-  const viewerIdentityKey = randomBytes(32);
-  const viewerAffinity = (request: FastifyRequest) => viewerIdentity(request, viewerIdentityKey);
+  const viewerAffinity = (request: FastifyRequest) =>
+    services.sessions.viewerIdentity(request.ip, request.headers['user-agent']);
   const playbackRequests = new PlaybackRequestTracker();
   const viewerRegion = async (request: FastifyRequest) => {
     if (request.headers[config.viewerRegionHeader] === undefined) return undefined;
@@ -642,60 +631,15 @@ export async function createServer(
   };
   let runtimeRestartRequired = false;
 
-  const configuredLivePaths = new Map<string, Promise<void>>();
-  const ensureLiveEdgePath = async (path: string): Promise<void> => {
-    if (!config.liveOriginUrl) return;
-    const existing = configuredLivePaths.get(path);
-    if (existing) return existing;
-    const operation = (async () => {
-      const endpoint = `${config.mediaMtxApiUrl.replace(/\/$/, '')}/v3/config/paths`;
-      const body = JSON.stringify({
-        source: liveOriginSourceUrl(
-          config.liveOriginUrl!,
-          path,
-          config.mediaMtxReadToken,
-          config.liveOriginSrtPassphrase
-        ),
-        sourceOnDemand: true,
-        sourceOnDemandCloseAfter: '30s'
-      });
-      const add = await fetch(`${endpoint}/add/${encodeURIComponent(path)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body
-      });
-      if (add.ok) return;
-      if (add.status !== 400) throw new Error(`MediaMTX path add failed (${add.status})`);
-      const replace = await fetch(`${endpoint}/replace/${encodeURIComponent(path)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body
-      });
-      if (!replace.ok) throw new Error(`MediaMTX path replace failed (${replace.status})`);
-    })();
-    configuredLivePaths.set(path, operation);
-    try {
-      await operation;
-    } catch (error) {
-      configuredLivePaths.delete(path);
-      throw error;
-    }
-  };
-  const forgetLiveEdgePath = (path: string): void => {
-    configuredLivePaths.delete(path);
-  };
-  const liveReadHeaders = () => ({
-    Authorization: `Basic ${Buffer.from(`vrrelay-read:${config.mediaMtxReadToken}`).toString('base64')}`
+  const liveEdgePaths = new LiveEdgePathManager({
+    ...(config.liveOriginUrl ? { originUrl: config.liveOriginUrl } : {}),
+    apiUrl: config.mediaMtxApiUrl,
+    readToken: config.mediaMtxReadToken,
+    ...(config.liveOriginSrtPassphrase ? { srtPassphrase: config.liveOriginSrtPassphrase } : {})
   });
+  app.addHook('onClose', () => liveEdgePaths.close());
   const fetchLiveHlsWithPathRecovery = async (path: string, url: string): Promise<Response> => {
-    await ensureLiveEdgePath(path);
-    let response = await fetch(url, { headers: liveReadHeaders() });
-    if (response.ok) return response;
-    forgetLiveEdgePath(path);
-    await ensureLiveEdgePath(path);
-    response = await fetch(url, { headers: liveReadHeaders() });
-    if (!response.ok) forgetLiveEdgePath(path);
-    return response;
+    return liveEdgePaths.fetchHls(path, url);
   };
 
   await app.register(cookie, { hook: 'onRequest' });
@@ -758,6 +702,15 @@ export async function createServer(
         }
       });
     }
+    const clientError = frameworkClientError(error);
+    if (clientError)
+      return reply.status(clientError.statusCode).send({
+        error: {
+          code: clientError.code,
+          message: clientError.message,
+          requestId: request.id
+        }
+      });
     request.log.error({ err: error }, 'request failed');
     return reply.status(500).send({
       error: {
@@ -812,24 +765,26 @@ export async function createServer(
   }));
   app.get('/api/v1/ready', async (request, reply) => {
     const backends = await services.backends.list();
-    const dependencies = backends.items.map(
-      ({ category, kind, healthy, checkedAt, restartRequired }) => ({
+    const dependencies = [
+      ...backends.items.map(({ category, kind, healthy, checkedAt, restartRequired }) => ({
         category,
         kind,
         healthy,
         checkedAt,
         ...(restartRequired ? { restartRequired } : {})
-      })
-    );
-    const ready =
-      dependencies.every((dependency) => dependency.healthy) && !backends.restartRequired;
+      })),
+      ...((await services.readiness?.()) ?? [])
+    ];
+    const restartRequired =
+      backends.restartRequired || dependencies.some((dependency) => dependency.restartRequired);
+    const ready = dependencies.every((dependency) => dependency.healthy) && !restartRequired;
     return reply.status(ready ? 200 : 503).send({
       status: ready ? 'ready' : 'degraded',
       version: config.applicationVersion,
       now: new Date().toISOString(),
       workers: services.sessions.capacity(),
       dependencies,
-      restartRequired: backends.restartRequired
+      restartRequired
     });
   });
   app.get('/api/v1/setup', async () => {
@@ -1502,6 +1457,11 @@ export async function createServer(
       async () => {
         const body = parse(CreateSessionRequestSchema, request.body);
         body.placementLocked = Boolean(body.preferredNodeId);
+        if (body.kind === 'vod')
+          await refreshStandalonePlacementCapabilities(
+            surface,
+            services.refreshLocalNodeCapabilities
+          );
         if (principal.kind === 'jellyfin_session') {
           if (body.kind === 'vod')
             body.reportActivity =
@@ -1667,7 +1627,7 @@ export async function createServer(
     const principal = await mutate(request, ['sessions:create']);
     return reply.status(201).send(
       await services.live.create(parse(CreateLiveChannelRequestSchema, request.body), {
-        ...(principal.kind === 'jellyfin_session' && principal.id ? { ownerId: principal.id } : {})
+        ...(principal.id ? { ownerId: principal.id } : {})
       })
     );
   });
@@ -1836,7 +1796,7 @@ export async function createServer(
   app.get('/play/:token/index.m3u8', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const token = tokenFromPath(request);
-    const affinity = viewerAffinity(request);
+    const affinity = await viewerAffinity(request);
     const session = await services.sessions.touchViewer(token, affinity);
     const region = await viewerRegion(request);
     const route = await services.cluster.selectEdge(session.id, session.preferredRegion, region);
@@ -1869,7 +1829,7 @@ export async function createServer(
     app.get('/play/:token/segment/:index.ts', async (request, reply) => {
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
-      const affinity = viewerAffinity(request);
+      const affinity = await viewerAffinity(request);
       const observation = playbackRequests.observe(params.token, affinity, segmentIndex);
       const session = await services.sessions.touchViewer(
         params.token,
@@ -1894,7 +1854,7 @@ export async function createServer(
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
-      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      reply.header('Cache-Control', 'private, no-store');
       return reply
         .type('video/mp2t')
         .send(
@@ -1906,7 +1866,7 @@ export async function createServer(
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
       const segmentIndex = Number(params.index);
-      const affinity = viewerAffinity(request);
+      const affinity = await viewerAffinity(request);
       const observation = playbackRequests.observe(params.token, affinity, segmentIndex);
       const session = await services.sessions.touchViewer(
         params.token,
@@ -1931,7 +1891,7 @@ export async function createServer(
       const path = await services.sessions.segment(params.token, segmentIndex, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
-      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      reply.header('Cache-Control', 'private, no-store');
       return reply
         .type('video/iso.segment')
         .send(
@@ -1942,7 +1902,7 @@ export async function createServer(
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = tokenFromPath(request);
-      const affinity = viewerAffinity(request);
+      const affinity = await viewerAffinity(request);
       const session = await services.sessions.touchViewer(token, affinity);
       logPlaybackRequest(request.log, playbackRequests, {
         sessionId: session.id,
@@ -1955,7 +1915,7 @@ export async function createServer(
       const path = await services.sessions.initSegment(token, controller.signal);
       const info = await stat(path);
       reply.header('Content-Length', info.size);
-      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      reply.header('Cache-Control', 'private, no-store');
       return reply
         .type('video/mp4')
         .send(
@@ -1964,32 +1924,11 @@ export async function createServer(
           )
         );
     });
-    app.get('/play/:token/stream.mp4', async (request, reply) => {
-      const token = tokenFromPath(request);
-      const affinity = viewerAffinity(request);
-      const session = await services.sessions.touchViewer(token, affinity);
-      logPlaybackRequest(request.log, playbackRequests, {
-        sessionId: session.id,
-        clientAffinity: affinity,
-        resource: 'stream',
-        nodeId: config.nodeId
-      });
-      const controller = new AbortController();
-      reply.raw.once('close', () => controller.abort());
-      reply.raw.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
-      const output = payloadMeter((bytes) => services.sessions.recordEgress(bytes, session.id));
-      output.pipe(reply.raw);
-      await services.sessions
-        .streamFragmentedMp4(token, output, controller.signal)
-        .catch((error) => {
-          output.destroy();
-          throw error;
-        });
-    });
   }
   app.get('/play/:token/live.m3u8', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const token = tokenFromPath(request);
-    const affinity = viewerAffinity(request);
+    const affinity = await viewerAffinity(request);
     const session = await services.sessions.touchViewer(token, affinity);
     const query = request.query as { edge?: string };
     let region: string | undefined;
@@ -2047,7 +1986,10 @@ export async function createServer(
       const params = request.params as { token: string; '*': string };
       if (!params['*'] || params['*'].includes('..') || params['*'].includes('\\'))
         return reply.status(400).send();
-      const session = await services.sessions.touchViewer(params.token, viewerAffinity(request));
+      const session = await services.sessions.touchViewer(
+        params.token,
+        await viewerAffinity(request)
+      );
       const channel = await services.sessions.resolveLive(params.token);
       const response = await fetchLiveHlsWithPathRecovery(
         channel.path,
@@ -2059,10 +2001,9 @@ export async function createServer(
         )
       );
       if (!response.ok || !response.body) {
-        forgetLiveEdgePath(channel.path);
         return reply.status(response.status).send();
       }
-      reply.header('Cache-Control', response.headers.get('cache-control') ?? 'no-store');
+      reply.header('Cache-Control', 'private, no-store');
       return reply
         .type(response.headers.get('content-type') ?? 'application/octet-stream')
         .send(

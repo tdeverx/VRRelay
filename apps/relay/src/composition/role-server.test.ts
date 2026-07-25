@@ -28,6 +28,49 @@ const metrics: MetricsSink = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('data-plane role servers', () => {
+  it('preserves framework rate-limit responses on dedicated roles', async () => {
+    const app = await createRoleServer(loadConfig({ VRRELAY_LOG_LEVEL: 'fatal' }), {
+      kind: 'source-worker',
+      sessions: {
+        capacity: () => ({ active: 0, limit: 1, queued: 0 })
+      } as SessionService,
+      capabilities,
+      metrics
+    });
+    let response;
+    for (let index = 0; index <= 240; index += 1) {
+      response = await app.inject({ method: 'GET', url: `/api/v1/health?request=${index}` });
+    }
+
+    expect(response?.statusCode).toBe(429);
+    expect(response?.json()).toMatchObject({
+      error: { code: 'rate_limited', message: 'Too many requests' }
+    });
+    await app.close();
+  });
+
+  it('routes bounded signed edge grants beyond Fastify’s default parameter length', async () => {
+    const app = await createRoleServer(loadConfig({ VRRELAY_LOG_LEVEL: 'fatal' }), {
+      kind: 'edge',
+      sessions: {
+        viewerIdentity: async () => 'viewer-fixture',
+        touchViewer: async () => ({ id: 'session-fixture' }),
+        manifest: async () => '#EXTM3U\n',
+        recordEgress: () => undefined
+      } as unknown as SessionService,
+      capabilities,
+      metrics
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/play/${'g'.repeat(512)}/index.m3u8`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toBe('#EXTM3U\n');
+    await app.close();
+  });
+
   it('registers only the source-worker HTTP surface', async () => {
     const app = await createRoleServer(loadConfig({}), {
       kind: 'source-worker',
@@ -40,6 +83,35 @@ describe('data-plane role servers', () => {
     expect(app.hasRoute({ method: 'POST', url: '/internal/mediamtx/auth' })).toBe(false);
     expect(app.hasRoute({ method: 'GET', url: '/play/:token/index.m3u8' })).toBe(false);
     expect(app.hasRoute({ method: 'GET', url: '/api/v1/providers' })).toBe(false);
+    await app.close();
+  });
+
+  it('reports role dependency readiness independently from liveness', async () => {
+    const app = await createRoleServer(loadConfig({}), {
+      kind: 'source-worker',
+      sessions: { capacity: () => ({ active: 1, limit: 2, queued: 0 }) } as SessionService,
+      capabilities,
+      metrics,
+      readiness: async () => [
+        {
+          category: 'coordination',
+          kind: 'controller-agent',
+          healthy: false,
+          checkedAt: '2026-07-25T00:00:00.000Z'
+        }
+      ]
+    });
+
+    await expect(app.inject({ method: 'GET', url: '/api/v1/health' })).resolves.toMatchObject({
+      statusCode: 200
+    });
+    const readiness = await app.inject({ method: 'GET', url: '/api/v1/ready' });
+    expect(readiness.statusCode).toBe(503);
+    expect(readiness.json()).toMatchObject({
+      status: 'degraded',
+      workers: { active: 1, limit: 2, queued: 0 },
+      dependencies: [{ kind: 'controller-agent', healthy: false }]
+    });
     await app.close();
   });
 
@@ -113,16 +185,27 @@ describe('data-plane role servers', () => {
       const url = String(input);
       if (url.includes('/v3/config/paths/add/live-fixture'))
         return new Response(null, { status: 200 });
+      if (url.includes('/v3/config/paths/delete/live-fixture'))
+        return new Response(null, { status: 200 });
       if (url.endsWith('/live-fixture/index.m3u8')) {
         hlsAttempts += 1;
         return new Response(hlsAttempts === 1 ? '' : '#EXTM3U\nsegment.ts\n', {
           status: hlsAttempts === 1 ? 502 : 200
         });
       }
+      if (url.endsWith('/live-fixture/segment.ts'))
+        return new Response('live-segment', {
+          status: 200,
+          headers: {
+            'content-type': 'video/mp2t',
+            'cache-control': 'public, max-age=31536000, immutable'
+          }
+        });
       return new Response('', { status: 500 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const sessions = {
+      viewerIdentity: async () => 'viewer-fixture',
       touchViewer: async () => ({ id: 'live-session' }),
       resolveLive: async () => ({ path: 'live-fixture' }),
       recordEgress: () => undefined
@@ -139,13 +222,25 @@ describe('data-plane role servers', () => {
 
     const response = await app.inject({ method: 'GET', url: '/play/live-token/live.m3u8' });
     expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
     expect(response.payload).toContain('/play/live-token/live/segment.ts');
     expect(
       fetchMock.mock.calls.filter(([input]) =>
         String(input).includes('/v3/config/paths/add/live-fixture')
       )
     ).toHaveLength(2);
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/v3/config/paths/delete/live-fixture')
+      )
+    ).toHaveLength(1);
     expect(hlsAttempts).toBe(2);
+    const segment = await app.inject({
+      method: 'GET',
+      url: '/play/live-token/live/segment.ts'
+    });
+    expect(segment.statusCode).toBe(200);
+    expect(segment.headers['cache-control']).toBe('private, no-store');
     await app.close();
   });
 
@@ -163,6 +258,7 @@ describe('data-plane role servers', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const sessions = {
+      viewerIdentity: async () => 'viewer-fixture',
       touchViewer: async () => ({ id: 'live-session' }),
       resolveLive: async () => ({ path: 'live-fixture' }),
       recordEgress: () => undefined
@@ -201,15 +297,34 @@ describe('data-plane role servers', () => {
 
   it('limits credential-free ingest reads to RTSP callbacks', async () => {
     const readToken = 'ingest-read-token-fixture';
-    const live = new LiveService({} as Repository, {
-      publicUrl: 'https://relay.example',
-      rtmpUrl: 'rtmp://ingest.example/live',
-      srtUrl: 'srt://ingest.example:8890',
-      whipUrl: 'https://ingest.example',
-      hlsUrl: 'https://edge.example',
-      internalRtspUrl: 'rtsp://mediamtx:8554',
-      allowUnauthenticatedInternalRead: true
-    });
+    const live = new LiveService(
+      {
+        listLiveChannels: async () => [
+          {
+            id: 'live-channel-fixture',
+            name: 'Live fixture',
+            path: 'live-normalized',
+            ingestPath: 'live-fixture',
+            normalize: true,
+            publisherState: 'online',
+            publishTokenHash: 'not-a-real-token',
+            rtmpUrl: 'rtmp://relay.example/live-fixture',
+            srtUrl: 'srt://relay.example:8890?streamid=publish:live-fixture',
+            whipUrl: 'https://relay.example/live-fixture/whip',
+            createdAt: '2026-07-25T00:00:00.000Z'
+          }
+        ]
+      } as unknown as Repository,
+      {
+        publicUrl: 'https://relay.example',
+        rtmpUrl: 'rtmp://ingest.example/live',
+        srtUrl: 'srt://ingest.example:8890',
+        whipUrl: 'https://ingest.example',
+        hlsUrl: 'https://edge.example',
+        internalRtspUrl: 'rtsp://mediamtx:8554',
+        allowUnauthenticatedInternalRead: true
+      }
+    );
     const app = await createRoleServer(loadConfig({ VRRELAY_MEDIAMTX_READ_TOKEN: readToken }), {
       kind: 'ingest-origin',
       live,
@@ -237,6 +352,14 @@ describe('data-plane role servers', () => {
       statusCode: 401
     });
     await expect(request({ action: 'read' })).resolves.toMatchObject({ statusCode: 401 });
+    await expect(
+      app.inject({
+        method: 'POST',
+        url: '/internal/mediamtx/auth',
+        remoteAddress: '10.20.30.40',
+        payload: { action: 'read', protocol: 'rtsp', path: 'another-private-path' }
+      })
+    ).resolves.toMatchObject({ statusCode: 401 });
     await expect(
       request({
         action: 'read',

@@ -255,9 +255,9 @@ export class VodProducerCoordinator {
     const owner = `${this.options.nodeId}:${randomUUID()}`;
     const leaseKey = `vod-producer:${session.id}`;
     const leaseMs = this.options.leaseMs ?? LEASE_MS;
-    if (!(await this.coordination.acquire(leaseKey, owner, leaseMs))) return undefined;
     const controller = new AbortController();
     try {
+      if (!(await this.coordination.acquire(leaseKey, owner, leaseMs))) return undefined;
       const current = await this.repository.getVersionedVodProducer(session.id);
       const generation = (current?.value.generation ?? 0) + 1;
       const playbackAnchorAtMs = Date.now();
@@ -421,35 +421,45 @@ export class VodProducerCoordinator {
         request,
         directory,
         async (segment) => {
-          if (active.controller.signal.aborted) throw active.controller.signal.reason;
-          const contentKey = this.cache.contentKey(session, profile, segment.index);
-          await this.cache.publishObject(session, profile, segment.index, segment.path, contentKey);
-          active.lastPublishedSegmentIndex = segment.index;
-          this.#reconcilePacing(profile, active);
-          await this.#transition(session.id, active.generation, (current) => ({
-            ...current,
-            state: 'running',
-            lastPublishedSegmentIndex: segment.index,
-            bufferState: active.pacing.state,
-            leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(),
-            updatedAt: new Date().toISOString()
-          }));
-          await this.coordination.publish(
-            'segments',
-            JSON.stringify({ contentKey, sessionId: session.id, segmentIndex: segment.index })
-          );
-          this.callbacks.published?.(
-            session.id,
-            segment.index,
-            Math.min(
-              profile.delivery.segmentDuration,
-              Math.max(
-                0,
-                (session.durationSeconds ?? 0) - segment.index * profile.delivery.segmentDuration
-              )
-            ),
-            Date.now()
-          );
+          try {
+            if (active.controller.signal.aborted) throw active.controller.signal.reason;
+            const contentKey = this.cache.contentKey(session, profile, segment.index);
+            await this.cache.publishObject(
+              session,
+              profile,
+              segment.index,
+              segment.path,
+              contentKey
+            );
+            active.lastPublishedSegmentIndex = segment.index;
+            this.#reconcilePacing(profile, active);
+            await this.#transition(session.id, active.generation, (current) => ({
+              ...current,
+              state: 'running',
+              lastPublishedSegmentIndex: segment.index,
+              bufferState: active.pacing.state,
+              leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(),
+              updatedAt: new Date().toISOString()
+            }));
+            await this.coordination.publish(
+              'segments',
+              JSON.stringify({ contentKey, sessionId: session.id, segmentIndex: segment.index })
+            );
+            this.callbacks.published?.(
+              session.id,
+              segment.index,
+              Math.min(
+                profile.delivery.segmentDuration,
+                Math.max(
+                  0,
+                  (session.durationSeconds ?? 0) - segment.index * profile.delivery.segmentDuration
+                )
+              ),
+              Date.now()
+            );
+          } finally {
+            await this.cache.removeScratchObject(segment.path);
+          }
         },
         active.controller.signal
       );

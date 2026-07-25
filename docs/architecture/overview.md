@@ -105,7 +105,11 @@ The encrypted file backend serializes mutations within the process, writes a syn
 
 Administrative mutations are wrapped in a durable, append-only audit sequence. An attempt record with sensitive context keys redacted must persist before the mutation begins. A correlated success, failure, or denial record follows the operation. Terminal audit-write failure is surfaced to operational reporting but does not misrepresent an already committed one-time result as rolled back. Audit queries are authenticated and bounded; callers must continue to avoid putting secret values in free-form messages or nonsensitive context fields.
 
-Plex or Emby support is added by implementing `MediaProvider`. New delivery engines implement `Transcoder` or a future delivery port without changing public provider models.
+The domain and application ports accept provider identifiers without enumerating a vendor. Adding
+Plex, Emby, or another provider still requires an adapter plus explicit contract, authentication,
+composition, and dashboard integration because the current public setup/sign-in surface is
+deliberately Jellyfin-specific. New delivery engines require a structured delivery port and
+validated public contract; a `Transcoder` implementation alone is not a product integration.
 
 Activated object-store/backend configuration records per-node application state so one restarted role cannot clear restart-required status for other roles. The migration backup hook and its redaction/atomic-publication unit tests still do not constitute a real PostgreSQL `pg_dump` plus restore drill. That evidence remains in Phases 9–11.
 
@@ -133,9 +137,9 @@ sessions keep their playback URL and durable producer recovery metadata, not per
 permanently running worker.
 
 The durable producer applies to HLS VOD profiles, including MPEG-TS and fMP4-segmented HLS.
-Experimental direct fragmented-MP4 delivery is still request-oriented and does not yet provide the
-one-active-producer-source-per-session guarantee. A future shared CMAF/fMP4 delivery path must isolate
-viewer backpressure and late joins while reusing one upstream producer.
+Direct fragmented-MP4 delivery has been removed from the domain, API, dashboard, and transcoder
+surface. Any future CMAF/fMP4 delivery path must use shared admission, isolate viewer backpressure
+and late joins, and reuse one fenced upstream producer before it can become a public profile method.
 
 Producer generations keep timestamps on the manifest's absolute media timeline. A distant seek is
 performed against the seekable opaque loopback source, and the replacement producer offsets both

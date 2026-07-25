@@ -107,7 +107,9 @@ function relayEnvironment(name, roles, apiPort, agentPort, joinToken) {
       ? {
           VRRELAY_NODE_ID: 'local-smoke-controller',
           VRRELAY_AGENT_LISTEN_ADDR: `127.0.0.1:${agentPort}`,
-          VRRELAY_AGENT_TLS_NAMES: '127.0.0.1,localhost'
+          VRRELAY_AGENT_TLS_NAMES: '127.0.0.1,localhost',
+          VRRELAY_TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
+          VRRELAY_VIEWER_REGION_HEADER: 'x-vrrelay-region'
         }
       : {
           VRRELAY_CONTROLLER_AGENT_URL: `wss://127.0.0.1:${agentPort}/api/v1/nodes/connect`,
@@ -162,11 +164,13 @@ async function joinToken(name, roles, region) {
   ).token;
 }
 
-async function fetchMedia(url) {
-  const response = await fetch(url, { headers: { 'user-agent': 'VRRelay local cluster smoke' } });
+async function fetchMedia(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: { 'user-agent': 'VRRelay local cluster smoke', ...headers }
+  });
   const body = Buffer.from(await response.arrayBuffer());
-  if (!response.ok) throw new Error(`GET ${url} failed (${response.status})`);
-  assert(body.length > 1_000, `Segment from ${url} was too small`);
+  if (!response.ok) throw new Error(`Media request failed (${response.status})`);
+  assert(body.length > 1_000, 'Media response was unexpectedly small');
   return body;
 }
 
@@ -388,17 +392,43 @@ async function main() {
   });
   const cleanUrl = session.outputUrls.primary;
   const token = cleanUrl.split('/play/')[1].split('/')[0];
-  const manifest = await (await fetch(cleanUrl)).text();
-  assert(manifest.includes('#EXT-X-ENDLIST'), 'Controller did not return a finite VOD manifest');
+  const homeManifest = await (
+    await fetch(cleanUrl, {
+      headers: {
+        'x-vrrelay-region': 'home',
+        'user-agent': 'VRRelay local home viewer'
+      }
+    })
+  ).text();
+  const backupManifest = await (
+    await fetch(cleanUrl, {
+      headers: {
+        'x-vrrelay-region': 'backup',
+        'user-agent': 'VRRelay local backup viewer'
+      }
+    })
+  ).text();
   assert(
-    playlistMedia(manifest).every((line) => line.startsWith('http://127.0.0.1:1920')),
+    homeManifest.includes('#EXT-X-ENDLIST'),
+    'Controller did not return a finite VOD manifest'
+  );
+  assert(
+    playlistMedia(homeManifest).every((line) => line.startsWith('http://127.0.0.1:19201')) &&
+      playlistMedia(backupManifest).every((line) => line.startsWith('http://127.0.0.1:19202')),
     'Manifest does not contain absolute edge URLs'
   );
+  const rawGrantResponse = await fetch(`http://127.0.0.1:19201/play/${token}/segment/0.ts`);
+  assert(rawGrantResponse.status === 401, 'Edge accepted a raw controller playback grant');
+  await rawGrantResponse.arrayBuffer();
 
   log('Coalescing one real FFmpeg segment requested through both edges');
   const [a, b] = await Promise.all([
-    fetchMedia(`http://127.0.0.1:19201/play/${token}/segment/0.ts`),
-    fetchMedia(`http://127.0.0.1:19202/play/${token}/segment/0.ts`)
+    fetchMedia(playlistMedia(homeManifest)[0], {
+      'user-agent': 'VRRelay local home viewer'
+    }),
+    fetchMedia(playlistMedia(backupManifest)[0], {
+      'user-agent': 'VRRelay local backup viewer'
+    })
   ]);
   assert(a.equals(b) && a[0] === 0x47, 'Distributed edges did not return identical MPEG-TS');
   const jobs = (await api('/api/v1/jobs')).items.filter(
@@ -438,7 +468,7 @@ async function main() {
   );
 
   log('Draining the selected edge and checking refreshed route placement');
-  const selectedOrigin = new URL(playlistMedia(manifest)[0]).origin;
+  const selectedOrigin = new URL(playlistMedia(homeManifest)[0]).origin;
   const selectedEdge = nodes.find((candidate) => candidate.publicUrl === selectedOrigin);
   await api(`/api/v1/nodes/${selectedEdge.id}/drain`, {
     method: 'POST',
@@ -455,11 +485,10 @@ async function main() {
     (candidate) => candidate.id === session.assignedNodeId
   );
   await api(`/api/v1/nodes/${assignedWorker.id}/revoke`, { method: 'POST', body: {} });
-  const activeEdge = new URL(playlistMedia(rerouted)[0]).origin;
   // Use a distant segment so the continuous producer cannot have prefetched it
   // during the certificate/drain checks above. A nearby segment may already be
   // in the shared object store and would correctly bypass failover placement.
-  await fetchMedia(`${activeEdge}/play/${token}/segment/12.ts`);
+  await fetchMedia(playlistMedia(rerouted)[12]);
   const failoverJob = (await api('/api/v1/jobs')).items.find(
     (job) => job.sessionId === session.id && job.segmentIndex === 12
   );
@@ -494,7 +523,8 @@ async function main() {
       )
       .every((candidate) => candidate.agent.connected)
   );
-  await fetchMedia(`${activeEdge}/play/${token}/segment/2.ts`);
+  const recoveredManifest = await (await fetch(cleanUrl)).text();
+  await fetchMedia(playlistMedia(recoveredManifest)[2]);
   assert(
     (await api(`/api/v1/sessions/${session.id}`)).id === session.id,
     'Controller restart lost the persisted session'

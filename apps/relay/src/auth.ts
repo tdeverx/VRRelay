@@ -272,13 +272,6 @@ export class AuthService {
     if (!current) throw new ApplicationError('not_found', 'User was not found', 404);
     if (current.revision !== expectedRevision)
       throw new ApplicationError('revision_conflict', 'User was changed by another request', 409);
-    if (current.value.roles.includes('owner') && !update.roles.includes('owner')) {
-      const owners = (await this.repository.listUserIdentities()).filter(({ value }) =>
-        value.roles.includes('owner')
-      );
-      if (owners.length <= 1)
-        throw new ApplicationError('last_owner', 'The last assigned owner cannot be demoted', 409);
-    }
     const value: UserIdentity = {
       ...current.value,
       roles: [...new Set(update.roles)],
@@ -287,7 +280,12 @@ export class AuthService {
     };
     if (value.defaultProfileId && !value.allowedProfileIds.includes(value.defaultProfileId))
       throw new ApplicationError('invalid_profile_access', 'Default profile must be allowed', 409);
-    const result = await this.repository.compareAndSetUserIdentity(value, expectedRevision);
+    const result = await this.repository.compareAndSetUserIdentityPreservingOwner(
+      value,
+      expectedRevision
+    );
+    if (!result.applied && result.reason === 'dependency-conflict')
+      throw new ApplicationError('last_owner', 'The last assigned owner cannot be demoted', 409);
     if (!result.applied)
       throw new ApplicationError('revision_conflict', 'User was changed by another request', 409);
     return result.record;

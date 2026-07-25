@@ -33,7 +33,7 @@ export type Readiness = {
 
 export type DependencyReadiness = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
-    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    kind: string;
     healthy: boolean;
     checkedAt: string;
     restartRequired?: boolean;
@@ -217,7 +217,7 @@ export type VideoSettings = {
     codec: 'h264' | 'h265' | 'av1' | 'copy';
     encoder: string;
     hardwareMode: 'auto' | 'software' | 'videotoolbox' | 'qsv' | 'vaapi' | 'nvenc' | 'amf';
-    decodeMode?: 'auto' | 'software' | 'videotoolbox' | 'd3d11va' | 'qsv' | 'vaapi' | 'cuda';
+    decodeMode: 'auto' | 'software' | 'videotoolbox' | 'd3d11va' | 'qsv' | 'vaapi' | 'cuda';
     profile?: string;
     level?: string;
     pixelFormat: string;
@@ -244,7 +244,7 @@ export type AudioSettings = {
 };
 
 export type DeliverySettings = {
-    method: 'hls' | 'fragmented_mp4' | 'rtsp' | 'mpegts_http';
+    method: 'hls' | 'rtsp' | 'mpegts_http';
     container: 'mpegts' | 'fmp4' | 'mp4';
     segmentType: 'mpegts' | 'fmp4' | 'none';
     segmentDuration: number;
@@ -515,7 +515,7 @@ export type CreatedToken = PublicToken;
 export type RelayEvent = {
     version: 1;
     id: string;
-    type: string;
+    type: 'session.created' | 'session.updated' | 'session.deleted' | 'worker.started' | 'worker.completed' | 'worker.failed' | 'cache.hit' | 'cache.evicted' | 'viewer.joined' | 'viewer.left' | 'live.publisher.connected' | 'live.publisher.disconnected' | 'live.normalizer.failed' | 'live.channel.deleted' | 'system.capacity' | 'node.joined' | 'node.heartbeat' | 'node.draining' | 'node.offline' | 'node.log' | 'job.log' | 'job.queued' | 'job.leased' | 'job.completed' | 'job.failed' | 'route.selected' | 'storage.uploaded' | 'storage.invalidated';
     timestamp: string;
     sessionId?: string;
     payload: {
@@ -747,7 +747,7 @@ export type BackendActivationRequest = BackendValidationRequest;
 
 export type BackendStatus = {
     category: 'object-store' | 'coordination' | 'repository' | 'routing' | 'secrets' | 'metrics';
-    kind: 'local' | 's3' | 'azure-blob' | 'gcs' | 'postgres' | 'valkey' | 'builtin' | 'static' | 'webhook' | 'sqlite' | 'keychain' | 'dpapi' | 'encrypted-file' | 'prometheus';
+    kind: string;
     healthy: boolean;
     message?: string;
     checkedAt: string;

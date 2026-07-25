@@ -13,7 +13,7 @@
   } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { adminRoute, loginRoute } from '#lib/new-ui/state.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Alert from '#lib/new-ui/components/ui/alert';
   import * as Card from '#lib/new-ui/components/ui/card';
@@ -81,6 +81,20 @@
     !placementLoading && !placementError && Boolean(placementPreview?.node)
   );
 
+  function preferredVodProfile(items: ProfileRevision[]): ProfileRevision | undefined {
+    return (
+      items.find((profile) => profile.profileId === 'universal-h264-hls-vod') ??
+      items.find(
+        (profile) =>
+          profile.platform === 'universal' &&
+          profile.delivery.method === 'hls' &&
+          profile.delivery.container === 'mpegts' &&
+          profile.delivery.segmentType === 'mpegts' &&
+          profile.delivery.playlistType === 'vod'
+      )
+    );
+  }
+
   onMount(load);
   $effect(() => {
     void [
@@ -103,10 +117,7 @@
         (profile) => !profile.disabledReason && profile.delivery.playlistType === 'vod'
       );
       providerId = providers[0]?.id ?? '';
-      const defaultProfile =
-        profiles.find(
-          (profile) => profile.platform === 'universal' && profile.delivery.method === 'hls'
-        ) ?? profiles[0];
+      const defaultProfile = preferredVodProfile(profiles);
       if (defaultProfile) {
         profileKey = `${defaultProfile.profileId}:${defaultProfile.revision}`;
         platformMode = defaultProfile.platform;
@@ -118,7 +129,7 @@
       }
       if (providerId) await searchCatalog();
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
+      if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       toast.error(reason instanceof Error ? reason.message : 'Could not prepare relay form.');
     } finally {
       loading = false;
@@ -258,7 +269,7 @@
         reportActivity
       });
       toast.success('Relay ready.');
-      await goto(`${adminRoute(page.url.pathname)}?session=${session.id}`);
+      await goto(`${adminRoute(page.url.pathname, '/sessions')}?created=${session.id}`);
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not create relay.');
     } finally {
@@ -348,97 +359,115 @@
               Select a movie or episode from a connected provider.
             </p>
           </div>
-          <div class="flex flex-col gap-3 lg:flex-row">
-            <Select.Root
-              type="single"
-              value={providerId}
-              onValueChange={(value) => {
-                providerId = value ?? '';
-                void searchCatalog();
-              }}
-              ><Select.Trigger class="w-full lg:w-56"
-                >{providers.find((provider) => provider.id === providerId)?.name ??
-                  'Provider'}</Select.Trigger
-              ><Select.Content
-                >{#each providers as provider}<Select.Item value={provider.id}
-                    >{provider.name}</Select.Item
-                  >{/each}</Select.Content
-              ></Select.Root
-            ><ToggleGroup.Root
-              type="single"
-              value={mediaMode}
-              onValueChange={(value) => {
-                if (value === 'movies' || value === 'shows') {
-                  mediaMode = value;
-                  void searchCatalog();
-                }
-              }}
-              ><ToggleGroup.Item value="movies">Movies</ToggleGroup.Item><ToggleGroup.Item
-                value="shows">Shows</ToggleGroup.Item
-              ></ToggleGroup.Root
-            >
-            <form
-              class="flex flex-1 gap-2"
-              onsubmit={(event) => {
-                event.preventDefault();
-                void searchCatalog();
-              }}
-            >
-              <label class="relative flex-1"
-                ><Search
-                  class="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
-                /><span class="sr-only">Search catalog</span><Input
-                  class="ps-9"
-                  bind:value={query}
-                  placeholder="Search catalog…"
-                /></label
-              ><Button type="submit" variant="secondary">Search</Button>
-            </form>
-          </div>
-          {#if mediaMode === 'shows' && selectedSeries}<div class="grid gap-3 md:grid-cols-2">
-              <Field.Field
-                ><Field.Label>Season</Field.Label><Select.Root
-                  type="single"
-                  value={selectedSeason?.id ?? ''}
-                  onValueChange={(value) => value && chooseSeason(value)}
-                  ><Select.Trigger class="w-full"
-                    >{selectedSeason?.name ?? 'Choose season'}</Select.Trigger
-                  ><Select.Content
-                    >{#each seasons as season}<Select.Item value={season.id}
-                        >{season.name}</Select.Item
-                      >{/each}</Select.Content
-                  ></Select.Root
-                ></Field.Field
-              >
-            </div>{/if}
-          {#if searching}
-            <LoadState loading label="catalog results" variant="cards" count={6} />
+          {#if providers.length === 0}
+            <Alert.Root>
+              <Alert.Title>No administrator-managed provider connection</Alert.Title>
+              <Alert.Description class="space-y-3">
+                <p>
+                  Advanced placement uses a stored Jellyfin user token or API key. Delegated users
+                  can create relays from the main catalog without sharing their credential.
+                </p>
+                <Button
+                  href={adminRoute(page.url.pathname, '/settings/connections')}
+                  variant="outline"
+                >
+                  Configure a provider credential
+                </Button>
+              </Alert.Description>
+            </Alert.Root>
           {:else}
-            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {#each selectedSeason ? episodes : results as item}<Card.Root
-                  class={selected?.id === item.id || selectedSeries?.id === item.id
-                    ? 'ring-ring ring-2'
-                    : ''}
-                  ><Card.Header
-                    ><Card.Title class="line-clamp-1">{item.name}</Card.Title><Card.Description
-                      >{item.productionYear ?? item.kind}</Card.Description
-                    ></Card.Header
-                  ><Card.Footer
-                    ><Button
-                      class="w-full"
-                      variant="outline"
-                      disabled={searching}
-                      onclick={() =>
-                        mediaMode === 'shows' && !selectedSeason
-                          ? chooseSeries(item)
-                          : choose(item)}
-                      >{mediaMode === 'shows' && !selectedSeason
-                        ? 'Choose series'
-                        : 'Select source'}</Button
-                    ></Card.Footer
-                  ></Card.Root
-                >{/each}
+            <div class="flex flex-col gap-3 lg:flex-row">
+              <Select.Root
+                type="single"
+                value={providerId}
+                onValueChange={(value) => {
+                  providerId = value ?? '';
+                  void searchCatalog();
+                }}
+                ><Select.Trigger class="w-full lg:w-56"
+                  >{providers.find((provider) => provider.id === providerId)?.name ??
+                    'Provider'}</Select.Trigger
+                ><Select.Content
+                  >{#each providers as provider}<Select.Item value={provider.id}
+                      >{provider.name}</Select.Item
+                    >{/each}</Select.Content
+                ></Select.Root
+              ><ToggleGroup.Root
+                type="single"
+                value={mediaMode}
+                onValueChange={(value) => {
+                  if (value === 'movies' || value === 'shows') {
+                    mediaMode = value;
+                    void searchCatalog();
+                  }
+                }}
+                ><ToggleGroup.Item value="movies">Movies</ToggleGroup.Item><ToggleGroup.Item
+                  value="shows">Shows</ToggleGroup.Item
+                ></ToggleGroup.Root
+              >
+              <form
+                class="flex flex-1 gap-2"
+                onsubmit={(event) => {
+                  event.preventDefault();
+                  void searchCatalog();
+                }}
+              >
+                <label class="relative flex-1"
+                  ><Search
+                    class="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
+                  /><span class="sr-only">Search catalog</span><Input
+                    class="ps-9"
+                    bind:value={query}
+                    placeholder="Search catalog…"
+                  /></label
+                ><Button type="submit" variant="secondary">Search</Button>
+              </form>
             </div>
+            {#if mediaMode === 'shows' && selectedSeries}<div class="grid gap-3 md:grid-cols-2">
+                <Field.Field
+                  ><Field.Label>Season</Field.Label><Select.Root
+                    type="single"
+                    value={selectedSeason?.id ?? ''}
+                    onValueChange={(value) => value && chooseSeason(value)}
+                    ><Select.Trigger class="w-full"
+                      >{selectedSeason?.name ?? 'Choose season'}</Select.Trigger
+                    ><Select.Content
+                      >{#each seasons as season}<Select.Item value={season.id}
+                          >{season.name}</Select.Item
+                        >{/each}</Select.Content
+                    ></Select.Root
+                  ></Field.Field
+                >
+              </div>{/if}
+            {#if searching}
+              <LoadState loading label="catalog results" variant="cards" count={6} />
+            {:else}
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {#each selectedSeason ? episodes : results as item}<Card.Root
+                    class={selected?.id === item.id || selectedSeries?.id === item.id
+                      ? 'ring-ring ring-2'
+                      : ''}
+                    ><Card.Header
+                      ><Card.Title class="line-clamp-1">{item.name}</Card.Title><Card.Description
+                        >{item.productionYear ?? item.kind}</Card.Description
+                      ></Card.Header
+                    ><Card.Footer
+                      ><Button
+                        class="w-full"
+                        variant="outline"
+                        disabled={searching}
+                        onclick={() =>
+                          mediaMode === 'shows' && !selectedSeason
+                            ? chooseSeries(item)
+                            : choose(item)}
+                        >{mediaMode === 'shows' && !selectedSeason
+                          ? 'Choose series'
+                          : 'Select source'}</Button
+                      ></Card.Footer
+                    ></Card.Root
+                  >{/each}
+              </div>
+            {/if}
           {/if}
         </div>
       {:else if currentStep === 2}

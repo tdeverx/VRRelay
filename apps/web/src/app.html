@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#06111b" />
+    <meta id="vrrelay-theme-color" name="theme-color" content="#06111b" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='none' stroke='%2333d6f1' stroke-width='2.5' stroke-linejoin='round' d='M6 4v24l20-12z'/%3E%3C/svg%3E"
@@ -16,6 +16,9 @@
           preference === 'dark' ||
           (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
         root.classList.toggle('dark', dark);
+        document
+          .getElementById('vrrelay-theme-color')
+          ?.setAttribute('content', dark ? '#06111b' : '#f7fafc');
       })();
     </script>
     %sveltekit.head%

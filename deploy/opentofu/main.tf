@@ -1,24 +1,24 @@
 locals {
   base_env = merge(
     {
-      VRRELAY_ENVIRONMENT         = "production"
-      VRRELAY_DATA_DIR            = "/data"
-      VRRELAY_CACHE_DIR           = "/cache"
-      VRRELAY_SECRET_BACKEND      = "encrypted-file"
-      VRRELAY_TRUSTED_PROXY_CIDRS = var.trusted_proxy_cidrs
-      VRRELAY_VIEWER_REGION_HEADER = "x-vrrelay-region"
-      VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT = "60s"
-      VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK = "30s"
+      VRRELAY_ENVIRONMENT                        = "production"
+      VRRELAY_DATA_DIR                           = "/data"
+      VRRELAY_CACHE_DIR                          = "/cache"
+      VRRELAY_SECRET_BACKEND                     = "encrypted-file"
+      VRRELAY_TRUSTED_PROXY_CIDRS                = var.trusted_proxy_cidrs
+      VRRELAY_VIEWER_REGION_HEADER               = "x-vrrelay-region"
+      VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT          = "60s"
+      VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK  = "30s"
       VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK = "60s"
-      VRRELAY_VOD_PRODUCER_MAX_CONCURRENT = "2"
-      VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER = "2"
-      VRRELAY_REPOSITORY_DRIVER   = "postgres"
-      VRRELAY_POSTGRES_URL        = var.postgres_url
-      VRRELAY_COORDINATION_DRIVER = "valkey"
-      VRRELAY_VALKEY_URL          = var.valkey_url
-      VRRELAY_MASTER_KEY          = var.master_key
-      VRRELAY_MEDIAMTX_READ_TOKEN = var.media_mtx_read_token
-      VRRELAY_OBJECT_STORE_PREFIX = lookup(var.object_store_env, "VRRELAY_OBJECT_STORE_PREFIX", "segments")
+      VRRELAY_VOD_PRODUCER_MAX_CONCURRENT        = "2"
+      VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER      = "2"
+      VRRELAY_REPOSITORY_DRIVER                  = "postgres"
+      VRRELAY_POSTGRES_URL                       = var.postgres_url
+      VRRELAY_COORDINATION_DRIVER                = "valkey"
+      VRRELAY_VALKEY_URL                         = var.valkey_url
+      VRRELAY_MASTER_KEY                         = var.master_key
+      VRRELAY_MEDIAMTX_READ_TOKEN                = var.media_mtx_read_token
+      VRRELAY_OBJECT_STORE_PREFIX                = lookup(var.object_store_env, "VRRELAY_OBJECT_STORE_PREFIX", "segments")
     },
     var.object_store_env,
     var.common_env

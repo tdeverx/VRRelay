@@ -123,7 +123,9 @@ describe('relay configuration', () => {
         VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '30s',
         VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK: '60s',
         VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '4',
-        VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '3'
+        VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '3',
+        VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT: '4',
+        VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER: '2'
       })
     ).toMatchObject({
       viewerRegionHeader: 'x-vrrelay-region',
@@ -131,7 +133,9 @@ describe('relay configuration', () => {
       vodProducerBufferLowWatermarkMs: 30_000,
       vodProducerBufferHighWatermarkMs: 60_000,
       vodProducerMaxConcurrent: 4,
-      vodProducerMaxPerProvider: 3
+      vodProducerMaxPerProvider: 3,
+      liveNormalizerMaxConcurrent: 4,
+      liveNormalizerMaxPerOwner: 2
     });
     expect(() => loadConfig({ VRRELAY_VIEWER_REGION_HEADER: 'invalid header' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '14s' })).toThrow();
@@ -139,6 +143,12 @@ describe('relay configuration', () => {
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '0' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '33' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '0' })).toThrow();
+    expect(() =>
+      loadConfig({
+        VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT: '1',
+        VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER: '2'
+      })
+    ).toThrow(/Per-owner live normalizer capacity/);
     expect(() =>
       loadConfig({
         VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '60s',

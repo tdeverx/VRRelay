@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NodeCapability, ProviderBinding, ProviderConnection } from '@vrrelay/domain';
 import type { NodeAgentOptions } from '../agent-transport.js';
 import { loadConfig } from '../config.js';
 import {
   advertisedIngestUrl,
   configuredNodeAgentOptions,
-  locallyAvailableProviderIds
+  locallyAvailableProviderIds,
+  startCriticalResourcesBeforeHttp
 } from './runtime.js';
 
 const capabilities = async (): Promise<NodeCapability> => ({
@@ -18,7 +19,8 @@ const capabilities = async (): Promise<NodeCapability> => ({
   cacheBytes: 0,
   cacheLimitBytes: 0,
   egressMbps: 0,
-  providerIds: []
+  providerIds: [],
+  vodProducerVersion: 0
 });
 
 describe('runtime public routing configuration', () => {
@@ -102,5 +104,31 @@ describe('local provider capability discovery', () => {
         }
       )
     ).resolves.toEqual(['legacy']);
+  });
+});
+
+describe('runtime startup ordering', () => {
+  it('starts every critical resource before exposing public HTTP', async () => {
+    const calls: string[] = [];
+    await startCriticalResourcesBeforeHttp(
+      [async () => void calls.push('media'), async () => void calls.push('agent')],
+      async () => void calls.push('http')
+    );
+    expect(calls).toEqual(['media', 'agent', 'http']);
+  });
+
+  it('does not expose public HTTP when a critical resource fails', async () => {
+    const expose = vi.fn(async () => undefined);
+    await expect(
+      startCriticalResourcesBeforeHttp(
+        [
+          async () => {
+            throw new Error('agent failed');
+          }
+        ],
+        expose
+      )
+    ).rejects.toThrow('agent failed');
+    expect(expose).not.toHaveBeenCalled();
   });
 });

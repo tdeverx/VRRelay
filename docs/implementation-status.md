@@ -1,11 +1,16 @@
 # Private-production v1 implementation status
 
-VRRelay is prerelease software. Its major private-production v1 implementation,
-repository reconciliation, and local automated closeout are complete, but the
-audited checkout is not yet a feature-complete public release candidate and
-must not be presented as a released or supported VRCDN replacement. The gaps
-below distinguish remaining product workflows from external release
-qualification.
+VRRelay is prerelease software. Its major private-production v1 implementation
+and repository reconciliation have an implementation checkpoint. The
+audit-remediation checkout has passed its unit, contract, static, production
+build, browser, distributed acceptance, standalone Compose, cluster Compose,
+local-cluster, clean production OCI, Helm, OpenTofu, Swift, and source-secret
+checks. The exact patched dependency lock passes clean npm 12 host and container
+installs plus online audit with zero vulnerabilities. The checkout is not yet a
+feature-complete public release candidate and must not be presented as a
+released or supported VRCDN replacement. The gaps below distinguish
+current-worktree verification, remaining product workflows, and external
+release qualification.
 
 The authoritative progress record is the
 [v1 completion ledger](v1-completion-ledger.md). A capability becomes a release
@@ -27,10 +32,9 @@ not release evidence by themselves.
 - Finite just-in-time HLS VOD, FFmpeg capability discovery, temporary segment
   caching, one fenced continuous producer per session, regional edge routing, durable producer
   recovery state, and MPEG-TS output as the intended production
-  default. fMP4, fragmented MP4, H.265, AV1, and other experimental paths are
-  not supported release claims. The single-producer guarantee covers HLS VOD
-  only; direct fragmented MP4 remains request-oriented and may open one
-  provider connection per request.
+  default. fMP4 HLS, H.265, AV1, and other experimental paths are not supported
+  release claims. Direct fragmented MP4 has been removed; every exposed VOD
+  method uses the admitted single-producer HLS path.
 - MediaMTX-backed RTMP, SRT, and WHIP ingest plus live HLS fan-out foundations.
 - Outbound mTLS agent transport, node enrollment, role metadata, PostgreSQL,
   Valkey, filesystem/S3-compatible/Azure/GCS adapters, and a distributed
@@ -50,9 +54,10 @@ complete.
 Phase 2 is complete. Its targeted SQLite/PostgreSQL evidence and full
 pinned-runtime repository gate are green.
 
-- Controller, source-worker, ingest-origin, edge, and standalone now dispatch
-  through distinct composition roots with explicit dependency graphs,
-  role-owned HTTP surfaces, schema-startup policy, and ordered shutdown tests.
+- Controller, source-worker, ingest-origin, edge, and standalone dispatch
+  through distinct injectable composition roots with role-owned HTTP surfaces,
+  schema-startup policy, and ordered shutdown behavior. The obsolete parallel
+  role-graph declaration and its self-referential test have been removed.
 - SQLite and PostgreSQL migrations now have immutable version/name/SHA-256
   metadata through v9. V4 adds live-channel revisions, v5 adds provider
   revisions/deletion state, v6 adds crash-safe binding deletion, and v7 adds
@@ -145,14 +150,13 @@ matrix and real-client verification are still pending.
 
 - New profile revisions now start as experiments. The create-profile path rejects
   manual verified state, low-latency delivery, RTSP, HTTP MPEG-TS, HLS event
-  playlists, mismatched HLS segment/container settings, invalid fragmented-MP4
-  shapes, and passthrough-policy profiles instead of accepting schema-only
+  playlists, direct fragmented MP4, mismatched HLS segment/container settings,
+  and passthrough-policy profiles instead of accepting schema-only
   combinations the runtime cannot serve.
 - The dashboard profile form now offers only implemented delivery shapes: HLS
-  with matching MPEG-TS or fMP4 segments, and direct fragmented MP4 with no
-  segment output.
+  with matching MPEG-TS or fMP4 segments.
 - H.265, AV1, copy codecs, hardware-specific encoders, tone mapping, subtitle
-  burn-in, fMP4/fragmented-MP4 concurrency, dual PC/Quest output claims, corrupt
+  burn-in, fMP4 concurrency, dual PC/Quest output claims, corrupt
   inputs, and real VRChat compatibility still require the retained Phase 9 and
   release-gate evidence. See
   [Phase 5 implementation evidence](evidence/phase-05-implementation.md).
@@ -205,11 +209,19 @@ edge-delivery and live-fan-out verification is still pending.
   having already removed the object.
 - Segment generation and object-store restore enforce the configured disk cache
   limit immediately while protecting the requested segment from same-request
-  eviction.
-- Edge live playback drops cached MediaMTX path configuration after failed HLS
+  eviction. Producer scratch is included in disk accounting, recovered scratch
+  is removed at startup, and each completed source segment is deleted after
+  publication instead of accumulating for the producer lifetime.
+- Grant-bearing VOD and live media is private and non-cacheable so revocation is
+  revalidated at VRRelay.
+- Edge live playback deletes MediaMTX path configuration after failed HLS
   upstream responses, reapplies the origin pull configuration, and retries the
-  current request once. Concurrent viewers share one path setup promise for the
-  active edge path instead of creating per-viewer setup operations.
+  current request once. Successful paths are deleted after bounded inactivity,
+  while concurrent viewers share one path setup promise.
+- Live channel creation is atomically bounded by installation and owner quotas.
+  Normalized channels enforce global and per-owner process limits, drain
+  bounded redacted stderr, apply exponential restart backoff, and stop through
+  bounded TERM-to-KILL escalation.
 - Focused application, adapter, backend, live-origin, and HTTP-boundary tests,
   format check, generated-contract and TypeScript checks, lint, package builds,
   and relay build passed. See
@@ -225,23 +237,35 @@ the complete administrator workflow set and realtime behavior remains pending.
   bodies; the remaining facade handles authentication, CSRF, normalized errors,
   and small domain-facing conveniences. Repository checks reject a return to
   literal API paths or the generated client's generic request method.
-- Session controls now expose stop/resume, pin/unpin, delete, detail/output
-  selection, and copy-link actions.
-- VOD creation previews placement, filters eligible source workers by provider
-  and encoder, supports preferred region or an exact locked worker, and shows
-  explicit rejection reasons. The server derives the durable lock from the
-  exact preferred-worker request.
+- Sessions expose the supported copy and revocation actions. Deletion has a
+  confirmation, pending state, and recoverable inline error; stale stop/resume,
+  pin, and output-selection claims have been removed.
+- Advanced VOD creation for administrator-managed provider connections previews
+  placement, filters eligible source workers by provider and encoder, supports
+  a preferred region or exact locked worker, and shows explicit rejection
+  reasons. Delegated Jellyfin users retain the catalog workflow backed by their
+  own session credential. Connections can explicitly create a delegated
+  endpoint or an administrator-managed stored user-token/API-key endpoint; the
+  server derives the durable lock from the exact preferred-worker request.
 - Navigation collapse now persists, mobile open/close and Escape behavior
   restore focus, and a skip link supports keyboard users.
-- The cluster dashboard node cache panel can target the local cache or a
-  connected source-worker/edge node for inventory and bulk eviction.
-- The dashboard sends `nodeId` only for selected remote cache targets, falls
-  back to local cache when the selected node disconnects or stops owning cache,
-  and now labels the workflow as node cache instead of edge-only cache.
-- Playwright setup/login/navigation and PAT create/revoke/logout workflows pass
-  across desktop and mobile Chromium with no captured page errors or
-  serious/critical Axe findings, and a dedicated CI job retains failure
-  artifacts. See
+- The jobs-and-cache page exposes controller-local cache inventory and confirmed
+  bulk eviction. Remote cache targeting is not currently a dashboard workflow.
+- Storage & routing exposes structured routing, metrics, and object-store
+  validation followed by confirmed activation. The form accepts existing secret
+  references, never raw secret values, and reports staged object-store restart
+  requirements.
+- Jobs expose bounded redacted log inspection, retry, and confirmed
+  cancellation. A revoked node can be removed through confirmation only after
+  its provider bindings are gone.
+- The production-build Playwright suite now covers theme and responsive
+  geometry, all administrator destinations, safe login returns, degraded
+  readiness, settings read-only behavior, PAT expiry and confirmed revocation,
+  mobile navigation close, persisted desktop collapse, complete advanced relay
+  creation and Sessions handoff, clipboard-denied partial success, role-aware
+  login, and confirmed Session deletion. It captures uncaught errors from every
+  opened page and retains failure artifacts. Fresh execution of this expanded
+  suite remains part of the final high pass. See
   [Phase 7 implementation evidence](evidence/phase-07-implementation.md).
 
 ## Phase 8 implementation checkpoint
@@ -251,11 +275,14 @@ metrics, log streaming, routing, benchmarking, and operations evidence is still
 pending.
 
 - `/api/v1/health` remains a lightweight unauthenticated liveness endpoint with
-  version, timestamp, and worker capacity.
+  version, timestamp, and worker capacity on every runtime role.
 - `/api/v1/ready` is now a separate unauthenticated readiness endpoint. It
-  checks the backend health aggregate, returns HTTP 503 when a dependency is
-  unhealthy or a staged backend change requires restart, and returns only
-  redacted category/kind/healthy/timestamp dependency fields.
+  checks the backend health aggregate on controller/standalone, the standalone
+  MediaMTX API, and the controller-agent and MediaMTX dependencies required by
+  each dedicated role.
+  It returns HTTP 503 when a dependency is unhealthy or a staged backend change
+  requires restart, and returns only redacted
+  category/kind/healthy/timestamp dependency fields.
 - The generated OpenAPI client includes the readiness operation and the route
   is covered by HTTP tests that verify status codes and redaction. See
   [Phase 8 implementation evidence](evidence/phase-08-implementation.md).
@@ -306,23 +333,36 @@ Phase 9 has an automated-verification checkpoint, not a completed exit gate.
 - Four route-level security tests cover setup/login cookies, CSRF, PAT
   scope/expiry/revocation, malformed and secret-bearing requests, and playback
   grant tampering/revocation/expiry.
-- Playwright desktop/mobile coverage and CI integration exercise two critical
-  administrator journeys, browser errors, and serious/critical accessibility
-  findings.
+- Playwright desktop/mobile coverage and CI integration exercise administrator
+  reachability and safety workflows, browser errors, and serious/critical
+  accessibility findings. On 2026-07-25 the expanded current suite passed 13
+  workflows with one intentional skip on desktop Chromium and independently
+  passed the same matrix on mobile Chromium.
 - Benchmark evidence can be retained atomically and enforced against request
   failures and target-comparable throughput/p95 baselines.
-- The focused provider, HTTP-security, and benchmark bundle passed 26 of 26
-  tests; the browser matrix passed four of four project cases. The complete
-  pinned Node `22.23.1` repository gate passed 395 tests with 23 intentional
-  skips, all checks and builds green, and zero npm vulnerabilities. See
+- At the 2026-07-16 checkpoint, the focused provider, HTTP-security, and
+  benchmark bundle passed 26 of 26 tests; the then-current browser matrix
+  passed four of four project cases; and the complete pinned Node `22.23.1`
+  repository gate passed 395 tests with 23 intentional skips, all checks and
+  builds green, and zero npm vulnerabilities. Those results do not verify the
+  current audit-remediation worktree. See
   [Phase 9 implementation evidence](evidence/phase-09-implementation.md).
+- On 2026-07-25 the current worktree passed 474 tests across 47 files, with 25
+  intentional skips and one skipped file. Formatting, generated contracts,
+  semantic contract checks, all typechecks and Svelte diagnostics, repository
+  and deployment guards, lint, production builds, and the expanded browser
+  matrix also passed. The distributed acceptance harness passed regional edge
+  routing, one fenced persistent VOD producer, cache reuse, failover, controller
+  recovery, cleanup, and live fan-out.
 
 ## Known gaps in the audited checkout
 
-- The clean pinned-runtime repository gate covers formatting, lint, workspace
-  and test-source typechecks, generated-client freshness, unit tests, builds,
-  browser smoke coverage, and the npm dependency audit. It does not substitute
-  for unfinished product workflows or target-environment release evidence.
+- The current repository gate covers formatting, lint, workspace and
+  test-source typechecks, generated-client freshness and semantics, unit tests,
+  builds, and browser workflows. The patched dependency graph is exact-lock
+  installable, the clean production OCI smoke passes, and the final online npm
+  audit reports zero vulnerabilities. This does not substitute for unfinished
+  product workflows or target-environment release evidence.
 - A real PostgreSQL `pg_dump`/restore drill has not yet been retained; unit-tested
   backup invocation is not a substitute for the Phase 9–11 recovery and
   deployment evidence.

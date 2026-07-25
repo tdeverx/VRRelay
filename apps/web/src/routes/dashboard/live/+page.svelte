@@ -6,7 +6,7 @@
   import { toast } from 'svelte-sonner';
   import type { ProfileRevision, PublicLiveChannel } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
@@ -30,6 +30,7 @@
   let pendingDelete = $state<PublicLiveChannel | null>(null);
   let pendingReplace = $state<PublicLiveChannel | null>(null);
   let newSecret = $state<Awaited<ReturnType<typeof api.createLiveChannel>> | null>(null);
+  let refreshInFlight = false;
 
   onMount(() => {
     void load();
@@ -47,7 +48,7 @@
         availableProfiles.items.filter((profile) => profile.delivery.playlistType === 'live')
       ];
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
+      if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       error = reason instanceof Error ? reason.message : 'Could not load live channels.';
     } finally {
       loading = false;
@@ -55,10 +56,14 @@
   }
 
   async function refresh() {
+    if (refreshInFlight) return;
+    refreshInFlight = true;
     try {
       channels = (await api.liveChannels()).items;
     } catch {
       /* Retain the last useful state. */
+    } finally {
+      refreshInFlight = false;
     }
   }
 
@@ -76,7 +81,16 @@
   }
 
   async function createPlayback(channel: PublicLiveChannel) {
-    const profile = profiles[0];
+    const profile =
+      profiles.find((candidate) => candidate.profileId === 'h264-live-hls') ??
+      profiles.find(
+        (candidate) =>
+          candidate.platform === 'universal' &&
+          candidate.delivery.method === 'hls' &&
+          candidate.delivery.container === 'mpegts' &&
+          candidate.delivery.segmentType === 'mpegts' &&
+          candidate.delivery.playlistType === 'live'
+      );
     if (!profile) return toast.error('No live profile is available.');
     try {
       await api.createLiveSession({
@@ -126,8 +140,29 @@
   }
 
   async function copy(value: string) {
-    await navigator.clipboard.writeText(value);
-    toast.success('Copied to clipboard.');
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success('Copied to clipboard.');
+    } catch {
+      toast.error('Clipboard access was denied. Select and copy the value manually.');
+    }
+  }
+
+  function publisherRows() {
+    if (!newSecret) return [];
+    const publisher = newSecret.publisher;
+    return [
+      { label: 'Publisher token', value: publisher.publishToken },
+      { label: 'RTMP URL', value: publisher.rtmpUrl },
+      { label: 'SRT URL', value: publisher.srtUrl },
+      { label: 'WHIP URL', value: publisher.whipUrl },
+      ...(publisher.backupRtmpUrl
+        ? [{ label: 'Backup RTMP URL', value: publisher.backupRtmpUrl }]
+        : []),
+      ...(publisher.backupSrtUrl
+        ? [{ label: 'Backup SRT URL', value: publisher.backupSrtUrl }]
+        : [])
+    ];
   }
 </script>
 
@@ -149,20 +184,20 @@
       <Alert.Title>Save these OBS connection details now</Alert.Title>
       <Alert.Description class="space-y-3">
         <p>The authenticated URLs and publisher token will not be shown again.</p>
-        <dl class="grid gap-2 text-xs md:grid-cols-2">
-          {#each [['Token', newSecret.publisher.publishToken], ['RTMP', newSecret.publisher.rtmpUrl], ['SRT', newSecret.publisher.srtUrl], ['WHIP', newSecret.publisher.whipUrl]] as row}
-            <div class="min-w-0">
-              <dt class="font-medium">{row[0]}</dt>
-              <dd class="truncate font-mono">{row[1]}</dd>
+        <dl class="grid gap-3">
+          {#each publisherRows() as row}
+            <div class="grid gap-2 rounded-md border p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div class="min-w-0">
+                <dt class="font-medium">{row.label}</dt>
+                <dd class="break-all font-mono text-xs">{row.value}</dd>
+              </div>
+              <Button variant="outline" size="sm" onclick={() => copy(row.value)}>
+                <Copy data-icon="inline-start" />Copy
+              </Button>
             </div>
           {/each}
         </dl>
       </Alert.Description>
-      <Alert.Action
-        ><Button variant="outline" size="sm" onclick={() => copy(newSecret!.publisher.rtmpUrl)}
-          ><Copy data-icon="inline-start" />Copy RTMP</Button
-        ></Alert.Action
-      >
     </Alert.Root>
   {/if}
 

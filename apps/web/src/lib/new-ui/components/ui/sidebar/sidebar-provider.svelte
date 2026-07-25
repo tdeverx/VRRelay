@@ -13,24 +13,33 @@
   let {
     ref = $bindable(null),
     open = $bindable(true),
+    openMobile = $bindable(false),
     onOpenChange = () => {},
+    onOpenMobileChange = () => {},
     class: className,
     style,
     children,
     ...restProps
   }: WithElementRef<HTMLAttributes<HTMLDivElement>> & {
     open?: boolean;
+    openMobile?: boolean;
     onOpenChange?: (open: boolean) => void;
+    onOpenMobileChange?: (open: boolean) => void;
   } = $props();
 
   const sidebar = setSidebar({
     open: () => open,
+    openMobile: () => openMobile,
     setOpen: (value: boolean) => {
       open = value;
       onOpenChange(value);
 
       // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${open}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+    },
+    setOpenMobile: (value: boolean) => {
+      openMobile = value;
+      onOpenMobileChange(value);
     }
   });
 </script>

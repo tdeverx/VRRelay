@@ -16,6 +16,7 @@
   import { Input } from '#lib/new-ui/components/ui/input';
   import * as Select from '#lib/new-ui/components/ui/select';
   import { Skeleton } from '#lib/new-ui/components/ui/skeleton';
+  import { loginRoute } from '#lib/new-ui/state.svelte';
 
   let username = $state('');
   let search = $state('');
@@ -38,8 +39,24 @@
   let loadingSeasons = $state(false);
   let loadingEpisodes = $state(false);
   let recovery = $state(false);
+  let createdUrl = $state('');
+  let createdOpen = $state(false);
   let searchRequestId = 0;
   let selectedSeason = $derived(seasons.find((season) => season.id === selectedSeasonId) ?? null);
+
+  function preferredVodProfile(items: ProfileRevision[]): ProfileRevision | undefined {
+    return (
+      items.find((profile) => profile.profileId === 'universal-h264-hls-vod') ??
+      items.find(
+        (profile) =>
+          profile.platform === 'universal' &&
+          profile.delivery.method === 'hls' &&
+          profile.delivery.container === 'mpegts' &&
+          profile.delivery.segmentType === 'mpegts' &&
+          profile.delivery.playlistType === 'vod'
+      )
+    );
+  }
 
   onMount(load);
 
@@ -57,14 +74,14 @@
       ]);
       const profileResult = await profileRequest;
       profiles = profileResult.items;
-      profileId = profileResult.defaultProfileId ?? profiles[0]?.profileId ?? '';
+      profileId = profileResult.defaultProfileId ?? preferredVodProfile(profiles)?.profileId ?? '';
       [continueWatching, upNext, recentlyAdded] = rowResults.map((result) =>
         result.status === 'fulfilled' ? result.value.items : []
       );
       if (rowResults.some((result) => result.status === 'rejected'))
         toast.warning('Some Jellyfin home rows could not be loaded. Search is still available.');
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto('/dashboard/login');
+      if (isAuthenticatedError(reason)) return goto(loginRoute(location.pathname));
       toast.error(reason instanceof Error ? reason.message : 'Could not load your home page.');
     } finally {
       loadingRows = false;
@@ -155,8 +172,14 @@
         placementPolicy: 'local'
       });
       selectionOpen = false;
-      await copy(session.outputUrls.primary);
-      toast.success('Relay link created and copied.');
+      createdUrl = session.outputUrls.primary;
+      createdOpen = true;
+      try {
+        await copy(createdUrl);
+        toast.success('Relay link created and copied.');
+      } catch {
+        toast.warning('Relay link created. Copy it from the open dialog.');
+      }
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not create a relay link.');
     } finally {
@@ -166,6 +189,15 @@
 
   async function copy(value: string) {
     await navigator.clipboard.writeText(value);
+  }
+
+  async function copyCreatedUrl() {
+    try {
+      await copy(createdUrl);
+      toast.success('Relay link copied.');
+    } catch {
+      toast.error('Clipboard access was denied. Select and copy the URL manually.');
+    }
   }
 </script>
 
@@ -408,5 +440,24 @@
         {/if}
       {/if}
     {/if}
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={createdOpen}>
+  <Dialog.Content>
+    <Dialog.Header>
+      <Dialog.Title>Relay link created</Dialog.Title>
+      <Dialog.Description>
+        The session is saved even if your browser blocks clipboard access.
+      </Dialog.Description>
+    </Dialog.Header>
+    <Field.Field>
+      <Field.Label for="created-relay-url">Playback URL</Field.Label>
+      <Input id="created-relay-url" value={createdUrl} readonly />
+    </Field.Field>
+    <Dialog.Footer>
+      <Button variant="outline" href="/dashboard/sessions">View sessions</Button>
+      <Button onclick={copyCreatedUrl}><Link2 />Copy URL</Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

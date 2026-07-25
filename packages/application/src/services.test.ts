@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { PassThrough, Readable, Writable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
@@ -27,6 +27,13 @@ import { LiveService, ProfileService, ProviderService, SessionService } from './
 
 const dirs: string[] = [];
 const repositories: SqliteRepository[] = [];
+const mediaCapabilities = {
+  ffmpegVersion: 'test',
+  encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
+  muxers: ['hls', 'mpegts'],
+  filters: [],
+  pixelFormats: ['yuv420p']
+};
 
 function trackRepository<T extends SqliteRepository>(repository: T): T {
   repositories.push(repository);
@@ -76,6 +83,7 @@ class CapturingLiveNormalizer implements LiveNormalizer {
 
   async start(
     channelId: string,
+    _ownerId: string | undefined,
     sourceUrl: string,
     destinationUrl: string,
     profile: ProfileRevision
@@ -225,7 +233,8 @@ function sourceWorkerNode(id: string): ClusterNode {
       cacheBytes: 0,
       cacheLimitBytes: null,
       egressMbps: 0,
-      providerIds: []
+      providerIds: [],
+      vodProducerVersion: 1
     },
     weight: 100,
     lastHeartbeatAt: now,
@@ -371,34 +380,17 @@ function profileInput(overrides: ProfileInputOverrides = {}): CreateProfileRevis
 }
 
 describe('profile lifecycle', () => {
-  it('accepts implemented HLS and fragmented MP4 profile shapes', async () => {
+  it('accepts implemented HLS profile shapes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-implemented-'));
     dirs.push(dir);
     const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
-    const service = new ProfileService(repo);
+    const service = new ProfileService(repo, mediaCapabilities);
 
     await expect(service.createRevision(profileInput())).resolves.toMatchObject({
       profileId: expect.any(String),
       revision: 1,
       delivery: { method: 'hls', container: 'mpegts', segmentType: 'mpegts' }
-    });
-    await expect(
-      service.createRevision(
-        profileInput({
-          profileId: 'fragmented-profile',
-          delivery: {
-            method: 'fragmented_mp4',
-            container: 'mp4',
-            segmentType: 'none',
-            playlistType: 'vod'
-          }
-        })
-      )
-    ).resolves.toMatchObject({
-      profileId: 'fragmented-profile',
-      revision: 1,
-      delivery: { method: 'fragmented_mp4', container: 'mp4', segmentType: 'none' }
     });
   });
 
@@ -414,9 +406,16 @@ describe('profile lifecycle', () => {
       /matching MPEG-TS or fMP4/
     ],
     [
-      'mismatched fragmented MP4 shape',
-      { delivery: { method: 'fragmented_mp4', container: 'fmp4', segmentType: 'fmp4' } },
-      /Fragmented MP4 profiles/
+      'direct fragmented MP4 delivery',
+      {
+        delivery: {
+          method: 'fragmented_mp4',
+          container: 'mp4',
+          segmentType: 'none',
+          playlistType: 'vod'
+        }
+      } as unknown as ProfileInputOverrides,
+      /Direct fragmented MP4/
     ],
     [
       'schema-only passthrough policy',
@@ -430,7 +429,28 @@ describe('profile lifecycle', () => {
       dirs.push(dir);
       const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
       await repo.migrate();
-      const service = new ProfileService(repo);
+      const service = new ProfileService(repo, mediaCapabilities);
+
+      await expect(service.createRevision(profileInput(overrides))).rejects.toThrow(expected);
+      await expect(repo.listProfiles()).resolves.toEqual([]);
+    }
+  );
+
+  it.each([
+    [
+      'encoder',
+      { video: { encoder: 'h264_nvenc', hardwareMode: 'nvenc' } },
+      /video encoder is not available/
+    ],
+    ['pixel format', { video: { pixelFormat: 'yuv444p' } }, /pixel format is not available/]
+  ] as Array<[string, ProfileInputOverrides, RegExp]>)(
+    'rejects a profile whose %s was not discovered',
+    async (_name, overrides, expected) => {
+      const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-capability-'));
+      dirs.push(dir);
+      const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+      await repo.migrate();
+      const service = new ProfileService(repo, mediaCapabilities);
 
       await expect(service.createRevision(profileInput(overrides))).rejects.toThrow(expected);
       await expect(repo.listProfiles()).resolves.toEqual([]);
@@ -496,8 +516,7 @@ describe('VOD relay service', () => {
             filters: [],
             pixelFormats: []
           }),
-          generateSegment: async () => {},
-          streamFragmentedMp4: async () => {}
+          generateSegment: async () => {}
         },
         new InMemoryEventBus(),
         {
@@ -581,7 +600,7 @@ describe('VOD relay service', () => {
     };
     const registry = new DefaultProviderRegistry();
     registry.register(languageProvider);
-    const profiles = new ProfileService(repo);
+    const profiles = new ProfileService(repo, mediaCapabilities);
     const selectedProfile = await profiles.createRevision(
       profileInput({
         profileId: 'language-profile',
@@ -600,8 +619,7 @@ describe('VOD relay service', () => {
           filters: [],
           pixelFormats: []
         }),
-        generateSegment: async () => {},
-        streamFragmentedMp4: async () => {}
+        generateSegment: async () => {}
       },
       new InMemoryEventBus(),
       {
@@ -672,11 +690,8 @@ describe('VOD relay service', () => {
     };
     const registry = new DefaultProviderRegistry();
     registry.register(sourceProvider);
-    const selectedProfile = await new ProfileService(repo).createRevision(
-      profileInput({
-        profileId: 'source-stats-profile',
-        delivery: { method: 'fragmented_mp4', container: 'mp4', segmentType: 'none' }
-      })
+    const selectedProfile = await new ProfileService(repo, mediaCapabilities).createRevision(
+      profileInput({ profileId: 'source-stats-profile' })
     );
     let service!: SessionService;
     const transcoder: Transcoder = {
@@ -687,19 +702,15 @@ describe('VOD relay service', () => {
         filters: [],
         pixelFormats: []
       }),
-      generateSegment: async () => {},
-      streamFragmentedMp4: async (source, _profile, output) => {
-        const grantToken = source.url.split('/internal/source/')[1];
+      generateSegment: async (request, destination) => {
+        const grantToken = request.source.url.split('/internal/source/')[1];
         if (!grantToken) throw new Error('Missing source grant');
         const response = await service.openSourceProxy(grantToken);
-        await new Promise<void>((resolve, reject) => {
-          response.stream.on('data', (chunk) => output.write(chunk));
-          response.stream.once('end', () => {
-            output.end();
-            resolve();
-          });
-          response.stream.once('error', reject);
-        });
+        const chunks: Buffer[] = [];
+        for await (const chunk of response.stream)
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        await mkdir(dirname(destination), { recursive: true });
+        await writeFile(destination, Buffer.concat(chunks));
       }
     };
     service = new SessionService(repo, secrets, registry, transcoder, new InMemoryEventBus(), {
@@ -722,12 +733,77 @@ describe('VOD relay service', () => {
       playbackTtlSeconds: null
     });
     const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
-    const output = new Writable({ write: (_chunk, _encoding, callback) => callback() });
-    await service.streamFragmentedMp4(token, output);
+    await service.segment(token, 0);
     await expect(service.runtimeStats(session)).resolves.toMatchObject({
       sourceConnectionCount: 0,
       sourceRequestsLast30s: 1
     });
+  });
+
+  it('falls back to one-segment generation when persistent VOD production is unavailable', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-producer-fallback-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'p-producer-fallback',
+      type: 'jellyfin',
+      name: 'Fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'producer-fallback-secret',
+      capabilities: ['search', 'direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const secrets = new MemorySecretStore();
+    await secrets.put('producer-fallback-secret', 'token');
+    const registry = new DefaultProviderRegistry();
+    registry.register(provider);
+    const selectedProfile = await new ProfileService(repo, mediaCapabilities).createRevision(
+      profileInput({ profileId: 'producer-fallback-profile' })
+    );
+    const service = new SessionService(
+      repo,
+      secrets,
+      registry,
+      {
+        discover: async () => mediaCapabilities,
+        generateSegment: async (_request, destination) => {
+          await mkdir(dirname(destination), { recursive: true });
+          await writeFile(destination, 'fallback-segment');
+        }
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 1_000,
+        maxWorkers: 1
+      },
+      {
+        objectStore: new MutableMemoryObjectStore(),
+        coordination: new MemoryCoordinationStore(),
+        clusterRepository: repo
+      }
+    );
+    const session = await service.create({
+      kind: 'vod',
+      source: { providerId: 'p-producer-fallback', itemId: 'movie' },
+      profileId: selectedProfile.profileId,
+      profileRevision: selectedProfile.revision,
+      platformMode: 'universal',
+      pinned: false,
+      reportActivity: false,
+      placementPolicy: 'local',
+      placementLocked: false,
+      playbackTtlSeconds: null
+    });
+    const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
+    await expect(service.segment(token, 0)).resolves.toMatch(/0\.ts$/);
   });
 
   it('keeps concurrent source ranges alive until their own request or producer signal ends', async () => {
@@ -764,14 +840,10 @@ describe('VOD relay service', () => {
     };
     const registry = new DefaultProviderRegistry();
     registry.register(sourceProvider);
-    const selectedProfile = await new ProfileService(repo).createRevision(
-      profileInput({
-        profileId: 'source-ranges-profile',
-        delivery: { method: 'fragmented_mp4', container: 'mp4', segmentType: 'none' }
-      })
+    const selectedProfile = await new ProfileService(repo, mediaCapabilities).createRevision(
+      profileInput({ profileId: 'source-ranges-profile' })
     );
     let service!: SessionService;
-    let nextRange = 0;
     const transcoder: Transcoder = {
       discover: async () => ({
         ffmpegVersion: 'test',
@@ -780,24 +852,20 @@ describe('VOD relay service', () => {
         filters: [],
         pixelFormats: []
       }),
-      generateSegment: async () => {},
-      streamFragmentedMp4: async (source, _profile, output, signal) => {
-        const grantToken = source.url.split('/internal/source/')[1];
+      generateSegment: async (request, destination, signal) => {
+        const grantToken = request.source.url.split('/internal/source/')[1];
         if (!grantToken) throw new Error('Missing source grant');
         const response = await service.openSourceProxy(
           grantToken,
-          `bytes=${nextRange++ * 10}-`,
+          `bytes=${request.segmentIndex * 10}-`,
           signal
         );
         expect(response.sourceRequestId).toMatch(/^[0-9a-f-]{36}$/);
-        await new Promise<void>((resolve, reject) => {
-          response.stream.on('data', (chunk) => output.write(chunk));
-          response.stream.once('end', () => {
-            output.end();
-            resolve();
-          });
-          response.stream.once('error', reject);
-        });
+        const chunks: Buffer[] = [];
+        for await (const chunk of response.stream)
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        await mkdir(dirname(destination), { recursive: true });
+        await writeFile(destination, Buffer.concat(chunks));
       }
     };
     service = new SessionService(repo, secrets, registry, transcoder, new InMemoryEventBus(), {
@@ -820,12 +888,10 @@ describe('VOD relay service', () => {
       playbackTtlSeconds: null
     });
     const token = session.outputUrls.primary!.split('/play/')[1]!.split('/')[0]!;
-    const firstOutput = new Writable({ write: (_chunk, _encoding, callback) => callback() });
-    const secondOutput = new Writable({ write: (_chunk, _encoding, callback) => callback() });
-    const first = service.streamFragmentedMp4(token, firstOutput, new AbortController().signal);
+    const first = service.segment(token, 0, new AbortController().signal);
     for (let attempt = 0; attempt < 100 && streams.length < 1; attempt += 1)
       await new Promise((resolve) => setTimeout(resolve, 5));
-    const second = service.streamFragmentedMp4(token, secondOutput, new AbortController().signal);
+    const second = service.segment(token, 1, new AbortController().signal);
     for (let attempt = 0; attempt < 100 && streams.length < 2; attempt += 1)
       await new Promise((resolve) => setTimeout(resolve, 5));
     expect(streams).toHaveLength(2);
@@ -901,10 +967,9 @@ describe('VOD relay service', () => {
         await new Promise((r) => setTimeout(r, 20));
         await mkdir(dirname(destination), { recursive: true });
         await writeFile(destination, 'segment');
-      },
-      streamFragmentedMp4: async () => {}
+      }
     };
-    const profileService = new ProfileService(repo);
+    const profileService = new ProfileService(repo, mediaCapabilities);
     await profileService.seed({
       ffmpegVersion: 'test',
       encoders: [{ name: 'libx264', codec: 'h264', hardware: false, available: true }],
@@ -1151,8 +1216,7 @@ describe('VOD relay service', () => {
           generated += 1;
           await mkdir(dirname(destination), { recursive: true });
           await writeFile(destination, 'segment');
-        },
-        streamFragmentedMp4: async () => {}
+        }
       },
       new InMemoryEventBus(),
       {
@@ -1255,8 +1319,7 @@ describe('VOD relay service', () => {
         generateSegment: async (_request, destination) => {
           await mkdir(dirname(destination), { recursive: true });
           await writeFile(destination, 'segment');
-        },
-        streamFragmentedMp4: async () => {}
+        }
       },
       new InMemoryEventBus(),
       {
@@ -1322,8 +1385,7 @@ describe('VOD relay service', () => {
         filters: [],
         pixelFormats: []
       }),
-      generateSegment: async () => {},
-      streamFragmentedMp4: async () => {}
+      generateSegment: async () => {}
     };
     const profileService = new ProfileService(repo);
     await profileService.seed({
@@ -1403,6 +1465,16 @@ describe('VOD relay service', () => {
 
     expect(edgeToken).toMatch(/^eg1\./);
     expect(edgeToken).not.toContain(controllerToken);
+    await expect(edgeA.touchViewer(controllerToken, 'viewer-raw')).rejects.toThrow(
+      'edge-scoped playback link is required'
+    );
+    const [controllerIdentity, edgeAIdentity, edgeBIdentity] = await Promise.all([
+      controller.viewerIdentity('192.0.2.40', 'viewer-agent'),
+      edgeA.viewerIdentity('192.0.2.40', 'viewer-agent'),
+      edgeB.viewerIdentity('192.0.2.40', 'viewer-agent')
+    ]);
+    expect(controllerIdentity).toBe(edgeAIdentity);
+    expect(controllerIdentity).toBe(edgeBIdentity);
     await expect(edgeA.touchViewer(edgeToken, 'viewer-a')).resolves.toMatchObject({
       id: session.id
     });
@@ -1678,6 +1750,33 @@ describe('provider lifecycle', () => {
 });
 
 describe('Live relay service', () => {
+  it('enforces installation and per-owner live-channel quotas', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-capacity-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new LiveService(repo, {
+      publicUrl: 'https://relay.example',
+      rtmpUrl: 'rtmp://ingest.example/live',
+      srtUrl: 'srt://ingest.example:8890',
+      whipUrl: 'https://ingest.example',
+      hlsUrl: 'https://edge.example',
+      internalRtspUrl: 'rtsp://mediamtx:8554',
+      maxChannelsTotal: 2,
+      maxChannelsPerOwner: 1
+    });
+
+    await service.create({ name: 'Owner A', normalize: true }, { ownerId: 'owner-a' });
+    await expect(
+      service.create({ name: 'Owner A second', normalize: true }, { ownerId: 'owner-a' })
+    ).rejects.toThrow('user has reached the live-channel limit');
+    await service.create({ name: 'Owner B', normalize: true }, { ownerId: 'owner-b' });
+    await expect(
+      service.create({ name: 'Owner C', normalize: true }, { ownerId: 'owner-c' })
+    ).rejects.toThrow('installation has reached its live-channel limit');
+    await expect(repo.listLiveChannels()).resolves.toHaveLength(2);
+  });
+
   it('returns publisher credentials once without persisting them in connection URLs', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-live-'));
     dirs.push(dir);
@@ -1862,8 +1961,7 @@ describe('Live relay service', () => {
           filters: [],
           pixelFormats: []
         }),
-        generateSegment: async () => {},
-        streamFragmentedMp4: async () => {}
+        generateSegment: async () => {}
       },
       new InMemoryEventBus(),
       {
@@ -2064,7 +2162,8 @@ describe('Live relay service', () => {
         cacheBytes: 0,
         cacheLimitBytes: null,
         egressMbps: 0,
-        providerIds: []
+        providerIds: [],
+        vodProducerVersion: 0
       },
       weight: 100,
       lastHeartbeatAt: now,
@@ -2163,8 +2262,7 @@ describe('Live relay service', () => {
           filters: [],
           pixelFormats: []
         }),
-        generateSegment: async () => {},
-        streamFragmentedMp4: async () => {}
+        generateSegment: async () => {}
       },
       new InMemoryEventBus(),
       {
@@ -2222,7 +2320,7 @@ describe('Live relay service', () => {
     dirs.push(dir);
     const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
-    const profileService = new ProfileService(repo);
+    const profileService = new ProfileService(repo, mediaCapabilities);
     const firstProfile = await profileService.createRevision(
       profileInput({ profileId: 'live-a', delivery: { playlistType: 'live' } })
     );
@@ -2254,8 +2352,7 @@ describe('Live relay service', () => {
           filters: [],
           pixelFormats: []
         }),
-        generateSegment: async () => {},
-        streamFragmentedMp4: async () => {}
+        generateSegment: async () => {}
       },
       new InMemoryEventBus(),
       {
@@ -2484,8 +2581,7 @@ describe('provider failover bindings', () => {
         generateSegment: async (_request, destination) => {
           await mkdir(dirname(destination), { recursive: true });
           await writeFile(destination, 'segment');
-        },
-        streamFragmentedMp4: async () => {}
+        }
       },
       new InMemoryEventBus(),
       {
@@ -2770,8 +2866,7 @@ describe('crash recovery', () => {
           filters: [],
           pixelFormats: []
         }),
-        generateSegment: async () => {},
-        streamFragmentedMp4: async () => {}
+        generateSegment: async () => {}
       },
       new InMemoryEventBus(),
       {

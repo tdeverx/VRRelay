@@ -75,6 +75,16 @@ for (const [source, text, message] of [
     'checksum/runtime-secrets',
     'runtime template must roll pods on operator-supplied Secret checksum changes'
   ],
+  [
+    runtime,
+    'readinessProbe: { httpGet: { path: /api/v1/ready, port: http }',
+    'runtime readiness probes must use dependency-aware readiness'
+  ],
+  [
+    runtime,
+    'livenessProbe: { httpGet: { path: /api/v1/health, port: http }',
+    'runtime liveness probes must use lightweight health'
+  ],
   [runtime, 'ipBlock:', 'runtime template must render explicit network-policy egress ipBlocks'],
   [
     runtime,

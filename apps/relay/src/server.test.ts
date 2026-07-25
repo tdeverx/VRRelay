@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -32,6 +33,7 @@ import {
   placementNodeConnectivity,
   providerBindingDeletionAuditContext,
   redactRequestUrl,
+  refreshStandalonePlacementCapabilities,
   rotateNodeCertificateWithDelivery,
   setNodeDrainWithDelivery,
   shouldRateLimitRequest,
@@ -57,6 +59,14 @@ const inertServerServices = {
   audit: {},
   backends: {}
 } as ServerServices;
+
+function testViewerIdentity(ip: string, userAgent: string | undefined): string {
+  return createHash('sha256')
+    .update(ip)
+    .update('\0')
+    .update(userAgent ?? 'unknown')
+    .digest('hex');
+}
 
 afterEach(async () =>
   Promise.all(
@@ -88,7 +98,8 @@ async function bindingCleanupFixture() {
       cacheBytes: 0,
       cacheLimitBytes: null,
       egressMbps: 0,
-      providerIds: ['provider-binding-api']
+      providerIds: ['provider-binding-api'],
+      vodProducerVersion: 1
     },
     weight: 100,
     lastHeartbeatAt: now,
@@ -201,6 +212,18 @@ describe('control-plane HTTP surface matrix', () => {
     expect(placementNodeConnectivity('controller', 'local-node')).toBeUndefined();
   });
 
+  it('refreshes provider placement capabilities synchronously only for standalone', async () => {
+    let refreshes = 0;
+    const refresh = async () => {
+      refreshes += 1;
+    };
+
+    await refreshStandalonePlacementCapabilities('standalone', refresh);
+    await refreshStandalonePlacementCapabilities('controller', refresh);
+
+    expect(refreshes).toBe(1);
+  });
+
   it.each([
     {
       surface: 'controller',
@@ -288,12 +311,33 @@ describe('control-plane HTTP surface matrix', () => {
     expect(isInternalPeer('203.0.113.10')).toBe(false);
   });
 
-  it('rate limits APIs and media paths without charging dashboard assets', () => {
+  it('rate limits control-plane paths without charging grant-authenticated media or assets', () => {
     expect(shouldRateLimitRequest('/api/v1/sessions?limit=20')).toBe(true);
     expect(shouldRateLimitRequest('/internal/agent')).toBe(true);
-    expect(shouldRateLimitRequest('/play/session/index.m3u8')).toBe(true);
+    expect(shouldRateLimitRequest('/play/session/index.m3u8')).toBe(false);
     expect(shouldRateLimitRequest('/')).toBe(false);
     expect(shouldRateLimitRequest('/_app/immutable/chunks/app.js')).toBe(false);
+  });
+
+  it('preserves framework rate-limit responses instead of reporting internal failures', async () => {
+    const app = await createServer(
+      loadConfig({ VRRELAY_LOG_LEVEL: 'fatal' }),
+      {
+        ...inertServerServices,
+        sessions: { capacity: () => ({ active: 0, limit: 1, queued: 0 }) }
+      } as ServerServices,
+      'standalone'
+    );
+    let response;
+    for (let index = 0; index <= 240; index += 1) {
+      response = await app.inject({ method: 'GET', url: `/api/v1/health?request=${index}` });
+    }
+
+    expect(response?.statusCode).toBe(429);
+    expect(response?.json()).toMatchObject({
+      error: { code: 'rate_limited', message: 'Too many requests' }
+    });
+    await app.close();
   });
 
   it('reports redacted dependency-aware readiness separately from liveness', async () => {
@@ -351,7 +395,15 @@ describe('control-plane HTTP surface matrix', () => {
             }
           ]
         })
-      }
+      },
+      readiness: async () => [
+        {
+          category: 'routing',
+          kind: 'mediamtx',
+          healthy: false,
+          checkedAt
+        }
+      ]
     } as unknown as ServerServices);
 
     const response = await app.inject({ method: 'GET', url: '/api/v1/ready' });
@@ -359,7 +411,10 @@ describe('control-plane HTTP surface matrix', () => {
     expect(response.json()).toMatchObject({
       status: 'degraded',
       restartRequired: true,
-      dependencies: [{ category: 'coordination', kind: 'valkey', healthy: false, checkedAt }]
+      dependencies: [
+        { category: 'coordination', kind: 'valkey', healthy: false, checkedAt },
+        { category: 'routing', kind: 'mediamtx', healthy: false, checkedAt }
+      ]
     });
     expect(response.payload).not.toContain('secret-hostname');
     await app.close();
@@ -372,6 +427,8 @@ describe('control-plane HTTP surface matrix', () => {
       {
         ...inertServerServices,
         sessions: {
+          viewerIdentity: async (ip: string, userAgent: string | undefined) =>
+            testViewerIdentity(ip, userAgent),
           touchViewer: async () => ({ id: 'session-1', preferredRegion: undefined }),
           manifest: async () => {
             manifestCalls += 1;
@@ -398,6 +455,8 @@ describe('control-plane HTTP surface matrix', () => {
       {
         ...inertServerServices,
         sessions: {
+          viewerIdentity: async (ip: string, userAgent: string | undefined) =>
+            testViewerIdentity(ip, userAgent),
           touchViewer: async () => ({ id: 'session-1', preferredRegion: 'eu-west' }),
           createEdgePlaybackGrant: async (token: string, edgeNodeId: string) => {
             calls.push({ token, edgeNodeId });
@@ -438,6 +497,8 @@ describe('control-plane HTTP surface matrix', () => {
       {
         ...inertServerServices,
         sessions: {
+          viewerIdentity: async (ip: string, userAgent: string | undefined) =>
+            testViewerIdentity(ip, userAgent),
           touchViewer: async (_token: string, identity: string) => {
             identities.push(identity);
             return { id: `session-${identities.length}`, preferredRegion: undefined };
@@ -528,7 +589,8 @@ describe('production node enrollment transport', () => {
         cacheBytes: 0,
         cacheLimitBytes: 0,
         egressMbps: 0,
-        providerIds: []
+        providerIds: [],
+        vodProducerVersion: 0
       },
       weight: 100,
       lastHeartbeatAt: now,

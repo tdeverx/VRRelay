@@ -6,6 +6,45 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Bound the standalone Compose administration port to loopback by default so
+  the localhost first-run policy cannot expose owner setup to LAN clients.
+  Standalone VOD placement now refreshes local provider capabilities
+  synchronously, eliminating the transient `preferred-node-unavailable`
+  response immediately after creating a provider.
+- Remediated the repository-wide production-readiness audit: owner demotion is now one transactional
+  set invariant; producer reservations and scratch storage are released and accounted; grant-bearing
+  media is non-cacheable; direct fragmented MP4 was removed; live channels and normalizers have
+  global and per-owner quotas plus restart supervision; Kubernetes readiness targets dependency
+  readiness; edge grants,
+  viewer affinity, media validation, outbound timeouts, startup rollback, aggregate shutdown, and
+  media-aware rate limiting now enforce their intended boundaries. Dedicated roles expose
+  dependency-aware readiness and bind public HTTP only after their critical local resources start;
+  stale live edge paths are deleted from MediaMTX and later recreated on demand. Dashboard
+  creation, diagnostics, mobile navigation, one-time credentials, destructive actions, token
+  expiry, advanced relay handoff, status styling, typography, and route titles were made
+  failure-safe and reachable. Connections can now explicitly create either delegated sign-in
+  endpoints or administrator-managed user-token/API-key endpoints needed by the advanced placement
+  workflow. Jobs expose bounded logs plus confirmed cancellation, and revoked binding-free node
+  records can be removed through a dedicated confirmation.
+- Clarified the unified sign-in form so the local recovery-owner path and its
+  Argon2id verification are explicit without misrepresenting the recovery
+  password as an unpersisted provider credential. Contract checks now include
+  PUT, dedicated role routes, and core OpenAPI/domain semantics.
+- Hardened the final distributed-runtime boundaries found by acceptance
+  testing. Signed edge grants are bounded at the router, dedicated roles finish
+  enrollment and use the durable enrolled node identity before composing
+  node-scoped services, controller disconnects abort every command accepted on
+  that transport link, and session deletion resolves the current durable
+  producer owner before requesting cleanup. The acceptance fixture now measures
+  source overlap at connection open, accounts actual scratch-file bytes rather
+  than directory metadata, restores drained edges before live fan-out, and
+  emits redacted per-worker cleanup diagnostics.
+- Pinned patched transitive releases for `fast-uri`, `fast-xml-parser`,
+  `@nodable/entities`, `brace-expansion`, `js-yaml`, and `find-my-way`, and
+  upgraded `@fastify/static` to its patched release. Clean npm 12 installs
+  accept the exact lockfile, the full repository gate and online audit report
+  zero vulnerabilities, and the production OCI, standalone Compose, cluster
+  Compose, and local multi-process cluster smoke tests pass.
 - Stabilized persistent HLS VOD after seeks. Producers no longer make an initial FFmpeg read-rate
   burst that stalls at the throttle boundary; demand selection now uses the active playback window
   rather than the deliberately buffered encoded head; individual client disconnects no longer cancel
@@ -62,8 +101,8 @@ semantic versioning after the first public release.
   switches playback windows only for dominant seeks or quiet demand. Added explicit producer agent
   commands/capabilities, in-memory signed-in-user credential transfer, idle shutdown, drain/failover
   fencing, redacted producer APIs, and dashboard status. The UI and documentation now call out that
-  this single-producer guarantee covers HLS VOD only; direct fragmented MP4 remains experimental
-  and request-oriented. Producer and segment lease cleanup now fails safely during a temporary
+  this single-producer guarantee covers HLS VOD only; direct fragmented MP4 has since been removed.
+  Producer and segment lease cleanup now fails safely during a temporary
   Valkey outage so workers survive coordination-backend restarts and reconnect normally.
 - Added trusted-proxy regional edge selection with stable session affinity, viewer-region → session
   preferred-region → any-edge fallback, edge-scoped grants per manifest, runtime/UI/deployment
@@ -322,10 +361,10 @@ retained evidence belong in the
   functions, leaving only auth, CSRF, normalized errors, and domain-facing
   conveniences in the handwritten facade; guard against reintroducing literal
   API paths or generic generated-client requests.
-- Add session stop/resume, pin/unpin, delete, details/output, and copy-link
-  controls; placement preview with preferred region or exact locked worker;
-  persisted navigation collapse; skip navigation; and mobile focus/Escape
-  behavior.
+- Expose copy and confirmed revocation as the current Sessions actions; link the
+  advanced relay workflow with placement preview, preferred region or exact
+  locked worker, and a completed-session handoff; persist navigation collapse;
+  and provide skip navigation plus mobile focus/Escape behavior.
 - Preserve live-session kind across stop/resume, block stopped-session playback
   until resume, and exclude disconnected workers from placement preview and
   creation while preserving standalone placement.
@@ -359,7 +398,8 @@ retained evidence belong in the
   segment-job attempts as failed before requeueing them for recovery.
 - Reject profile revisions that select delivery, passthrough, or compatibility
   states the runtime cannot currently serve, and narrow the profile form to
-  implemented HLS and fragmented-MP4 delivery shapes.
+  implemented MPEG-TS and fMP4 HLS delivery shapes. Direct fragmented-MP4
+  streaming was subsequently removed during audit remediation.
 - Route controller-generated VOD and live playlists to edges with signed,
   session-scoped edge playback grants, so public edge URLs no longer reuse the
   administrator-facing controller token and session revocation invalidates
@@ -374,8 +414,9 @@ retained evidence belong in the
 - Allow cache inventory and eviction requests to target a connected cluster
   node through strict agent envelopes, while failing closed for disconnected
   node targets.
-- Let the cluster dashboard target local or connected source/edge node caches
-  for inventory refreshes and bulk temporary-object eviction.
+- Keep node-targeted cache inventory and eviction available through the
+  authenticated cluster API while presenting the current dashboard's
+  controller-local cache scope explicitly.
 - Invalidate corrupt object-store segment restores and refill them through the
   normal generation/origin path instead of failing playback on stale completed
   job state.
@@ -387,8 +428,8 @@ retained evidence belong in the
   restores while protecting the segment currently being served.
 - Reconfigure and retry live edge origin pull paths once after failed HLS
   upstream responses instead of keeping stale MediaMTX path state pinned
-  indefinitely, while coalescing concurrent viewer setup onto one edge path
-  operation.
+  indefinitely, evict successful paths after bounded inactivity, and coalesce
+  concurrent viewer setup onto one edge path operation.
 - Drive normalized live ingest from the selected immutable live profile and
   reject conflicting normalized profiles for the same live channel.
 - Claim live publisher slots during MediaMTX publish authorization so duplicate

@@ -13,7 +13,8 @@ import type {
   ProviderBinding,
   ProviderConnection,
   RelaySession,
-  SegmentJob
+  SegmentJob,
+  UserIdentity
 } from '@vrrelay/domain';
 import type { ClusterRepository, Repository } from '@vrrelay/application';
 import { PostgresRepository } from './postgres-repository.js';
@@ -30,6 +31,7 @@ type ConcurrencyRepository = Pick<
   | 'getVersionedSession'
   | 'compareAndSetSession'
   | 'createLiveChannel'
+  | 'createLiveChannelWithinCapacity'
   | 'getVersionedLiveChannel'
   | 'compareAndSetLiveChannel'
   | 'deleteLiveChannel'
@@ -37,6 +39,9 @@ type ConcurrencyRepository = Pick<
   | 'getPersonalToken'
   | 'usePersonalToken'
   | 'revokePersonalToken'
+  | 'createUserIdentity'
+  | 'listUserIdentities'
+  | 'compareAndSetUserIdentityPreservingOwner'
 > &
   Pick<
     ClusterRepository,
@@ -163,7 +168,8 @@ function node(id: string): ClusterNode {
       cacheBytes: 0,
       cacheLimitBytes: 1_024,
       egressMbps: 0,
-      providerIds: []
+      providerIds: [],
+      vodProducerVersion: 1
     },
     weight: 100,
     lastHeartbeatAt: at(0),
@@ -227,6 +233,19 @@ function personalToken(id: string): PersonalAccessToken {
     lastUsedAt: null,
     revokedAt: null,
     createdAt: at(0)
+  };
+}
+
+function userIdentity(id: string): UserIdentity {
+  return {
+    id,
+    providerId: 'provider-a',
+    providerUserId: `provider-user-${id}`,
+    displayName: `Owner ${id}`,
+    roles: ['owner'],
+    allowedProfileIds: [],
+    firstSeenAt: at(0),
+    lastSeenAt: at(0)
   };
 }
 
@@ -310,6 +329,31 @@ function repositoryConcurrencySuite(
       if (!pair) throw new Error('Repository pair is not initialized');
       return pair;
     };
+
+    it('serializes concurrent demotions so one assigned owner always remains', async () => {
+      const { first, second } = repositories();
+      const left = await first.createUserIdentity(userIdentity('owner-left'));
+      const right = await first.createUserIdentity(userIdentity('owner-right'));
+      const [leftResult, rightResult] = await Promise.all([
+        first.compareAndSetUserIdentityPreservingOwner(
+          { ...left.value, roles: ['admin'], lastSeenAt: at(1_000) },
+          left.revision
+        ),
+        second.compareAndSetUserIdentityPreservingOwner(
+          { ...right.value, roles: ['admin'], lastSeenAt: at(1_000) },
+          right.revision
+        )
+      ]);
+
+      expect([leftResult, rightResult].filter((result) => result.applied)).toHaveLength(1);
+      expect([leftResult, rightResult].filter((result) => !result.applied)).toEqual([
+        expect.objectContaining({ reason: 'dependency-conflict' })
+      ]);
+      const identities = await first.listUserIdentities();
+      expect(identities.filter((identity) => identity.value.roles.includes('owner'))).toHaveLength(
+        1
+      );
+    });
 
     it('allows only one session CAS write from two stale snapshots', async () => {
       const { first, second } = repositories();
@@ -498,6 +542,45 @@ function repositoryConcurrencySuite(
           first.compareAndSetSession(candidate, snapshot.revision)
         ).resolves.toMatchObject({ applied: false, reason: 'invalid-state', current: snapshot });
       await expect(first.getVersionedSession(initial.id)).resolves.toEqual(snapshot);
+    });
+
+    it('serializes installation and owner live-channel capacity across connections', async () => {
+      const { first, second } = repositories();
+      const ownerId = 'live-owner-capacity';
+      const channels = [
+        { ...liveChannel('live-capacity-a'), ownerId },
+        { ...liveChannel('live-capacity-b'), ownerId }
+      ];
+      const results = await Promise.all([
+        first.createLiveChannelWithinCapacity(channels[0]!, {
+          maxTotal: 2,
+          maxPerOwner: 1
+        }),
+        second.createLiveChannelWithinCapacity(channels[1]!, {
+          maxTotal: 2,
+          maxPerOwner: 1
+        })
+      ]);
+
+      expect(results.filter((result) => result.created)).toHaveLength(1);
+      expect(results.filter((result) => !result.created)).toEqual([
+        { created: false, reason: 'owner-limit' }
+      ]);
+
+      const installationResults = await Promise.all([
+        first.createLiveChannelWithinCapacity(liveChannel('live-installation-a'), {
+          maxTotal: 2,
+          maxPerOwner: 2
+        }),
+        second.createLiveChannelWithinCapacity(liveChannel('live-installation-b'), {
+          maxTotal: 2,
+          maxPerOwner: 2
+        })
+      ]);
+      expect(installationResults.filter((result) => result.created)).toHaveLength(1);
+      expect(installationResults.filter((result) => !result.created)).toEqual([
+        { created: false, reason: 'installation-limit' }
+      ]);
     });
 
     it('does not let a stale publisher poll resurrect a deleted live channel', async () => {

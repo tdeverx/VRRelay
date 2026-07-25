@@ -6,7 +6,7 @@
   import { toast } from 'svelte-sonner';
   import type { ProfileRevision } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { adminRoute, loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
@@ -54,7 +54,7 @@
   let loadError = $state('');
   let step = $state(0);
   const steps = ['Basics', 'Video', 'Audio & delivery', 'Processing & review'];
-  const deliveryMethods: Array<ProfileRevision['delivery']['method']> = ['hls', 'fragmented_mp4'];
+  const deliveryMethods: Array<ProfileRevision['delivery']['method']> = ['hls'];
   let base = $derived(
     profiles.find((profile) => `${profile.profileId}:${profile.revision}` === baseKey)
   );
@@ -69,7 +69,7 @@
       encoders = capabilityResult.encoders;
       if (profiles[0]) selectBase(`${profiles[0].profileId}:${profiles[0].revision}`);
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
+      if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       loadError = reason instanceof Error ? reason.message : 'Could not load profiles.';
     } finally {
       loading = false;
@@ -128,7 +128,7 @@
   }
 
   function deliveryContainerOptions(): Array<ProfileRevision['delivery']['container']> {
-    return method === 'fragmented_mp4' ? ['mp4'] : ['mpegts', 'fmp4'];
+    return ['mpegts', 'fmp4'];
   }
 
   $effect(() => {
@@ -176,8 +176,7 @@
           ...base.delivery,
           method,
           container,
-          segmentType:
-            method === 'fragmented_mp4' ? 'none' : container === 'fmp4' ? 'fmp4' : 'mpegts',
+          segmentType: container === 'fmp4' ? 'fmp4' : 'mpegts',
           segmentDuration: Number(segmentDuration),
           latencyMode,
           playlistType: method === 'hls' ? base.delivery.playlistType : 'vod'
@@ -379,7 +378,7 @@
       <Card.Root class={step !== 2 ? 'hidden' : ''}
         ><Card.Header
           ><Card.Title>Audio and delivery</Card.Title><Card.Description
-            >Audio layout and the implemented HLS or fragmented MP4 delivery shape.</Card.Description
+            >Audio layout and the implemented finite HLS delivery shape.</Card.Description
           ></Card.Header
         ><Card.Content
           ><Field.Group class="grid sm:grid-cols-2"

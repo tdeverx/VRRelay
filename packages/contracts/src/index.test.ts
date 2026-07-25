@@ -16,7 +16,8 @@ const capabilities = {
   cacheBytes: 0,
   cacheLimitBytes: null,
   egressMbps: 0,
-  providerIds: []
+  providerIds: [],
+  vodProducerVersion: 0
 };
 
 describe('catalog query contract', () => {

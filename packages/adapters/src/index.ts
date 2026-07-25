@@ -11,5 +11,6 @@ export * from './postgres-repository.js';
 export * from './metrics.js';
 export * from './certificate-authority.js';
 export * from './ffmpeg-live-normalizer.js';
+export * from './supervised-child-process.js';
 export * from './webhook-traffic-director.js';
 export * from './webhook-metrics-exporter.js';

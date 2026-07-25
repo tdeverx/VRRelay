@@ -30,12 +30,25 @@
     "packages/*"
   ],
   "overrides": {
+    "@fastify/ajv-compiler": {
+      "fast-uri": "3.1.4"
+    },
     "@sveltejs/kit": {
       "cookie": "$cookie"
     },
+    "ajv": {
+      "fast-uri": "3.1.4"
+    },
+    "brace-expansion": "5.0.8",
+    "fast-json-stringify": {
+      "fast-uri": "4.1.1"
+    },
+    "fast-xml-parser": "5.10.1",
+    "find-my-way": "9.7.0",
     "gaxios": {
       "uuid": "14.0.1"
     },
+    "js-yaml": "4.3.0",
     "teeny-request": {
       "uuid": "14.0.1"
     }
@@ -45,12 +58,13 @@
     "build": "npm run build:packages && npm run build --workspace @vrrelay/relay && npm run build --workspace @vrrelay/web && node script/sync-web.mjs",
     "build:packages": "npm run build --workspace @vrrelay/domain && npm run build --workspace @vrrelay/contracts && npm run build --workspace @vrrelay/application && npm run build --workspace @vrrelay/adapters",
     "clean": "node script/clean.mjs",
-    "check": "npm run check:api && npm run check:agent-protocol-schema && npm run check --workspaces --if-present && npm run check:tests && npm run check:repo && npm run check:kubernetes && npm run check:cloud-init && npm run check:backup && npm run check:tls && npm run check:native-packaging",
+    "check": "npm run check:api && npm run check:agent-protocol-schema && npm run check:contract-semantics && npm run check --workspaces --if-present && npm run check:tests && npm run check:repo && npm run check:kubernetes && npm run check:cloud-init && npm run check:backup && npm run check:tls && npm run check:native-packaging",
     "check:agent-protocol-schema": "node --import tsx script/generate-agent-protocol-schema.mjs --check",
     "check:api": "node script/generate-api.mjs --check",
     "check:backup": "node script/check-backup-restore.mjs",
     "check:compose": "script/check-compose.sh",
     "check:cloud-init": "node script/check-cloud-init.mjs",
+    "check:contract-semantics": "node --import tsx script/check-contract-semantics.mjs",
     "check:kubernetes": "node script/check-kubernetes-templates.mjs",
     "check:native-packaging": "node script/check-native-packaging.mjs",
     "check:repo": "node script/check-repository.mjs",

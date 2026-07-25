@@ -228,6 +228,15 @@ describe('mTLS node agent transport', () => {
     const segmentRelease = new Promise<void>((resolve) => {
       releaseSegment = resolve;
     });
+    let signalDisconnectJobStarted!: () => void;
+    let signalDisconnectJobAborted!: () => void;
+    const disconnectJobStarted = new Promise<void>((resolve) => {
+      signalDisconnectJobStarted = resolve;
+    });
+    const disconnectJobAborted = new Promise<void>((resolve) => {
+      signalDisconnectJobAborted = resolve;
+    });
+    let disconnectCleanups = 0;
     const agentOptions: NodeAgentOptions = {
       controllerUrl: `wss://127.0.0.1:${port}/api/v1/nodes/connect`,
       enrollmentUrl: 'https://unused.invalid',
@@ -235,11 +244,26 @@ describe('mTLS node agent transport', () => {
       publicUrl: 'https://worker.invalid',
       secretStore: nodeSecrets,
       capabilities: async () => capabilities,
-      onSegment: async () => {
+      onSegment: async (pendingCommand, signal) => {
+        if (pendingCommand.jobId === 'job-disconnect') {
+          signalDisconnectJobStarted();
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => {
+              signalDisconnectJobAborted();
+              reject(signal.reason ?? new Error('controller connection closed'));
+            };
+            if (signal.aborted) abort();
+            else signal.addEventListener('abort', abort, { once: true });
+          });
+          return;
+        }
         signalSegmentStarted();
         await segmentRelease;
       },
       onCancel: async () => {},
+      onDisconnect: async () => {
+        disconnectCleanups += 1;
+      },
       onProvider: async () => ({}),
       onCache: async (operation) =>
         operation === 'cache.inventory' ? { items: [], totalBytes: 0 } : { removed: 0 }
@@ -268,6 +292,26 @@ describe('mTLS node agent transport', () => {
     releaseSegment();
     await dispatch;
     expect(dispatchCompleted).toBe(true);
+    const interruptedDispatch = controller.dispatch(enrollment.node.id, {
+      ...command,
+      jobId: 'job-disconnect'
+    });
+    const interruptedResult = interruptedDispatch.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await disconnectJobStarted;
+    controller.disconnect(enrollment.node.id, 'Test controller disconnect');
+    expect(await interruptedResult).toEqual(
+      expect.objectContaining({ message: expect.stringMatching(/disconnect|closed/i) })
+    );
+    await disconnectJobAborted;
+    for (let attempt = 0; attempt < 80 && disconnectCleanups === 0; attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(disconnectCleanups).toBe(1);
+    for (let attempt = 0; attempt < 120 && !controller.connected(enrollment.node.id); attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(controller.connected(enrollment.node.id)).toBe(true);
     await controller.rotateCertificate(enrollment.node.id, 30_000);
     let rotated = JSON.parse(await nodeSecrets.get('cluster:node-identity')) as {
       nodeId: string;

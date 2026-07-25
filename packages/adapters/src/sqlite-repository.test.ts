@@ -74,7 +74,8 @@ function node(id: string, updatedAt: string): ClusterNode {
       cacheBytes: 0,
       cacheLimitBytes: 1_024,
       egressMbps: 0,
-      providerIds: []
+      providerIds: [],
+      vodProducerVersion: 1
     },
     weight: 100,
     lastHeartbeatAt: updatedAt,

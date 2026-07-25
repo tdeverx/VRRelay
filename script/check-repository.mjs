@@ -116,19 +116,23 @@ for (const markdown of repositoryFiles.filter((path) => path.endsWith('.md'))) {
 }
 
 const routeSources = await Promise.all(
-  ['apps/relay/src/server.ts', 'apps/relay/src/agent-transport.ts'].map((path) =>
-    readFile(resolve(root, path), 'utf8')
-  )
+  [
+    'apps/relay/src/server.ts',
+    'apps/relay/src/composition/role-server.ts',
+    'apps/relay/src/agent-transport.ts'
+  ].map((path) => readFile(resolve(root, path), 'utf8'))
 );
 const runtimeRoutes = new Set();
-for (const match of routeSources[0].matchAll(
-  /app\.(get|post|patch|delete)\(\s*['`]\/api\/v1([^'`]+)['`]/g
-)) {
-  const method = match[1]?.toUpperCase();
-  const path = match[2]?.replace(/:([A-Za-z][A-Za-z0-9]*)/g, '{$1}');
-  if (method && path) runtimeRoutes.add(`${method} ${path}`);
+for (const source of routeSources.slice(0, 2)) {
+  for (const match of source.matchAll(
+    /app\.(get|post|put|patch|delete)\(\s*['`]\/api\/v1([^'`]+)['`]/g
+  )) {
+    const method = match[1]?.toUpperCase();
+    const path = match[2]?.replace(/:([A-Za-z][A-Za-z0-9]*)/g, '{$1}');
+    if (method && path) runtimeRoutes.add(`${method} ${path}`);
+  }
 }
-if (routeSources[1].includes("'/api/v1/nodes/connect'")) runtimeRoutes.add('GET /nodes/connect');
+if (routeSources[2].includes("'/api/v1/nodes/connect'")) runtimeRoutes.add('GET /nodes/connect');
 
 const openapi = await readFile(resolve(root, 'contracts/openapi/vrrelay-v1.yaml'), 'utf8');
 const documentedRoutes = new Set();
@@ -139,7 +143,7 @@ for (const line of openapi.split('\n')) {
     currentPath = path[1];
     continue;
   }
-  const method = /^    (get|post|patch|delete):$/.exec(line);
+  const method = /^    (get|post|put|patch|delete):$/.exec(line);
   if (currentPath && method) documentedRoutes.add(`${method[1].toUpperCase()} ${currentPath}`);
 }
 for (const route of runtimeRoutes) {

@@ -5,7 +5,7 @@
   import { Plus } from '@lucide/svelte';
   import type { CompatibilityResult, ProfileRevision } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
@@ -61,7 +61,7 @@
       evidence = evidenceResult.items;
       selectedProfile = profiles[0] ? `${profiles[0].profileId}:${profiles[0].revision}` : '';
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
+      if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       error = reason instanceof Error ? reason.message : 'Could not load profiles.';
     } finally {
       loading = false;

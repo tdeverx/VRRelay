@@ -134,6 +134,10 @@ const ConfigSchema = z
       .default(60_000),
     vodProducerMaxConcurrent: z.coerce.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.coerce.number().int().min(1).max(32).default(2),
+    liveMaxChannelsTotal: z.coerce.number().int().min(1).max(1_000).default(32),
+    liveMaxChannelsPerOwner: z.coerce.number().int().min(1).max(100).default(4),
+    liveNormalizerMaxConcurrent: z.coerce.number().int().min(1).max(32).default(2),
+    liveNormalizerMaxPerOwner: z.coerce.number().int().min(1).max(32).default(1),
     masterKey: z.string().optional(),
     secretBackend: z.enum(['auto', 'keychain', 'dpapi', 'encrypted-file']).default('auto'),
     mediaMtxHlsUrl: z.url().default('http://127.0.0.1:8888'),
@@ -207,6 +211,13 @@ const ConfigSchema = z
         code: 'custom',
         path: ['vodProducerBufferHighWatermarkMs'],
         message: 'VOD producer high watermark must be greater than the low watermark'
+      });
+
+    if (value.liveNormalizerMaxPerOwner > value.liveNormalizerMaxConcurrent)
+      context.addIssue({
+        code: 'custom',
+        path: ['liveNormalizerMaxPerOwner'],
+        message: 'Per-owner live normalizer capacity cannot exceed global capacity'
       });
 
     if (value.environment !== 'production') return;
@@ -393,6 +404,10 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_VOD_PRODUCER_MAX_CONCURRENT ?? runtime?.vodProducerMaxConcurrent,
     vodProducerMaxPerProvider:
       environment.VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER ?? runtime?.vodProducerMaxPerProvider,
+    liveMaxChannelsTotal: environment.VRRELAY_LIVE_MAX_CHANNELS_TOTAL,
+    liveMaxChannelsPerOwner: environment.VRRELAY_LIVE_MAX_CHANNELS_PER_OWNER,
+    liveNormalizerMaxConcurrent: environment.VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT,
+    liveNormalizerMaxPerOwner: environment.VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER,
     masterKey: optionalEnvironmentValue(environment.VRRELAY_MASTER_KEY),
     secretBackend: environment.VRRELAY_SECRET_BACKEND,
     mediaMtxHlsUrl: environment.VRRELAY_MEDIAMTX_HLS_URL,

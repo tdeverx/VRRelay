@@ -6,6 +6,33 @@ export function adminRoute(_pathname: string, suffix = ''): string {
   return `/dashboard${suffix}`;
 }
 
+export function loginRoute(returnTo: string): string {
+  return `/dashboard/login?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+export function safeDashboardReturnTo(value: string | null): string {
+  if (
+    !value ||
+    (value !== '/dashboard' && !value.startsWith('/dashboard/')) ||
+    value.startsWith('//')
+  )
+    return '/dashboard';
+  let target: URL;
+  try {
+    target = new URL(value, 'https://vrrelay.invalid');
+  } catch {
+    return '/dashboard';
+  }
+  if (
+    target.origin !== 'https://vrrelay.invalid' ||
+    target.pathname === '/dashboard/login' ||
+    target.pathname.startsWith('/dashboard/login/') ||
+    (target.pathname !== '/dashboard' && !target.pathname.startsWith('/dashboard/'))
+  )
+    return '/dashboard';
+  return `${target.pathname}${target.search}${target.hash}`;
+}
+
 export function applyRouteTheme(_pathname: string): void {
   const root = document.documentElement;
   root.dataset.ui = 'new';
@@ -22,6 +49,10 @@ export function applyTheme(preference: ThemePreference): void {
     preference === 'dark' ||
     (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.classList.toggle('dark', dark);
+  document
+    .getElementById('vrrelay-theme-color')
+    ?.setAttribute('content', dark ? '#06111b' : '#f7fafc');
+  document.dispatchEvent(new CustomEvent('vrrelay:theme', { detail: dark ? 'dark' : 'light' }));
 }
 
 export function setThemePreference(preference: ThemePreference): void {

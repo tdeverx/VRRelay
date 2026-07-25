@@ -13,6 +13,7 @@ import type {
   ProducedVodSegment
 } from '@vrrelay/application';
 import type { ProfileRevision } from '@vrrelay/domain';
+import { terminateChildProcess } from './supervised-child-process.js';
 
 export interface FFmpegOptions {
   ffmpegPath: string;
@@ -248,36 +249,6 @@ export class FFmpegTranscoder implements Transcoder {
       throw outcome.error instanceof Error ? outcome.error : new Error('VOD producer failed');
   }
 
-  async streamFragmentedMp4(
-    source: ResolvedSource,
-    profile: ProfileRevision,
-    output: Writable,
-    signal?: AbortSignal
-  ): Promise<void> {
-    await this.#run(
-      [
-        '-hide_banner',
-        '-loglevel',
-        'warning',
-        '-nostdin',
-        ...this.#inputArgs(source, profile),
-        '-map',
-        '0:v:0',
-        '-map',
-        '0:a:0?',
-        ...this.#videoArgs(profile, source),
-        ...this.#audioArgs(profile),
-        '-movflags',
-        'frag_keyframe+empty_moov+default_base_moof',
-        '-f',
-        'mp4',
-        'pipe:1'
-      ],
-      output,
-      signal
-    );
-  }
-
   async #generateFmp4Segment(
     request: SegmentRequest,
     destination: string,
@@ -432,12 +403,22 @@ export class FFmpegTranscoder implements Transcoder {
       };
       child.stdout.on('data', append);
       child.stderr.on('data', append);
-      const abort = () => child.kill('SIGTERM');
-      signal?.addEventListener('abort', abort, { once: true });
+      let killTimer: NodeJS.Timeout | undefined;
+      const abort = () => {
+        if (child.exitCode !== null || child.signalCode !== null) return;
+        child.kill('SIGTERM');
+        killTimer ??= setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        }, 3_000);
+        killTimer.unref();
+      };
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
       child.once('error', (error) =>
         reject(new Error(`FFmpeg could not be started: ${redactFfmpegError(error.message)}`))
       );
       child.once('close', (code, killedBySignal) => {
+        if (killTimer) clearTimeout(killTimer);
         signal?.removeEventListener('abort', abort);
         if (signal?.aborted) return reject(new Error('FFmpeg was aborted'));
         if (code === 0) return resolve(output);
@@ -509,21 +490,50 @@ export class FFmpegTranscoder implements Transcoder {
           stderr += chunk.toString().slice(0, this.#maxLogBytes - stderr.length);
       });
       if (output) child.stdout.pipe(output, { end: !mergeStderr });
-      const abort = () => child.kill('SIGTERM');
-      signal?.addEventListener('abort', abort, { once: true });
-      child.once('error', (error) =>
-        reject(new Error(`FFmpeg could not be started: ${redactFfmpegError(error.message)}`))
-      );
-      child.once('close', (code, killedBySignal) => {
+      let settled = false;
+      let termination: Promise<void> | undefined;
+      const cleanup = () => {
         signal?.removeEventListener('abort', abort);
-        if (signal?.aborted) return reject(new Error('FFmpeg was aborted'));
-        if (code === 0) return resolve();
-        reject(
+        child.off('close', close);
+      };
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const abort = () => {
+        termination ??= terminateChildProcess(child).catch((error) => {
+          fail(
+            new Error(
+              `FFmpeg could not be stopped: ${redactFfmpegError(
+                error instanceof Error ? error.message : String(error)
+              )}`
+            )
+          );
+        });
+      };
+      const close = (code: number | null, killedBySignal: NodeJS.Signals | null) => {
+        if (signal?.aborted) return fail(new Error('FFmpeg was aborted'));
+        if (code === 0) return succeed();
+        fail(
           new Error(
             `FFmpeg failed (${killedBySignal ?? code ?? 'unknown'}): ${redactFfmpegError(stderr.trim())}`
           )
         );
-      });
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      child.once('error', (error) =>
+        fail(new Error(`FFmpeg could not be started: ${redactFfmpegError(error.message)}`))
+      );
+      child.once('close', close);
     });
   }
 }

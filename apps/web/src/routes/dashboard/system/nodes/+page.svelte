@@ -2,14 +2,15 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Copy, Plus, RefreshCw, ScrollText, ShieldX } from '@lucide/svelte';
+  import { Copy, Plus, RefreshCw, ScrollText, ShieldX, Trash2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import type { AgentLogEntry, ClusterNode } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
+  import ConfirmAction from '#lib/new-ui/components/ConfirmAction.svelte';
   import { Badge } from '#lib/new-ui/components/ui/badge';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
@@ -33,6 +34,8 @@
   let joinResult = $state<{ token: string; expiresAt: string } | null>(null);
   let nodeLogs = $state<AgentLogEntry[]>([]);
   let logsOpen = $state(false);
+  let pendingRevoke = $state<ClusterNode | null>(null);
+  let pendingRemove = $state<ClusterNode | null>(null);
 
   onMount(load);
 
@@ -42,7 +45,7 @@
     try {
       nodes = (await api.clusterNodes()).items;
     } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
+      if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       error = reason instanceof Error ? reason.message : 'Could not load nodes.';
     } finally {
       loading = false;
@@ -63,8 +66,12 @@
   }
 
   async function copy(value: string) {
-    await navigator.clipboard.writeText(value);
-    toast.success('Copied to clipboard.');
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success('Copied to clipboard.');
+    } catch {
+      toast.error('Clipboard access was denied. Select and copy the value manually.');
+    }
   }
 
   async function drain(node: ClusterNode) {
@@ -101,8 +108,17 @@
       await api.revokeNode(node.id);
       await load();
       toast.success('Node revoked.');
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : 'Could not revoke node.');
+    } finally {
+      busyId = '';
+    }
+  }
+
+  async function remove(node: ClusterNode) {
+    busyId = node.id;
+    try {
+      await api.removeNode(node.id);
+      nodes = nodes.filter((candidate) => candidate.id !== node.id);
+      toast.success('Revoked node record removed.');
     } finally {
       busyId = '';
     }
@@ -171,34 +187,45 @@
               >
               <Table.Cell>
                 <div class="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busyId === node.id}
-                    onclick={() => drain(node)}
-                  >
-                    {node.state === 'draining'
-                      ? node.id === 'standalone'
-                        ? 'Resume local worker'
-                        : 'Cancel drain'
-                      : 'Drain'}
-                  </Button>
+                  {#if node.state !== 'revoked'}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busyId === node.id}
+                      onclick={() => drain(node)}
+                    >
+                      {node.state === 'draining'
+                        ? node.id === 'standalone'
+                          ? 'Resume local worker'
+                          : 'Cancel drain'
+                        : 'Drain'}
+                    </Button>
+                  {/if}
                   {#if !node.roles.includes('controller')}
                     <Button variant="ghost" size="sm" onclick={() => showLogs(node)}
                       ><ScrollText />Logs</Button
                     >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busyId === node.id}
-                      onclick={() => rotate(node)}>Rotate</Button
-                    >
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={busyId === node.id}
-                      onclick={() => revoke(node)}><ShieldX />Revoke</Button
-                    >
+                    {#if node.state === 'revoked'}
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={busyId === node.id}
+                        onclick={() => (pendingRemove = node)}><Trash2 />Remove</Button
+                      >
+                    {:else}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busyId === node.id}
+                        onclick={() => rotate(node)}>Rotate</Button
+                      >
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={busyId === node.id}
+                        onclick={() => (pendingRevoke = node)}><ShieldX />Revoke</Button
+                      >
+                    {/if}
                   {/if}
                 </div>
               </Table.Cell>
@@ -219,17 +246,27 @@
             >
           </Card.Header>
           <Card.Footer class="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onclick={() => drain(node)}>
-              {node.state === 'draining'
-                ? node.id === 'standalone'
-                  ? 'Resume local worker'
-                  : 'Cancel drain'
-                : 'Drain node'}
-            </Button>
+            {#if node.state !== 'revoked'}
+              <Button variant="outline" size="sm" onclick={() => drain(node)}>
+                {node.state === 'draining'
+                  ? node.id === 'standalone'
+                    ? 'Resume local worker'
+                    : 'Cancel drain'
+                  : 'Drain node'}
+              </Button>
+            {/if}
             {#if !node.roles.includes('controller')}
               <Button variant="outline" size="sm" onclick={() => showLogs(node)}>Logs</Button>
-              <Button variant="outline" size="sm" onclick={() => rotate(node)}>Rotate</Button>
-              <Button variant="destructive" size="sm" onclick={() => revoke(node)}>Revoke</Button>
+              {#if node.state === 'revoked'}
+                <Button variant="destructive" size="sm" onclick={() => (pendingRemove = node)}
+                  >Remove</Button
+                >
+              {:else}
+                <Button variant="outline" size="sm" onclick={() => rotate(node)}>Rotate</Button>
+                <Button variant="destructive" size="sm" onclick={() => (pendingRevoke = node)}
+                  >Revoke</Button
+                >
+              {/if}
             {/if}
           </Card.Footer>
         </Card.Root>
@@ -292,6 +329,32 @@
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
+
+<ConfirmAction
+  open={Boolean(pendingRevoke)}
+  onOpenChange={(open) => !open && (pendingRevoke = null)}
+  title="Revoke cluster node?"
+  description={`Revoke ${pendingRevoke?.name ?? 'this node'} and invalidate its agent certificate. Work assigned to it may fail until rescheduled.`}
+  confirmLabel="Revoke node"
+  onConfirm={async () => {
+    if (!pendingRevoke) return;
+    await revoke(pendingRevoke);
+    pendingRevoke = null;
+  }}
+/>
+
+<ConfirmAction
+  open={Boolean(pendingRemove)}
+  onOpenChange={(open) => !open && (pendingRemove = null)}
+  title="Remove revoked node record?"
+  description={`Permanently remove ${pendingRemove?.name ?? 'this node'} from cluster state. Removal is refused while provider bindings remain.`}
+  confirmLabel="Remove node"
+  onConfirm={async () => {
+    if (!pendingRemove) return;
+    await remove(pendingRemove);
+    pendingRemove = null;
+  }}
+/>
 
 <Dialog.Root bind:open={logsOpen}>
   <Dialog.Content>

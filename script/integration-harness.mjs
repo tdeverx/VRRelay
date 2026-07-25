@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -152,7 +153,7 @@ async function fetchText(url, headers = {}) {
   });
   const text = await response.text();
   if (!response.ok)
-    throw new Error(`GET ${url} failed (${response.status}): ${text.slice(0, 300)}`);
+    throw new Error(`Playback manifest request failed (${response.status}): ${text.slice(0, 300)}`);
   return text;
 }
 
@@ -161,8 +162,8 @@ async function fetchMedia(url, headers = {}) {
     headers: { 'user-agent': 'VRRelay acceptance harness', ...headers }
   });
   const body = Buffer.from(await response.arrayBuffer());
-  if (!response.ok) throw new Error(`GET ${url} failed (${response.status})`);
-  assert(body.length > 1_000, `Media response from ${url} was unexpectedly small`);
+  if (!response.ok) throw new Error(`Media request failed (${response.status})`);
+  assert(body.length > 1_000, 'Media response was unexpectedly small');
   return body;
 }
 
@@ -179,12 +180,90 @@ function mediaLines(playlist) {
     .filter((line) => line && !line.startsWith('#'));
 }
 
-async function waitForPlaylist(url, timeoutMs = 60_000) {
+async function startStandardsCachingProxy() {
+  const cache = new Map();
+  let originRequests = 0;
+  const server = createHttpServer((request, response) => {
+    void (async () => {
+      const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+      const target = requestUrl.searchParams.get('url');
+      if (!target) {
+        response.writeHead(400).end();
+        return;
+      }
+      const cached = cache.get(target);
+      if (cached) {
+        response.writeHead(cached.status, cached.headers).end(cached.body);
+        return;
+      }
+      originRequests += 1;
+      const upstream = await fetch(target, {
+        headers: { 'user-agent': 'VRRelay acceptance revocation proxy' }
+      });
+      const body = Buffer.from(await upstream.arrayBuffer());
+      const cacheControl = upstream.headers.get('cache-control') ?? '';
+      const headers = {
+        'cache-control': cacheControl,
+        'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream'
+      };
+      if (upstream.ok && !/(?:^|,)\s*(?:no-store|private)\b/i.test(cacheControl))
+        cache.set(target, { status: upstream.status, headers, body });
+      response.writeHead(upstream.status, headers).end(body);
+    })().catch(() => response.writeHead(502).end());
+  });
+  await new Promise((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolvePromise);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Caching proxy did not bind');
+  return {
+    urlFor: (target) => `http://127.0.0.1:${address.port}/?url=${encodeURIComponent(target)}`,
+    originRequests: () => originRequests,
+    close: () => new Promise((resolvePromise) => server.close(resolvePromise))
+  };
+}
+
+function mediaRuntimeState() {
+  let processes = 0;
+  let scratchBytes = 0;
+  const workers = [];
+  for (const service of ['source-worker-a', 'source-worker-b']) {
+    const result = compose(
+      [
+        'exec',
+        '-T',
+        service,
+        'sh',
+        '-c',
+        "processes=0; for file in /proc/[0-9]*/cmdline; do if tr '\\0' ' ' < \"$file\" 2>/dev/null | grep -q '[f]fmpeg'; then processes=$((processes+1)); fi; done; scratch=$(find /cache/producer -type f -printf '%s\\n' 2>/dev/null | awk '{sum += $1} END {print sum + 0}'); printf '%s %s\\n' \"$processes\" \"${scratch:-0}\""
+      ],
+      { capture: true }
+    );
+    const [processCount, scratchCount] = result.stdout.trim().split(/\s+/).map(Number);
+    processes += Number.isFinite(processCount) ? processCount : 0;
+    scratchBytes += Number.isFinite(scratchCount) ? scratchCount : 0;
+    workers.push({
+      service,
+      processes: Number.isFinite(processCount) ? processCount : 0,
+      scratchBytes: Number.isFinite(scratchCount) ? scratchCount : 0
+    });
+  }
+  return { processes, scratchBytes, workers };
+}
+
+function mediaUrl(playlist, index) {
+  const url = mediaLines(playlist)[index];
+  assert(url, `Playlist did not contain media entry ${index}`);
+  return url;
+}
+
+async function waitForPlaylist(url, headers = {}, timeoutMs = 60_000) {
   return waitFor(
     `HLS playlist ${url}`,
     async () => {
       const response = await fetch(url, {
-        headers: { 'user-agent': 'VRRelay acceptance harness' }
+        headers: { 'user-agent': 'VRRelay acceptance harness', ...headers }
       });
       if (!response.ok) return undefined;
       const body = await response.text();
@@ -334,8 +413,18 @@ async function run() {
   ).body;
   const cleanUrl = session.outputUrls.primary;
   const token = cleanUrl.split('/play/')[1].split('/')[0];
-  const londonManifest = await fetchText(cleanUrl, { 'x-vrrelay-region': 'london' });
-  const newYorkManifest = await fetchText(cleanUrl, { 'x-vrrelay-region': 'new-york' });
+  const londonManifest = await fetchText(cleanUrl, {
+    'x-vrrelay-region': 'london',
+    'user-agent': 'London viewer'
+  });
+  const newYorkManifest = await fetchText(cleanUrl, {
+    'x-vrrelay-region': 'new-york',
+    'user-agent': 'New York viewer'
+  });
+  const thirdViewerManifest = await fetchText(cleanUrl, {
+    'x-vrrelay-region': 'london',
+    'user-agent': 'London viewer two'
+  });
   assert(londonManifest.includes('#EXT-X-PLAYLIST-TYPE:VOD'), 'VOD manifest is not finite VOD');
   assert(londonManifest.includes('#EXT-X-ENDLIST'), 'VOD manifest does not expose completion');
   assert(
@@ -355,15 +444,30 @@ async function run() {
     mediaLines(londonManifest).every((line) => line.startsWith('http://127.0.0.1:1820')),
     'Controller manifest did not contain absolute authorized edge URLs'
   );
+  assert(
+    mediaLines(thirdViewerManifest).every((line) => line.startsWith('http://127.0.0.1:18201')),
+    'Third viewer did not receive an edge-scoped London manifest'
+  );
 
-  log('Requesting the same segment through both regions to prove one continuous producer');
+  const rawEdgeResponse = await fetch(`http://127.0.0.1:18201/play/${token}/segment/0.ts`);
+  assert(
+    rawEdgeResponse.status === 401,
+    `Edge accepted a raw controller grant (${rawEdgeResponse.status})`
+  );
+  await rawEdgeResponse.arrayBuffer();
+
+  log('Starting three independent viewers through signed edge URLs');
   const sourceBefore = await jellyfinStats();
-  const segmentPath = `/play/${token}/segment/0.ts`;
-  const [segmentA, segmentB] = await Promise.all([
-    fetchMedia(`http://127.0.0.1:18201${segmentPath}`, { 'user-agent': 'London viewer' }),
-    fetchMedia(`http://127.0.0.1:18202${segmentPath}`, { 'user-agent': 'New York viewer' })
+  const [segmentA, segmentB, segmentC] = await Promise.all([
+    fetchMedia(mediaUrl(londonManifest, 0), { 'user-agent': 'London viewer' }),
+    fetchMedia(mediaUrl(newYorkManifest, 0), { 'user-agent': 'New York viewer' }),
+    fetchMedia(mediaUrl(thirdViewerManifest, 0), { 'user-agent': 'London viewer two' })
   ]);
   assert(segmentA.equals(segmentB), 'Edges returned different bytes for the same content key');
+  assert(
+    segmentA.equals(segmentC),
+    'Third viewer received different bytes for the same content key'
+  );
   assert(segmentA[0] === 0x47, 'Default VOD output is not an MPEG-TS segment');
   const jobs = (await api('/api/v1/jobs')).body.items.filter(
     (job) => job.sessionId === session.id && job.segmentIndex === 0
@@ -386,7 +490,7 @@ async function run() {
     sourceAfterFirst.sourceRequests - sourceBefore.sourceRequests === 1,
     `One session opened ${sourceAfterFirst.sourceRequests - sourceBefore.sourceRequests} Jellyfin source connections`
   );
-  await fetchMedia(`http://127.0.0.1:18202/play/${token}/segment/1.ts`, {
+  await fetchMedia(mediaUrl(newYorkManifest, 1), {
     'user-agent': 'New York viewer'
   });
   const sourceAfterSequential = await jellyfinStats();
@@ -394,22 +498,41 @@ async function run() {
     sourceAfterSequential.sourceRequests === sourceAfterFirst.sourceRequests,
     'Sequential segments did not reuse the continuous Jellyfin connection'
   );
-  await fetchMedia(`http://127.0.0.1:18201${segmentPath}`, { 'user-agent': 'London viewer' });
+  await fetchMedia(mediaUrl(thirdViewerManifest, 1), {
+    'user-agent': 'London viewer two'
+  });
+  await fetchMedia(mediaUrl(londonManifest, 0), { 'user-agent': 'London viewer' });
   assert(
     (await jellyfinStats()).sourceRequests === sourceAfterSequential.sourceRequests,
-    'An edge/object-store cache hit opened another Jellyfin request'
+    'Late join or reconnect opened another Jellyfin request'
+  );
+  const runtimeAfterReconnect = (await api('/api/v1/sessions')).body.runtime.find(
+    (item) => item.sessionId === session.id
+  );
+  assert(
+    runtimeAfterReconnect?.viewers === 3,
+    `Controller and edges did not preserve three viewer identities (${runtimeAfterReconnect?.viewers})`
+  );
+  const initialRuntimeState = mediaRuntimeState();
+  assert(
+    initialRuntimeState.processes === 1,
+    `Three viewers started ${initialRuntimeState.processes} FFmpeg processes instead of one`
+  );
+  assert(
+    initialRuntimeState.scratchBytes < 64 * 1024 * 1024,
+    `Producer scratch was already unbounded (${initialRuntimeState.scratchBytes} bytes)`
   );
 
-  log('Moving a regional majority to a distant segment and verifying one fenced replacement');
+  log('Moving two of three viewers to a distant segment and verifying one fenced replacement');
   await Promise.all([
-    fetchMedia(`http://127.0.0.1:18201/play/${token}/segment/12.ts`, {
-      'user-agent': 'London seek viewer'
+    fetchMedia(mediaUrl(londonManifest, 12), {
+      'user-agent': 'London viewer'
     }),
-    fetchMedia(`http://127.0.0.1:18202/play/${token}/segment/12.ts`, {
-      'user-agent': 'New York seek viewer'
+    fetchMedia(mediaUrl(newYorkManifest, 12), {
+      'user-agent': 'New York viewer'
     }),
-    fetchMedia(`http://127.0.0.1:18201/play/${token}/segment/12.ts`, {
-      'user-agent': 'London seek viewer two'
+    fetchMedia(mediaUrl(thirdViewerManifest, 0), {
+      'user-agent': 'London viewer two'
     })
   ]);
   const producerAfterSeek = (await api(`/api/v1/vod-producers/${session.id}`)).body;
@@ -433,8 +556,20 @@ async function run() {
     'Static Jellyfin source incorrectly claimed StartTimeTicks positioning'
   );
   assert(
-    sourceAfterSeek.maximumConcurrentSourceRequests <= 1,
+    sourceAfterSeek.sourceConcurrentAtOpen.at(-2) === 1,
     'Replacement overlapped an accepted old Jellyfin source request'
+  );
+  const slowResponse = await fetch(mediaUrl(londonManifest, 13), {
+    headers: { 'user-agent': 'Slow London viewer' }
+  });
+  assert(slowResponse.ok, `Slow viewer could not open a segment (${slowResponse.status})`);
+  const fastBody = await fetchMedia(mediaUrl(newYorkManifest, 13), {
+    'user-agent': 'Fast New York viewer'
+  });
+  const slowBody = Buffer.from(await slowResponse.arrayBuffer());
+  assert(
+    slowBody.equals(fastBody),
+    'A slow viewer changed or blocked the independently streamed cached segment'
   );
 
   log('Creating a distinct session and verifying it may consume an additional source pull');
@@ -460,8 +595,11 @@ async function run() {
       }
     })
   ).body;
-  const secondToken = secondSession.outputUrls.primary.split('/play/')[1].split('/')[0];
-  await fetchMedia(`http://127.0.0.1:18201/play/${secondToken}/segment/0.ts`, {
+  const secondManifest = await fetchText(secondSession.outputUrls.primary, {
+    'x-vrrelay-region': 'london',
+    'user-agent': 'Independent session viewer'
+  });
+  await fetchMedia(mediaUrl(secondManifest, 0), {
     'user-agent': 'Independent session viewer'
   });
   assert(
@@ -496,8 +634,7 @@ async function run() {
   const assignedWorker = [workerA, workerB].find((worker) => worker.id === session.assignedNodeId);
   assert(assignedWorker, 'Hosted session was not assigned to a bound worker');
   await api(`/api/v1/nodes/${assignedWorker.id}/revoke`, { method: 'POST', body: {} });
-  const activeEdgeUrl = new URL(mediaLines(reroutedManifest)[0]).origin;
-  await fetchMedia(`${activeEdgeUrl}/play/${token}/segment/19.ts`, {
+  await fetchMedia(mediaUrl(reroutedManifest, 19), {
     'user-agent': 'Failover viewer'
   });
   const secondJob = (await api('/api/v1/jobs')).body.items.find(
@@ -524,11 +661,65 @@ async function run() {
       .filter((node) => !node.roles.includes('controller') && node.state !== 'revoked')
       .every((node) => node.agent?.connected);
   });
-  await fetchMedia(`${activeEdgeUrl}/play/${token}/segment/2.ts`);
+  const recoveredManifest = await fetchText(cleanUrl, {
+    'user-agent': 'London viewer',
+    'x-vrrelay-region': 'london'
+  });
+  await fetchMedia(mediaUrl(recoveredManifest, 2), { 'user-agent': 'London viewer' });
   assert(
     (await api(`/api/v1/sessions/${session.id}`)).body.id === session.id,
     'Controller restart lost the VOD session'
   );
+
+  log('Revoking playback through a standards-aware caching proxy and proving cleanup');
+  const proxy = await startStandardsCachingProxy();
+  try {
+    const revocationTarget = mediaUrl(recoveredManifest, 2);
+    const firstProxyResponse = await fetch(proxy.urlFor(revocationTarget));
+    assert(firstProxyResponse.ok, 'Caching proxy could not fetch the authorized segment');
+    assert(
+      /(?:^|,)\s*(?:no-store|private)\b/i.test(
+        firstProxyResponse.headers.get('cache-control') ?? ''
+      ),
+      'Grant-bearing segment was not marked private or no-store'
+    );
+    await firstProxyResponse.arrayBuffer();
+    await api(`/api/v1/sessions/${session.id}`, { method: 'DELETE' });
+    await api(`/api/v1/sessions/${secondSession.id}`, { method: 'DELETE' });
+    const revokedProxyResponse = await fetch(proxy.urlFor(revocationTarget));
+    assert(
+      revokedProxyResponse.status === 401,
+      `Caching proxy served media after revocation (${revokedProxyResponse.status})`
+    );
+    await revokedProxyResponse.arrayBuffer();
+    assert(
+      proxy.originRequests() === 2,
+      `Caching proxy did not revalidate the revoked grant (${proxy.originRequests()} origin requests)`
+    );
+    await waitFor(
+      'VOD producer process and scratch cleanup',
+      async () => {
+        const state = mediaRuntimeState();
+        if (state.processes === 0 && state.scratchBytes <= 16 * 1024) return true;
+        throw new Error(JSON.stringify(state));
+      },
+      45_000
+    );
+  } finally {
+    await proxy.close();
+  }
+
+  log('Returning the drained edge to service for regional live fan-out');
+  await api(`/api/v1/nodes/${initialEdge.id}/drain`, {
+    method: 'POST',
+    body: { draining: false }
+  });
+  await waitFor('restored edge state', async () => {
+    const restored = (await api('/api/v1/nodes')).body.items.find(
+      (node) => node.id === initialEdge.id
+    );
+    return restored?.state === 'online' && restored.agent?.connected;
+  });
 
   log('Publishing one OBS-compatible stream and activating both live edges');
   const liveCreated = (
@@ -565,9 +756,18 @@ async function run() {
       }
     })
   ).body;
-  const liveToken = liveSession.outputUrls.primary.split('/play/')[1].split('/')[0];
-  for (const port of [18201, 18202]) {
-    const edgeUrl = `http://127.0.0.1:${port}/play/${liveToken}/live.m3u8?edge=1`;
+  for (const [region, port] of [
+    ['london', 18201],
+    ['new-york', 18202]
+  ]) {
+    const controllerPlaylist = await waitForPlaylist(liveSession.outputUrls.primary, {
+      'x-vrrelay-region': region
+    });
+    const edgeUrl = mediaUrl(controllerPlaylist, 0);
+    assert(
+      new URL(edgeUrl).port === String(port),
+      `${region} live viewer was not routed with an edge-scoped grant`
+    );
     const first = await waitForPlaylist(edgeUrl);
     const firstChild = mediaLines(first)[0];
     if (firstChild) await waitForPlaylist(new URL(firstChild, edgeUrl).toString());

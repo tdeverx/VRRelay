@@ -26,6 +26,7 @@ Optional tools depend on the area being changed:
 - Swift 6.3 and macOS 15 for the menu controller.
 - Windows x64, PowerShell, MSVC x64 Build Tools, Inno Setup 6, and WinSW for Windows packaging.
 - Helm 4.2.3 for Kubernetes chart work.
+- OpenTofu 1.10.6 for generic infrastructure-module work.
 
 TypeScript 7 remains the project compiler, while the `typescript-compat` alias intentionally uses
 Microsoft's `@typescript/typescript6` package for tools that require the compiler API. The direct
@@ -111,6 +112,7 @@ docker compose -f deploy/docker/docker-compose.yml config
 npm run check:compose
 npm run test:container
 helm lint deploy/kubernetes
+tofu fmt -check -recursive deploy/opentofu
 swift build --package-path apps/macos -c release --arch arm64
 deploy/macos/package.sh release dmg
 script/verify-macos-dmg.sh dist/VRRelay-<version>-macOS-arm64.dmg <version> <build-number>
