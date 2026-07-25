@@ -11,6 +11,7 @@ export type SidebarStateProps = {
    * component.
    */
   open: Getter<boolean>;
+  openMobile: Getter<boolean>;
 
   /**
    * A function that sets the open state of the sidebar. To support `bind:open`, we need
@@ -18,18 +19,21 @@ export type SidebarStateProps = {
    * the sub-components and any `bind:` references.
    */
   setOpen: (open: boolean) => void;
+  setOpenMobile: (open: boolean) => void;
 };
 
 class SidebarState {
   readonly props: SidebarStateProps;
   open = $derived.by(() => this.props.open());
-  openMobile = $state(false);
+  openMobile = $derived.by(() => this.props.openMobile());
   setOpen: SidebarStateProps['setOpen'];
+  setOpenMobile: SidebarStateProps['setOpenMobile'];
   #isMobile: IsMobile;
   state = $derived.by(() => (this.open ? 'expanded' : 'collapsed'));
 
   constructor(props: SidebarStateProps) {
     this.setOpen = props.setOpen;
+    this.setOpenMobile = props.setOpenMobile;
     this.#isMobile = new IsMobile();
     this.props = props;
   }
@@ -48,12 +52,8 @@ class SidebarState {
     }
   };
 
-  setOpenMobile = (value: boolean) => {
-    this.openMobile = value;
-  };
-
   toggle = () => {
-    return this.#isMobile.current ? (this.openMobile = !this.openMobile) : this.setOpen(!this.open);
+    return this.#isMobile.current ? this.setOpenMobile(!this.openMobile) : this.setOpen(!this.open);
   };
 }
 

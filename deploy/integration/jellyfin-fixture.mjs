@@ -14,6 +14,7 @@ const stats = {
   sourceRequests: 0,
   sourceRequestRanges: [],
   sourceStartTimeTicks: [],
+  sourceConcurrentAtOpen: [],
   activeSourceRequests: 0,
   maximumConcurrentSourceRequests: 0,
   completedSourceRequests: 0,
@@ -80,10 +81,12 @@ function streamMedia(request, response) {
   if (stats.sourceRequestRanges.length > 20) stats.sourceRequestRanges.shift();
   if (stats.sourceStartTimeTicks.length > 20) stats.sourceStartTimeTicks.shift();
   stats.activeSourceRequests += 1;
+  stats.sourceConcurrentAtOpen.push(stats.activeSourceRequests);
   stats.maximumConcurrentSourceRequests = Math.max(
     stats.maximumConcurrentSourceRequests,
     stats.activeSourceRequests
   );
+  if (stats.sourceConcurrentAtOpen.length > 20) stats.sourceConcurrentAtOpen.shift();
   let completed = false;
   const finish = () => {
     if (completed) return;

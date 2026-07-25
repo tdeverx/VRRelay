@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { RelayConfig } from '../config.js';
 import { resolveRolePlan, type CompositionKind } from './role-plan.js';
-import { ROLE_RUNTIME_COMPONENTS, type RuntimeComponent } from './runtime-graph.js';
 import {
   startControllerRuntime,
   startEdgeRuntime,
@@ -11,10 +10,7 @@ import {
 } from './runtime.js';
 
 export type CompositionRoot = (config: RelayConfig) => Promise<void>;
-export type RoleRuntimeFactory = (
-  config: RelayConfig,
-  components: readonly RuntimeComponent[]
-) => Promise<void>;
+export type RoleRuntimeFactory = (config: RelayConfig) => Promise<void>;
 
 export interface RuntimeFactories {
   controller: RoleRuntimeFactory;
@@ -36,13 +32,11 @@ export function createCompositionRoots(
   factories: RuntimeFactories = DEFAULT_RUNTIME_FACTORIES
 ): Record<CompositionKind, CompositionRoot> {
   return {
-    controller: (config) => factories.controller(config, ROLE_RUNTIME_COMPONENTS.controller),
-    'source-worker': (config) =>
-      factories['source-worker'](config, ROLE_RUNTIME_COMPONENTS['source-worker']),
-    'ingest-origin': (config) =>
-      factories['ingest-origin'](config, ROLE_RUNTIME_COMPONENTS['ingest-origin']),
-    edge: (config) => factories.edge(config, ROLE_RUNTIME_COMPONENTS.edge),
-    standalone: (config) => factories.standalone(config, ROLE_RUNTIME_COMPONENTS.standalone)
+    controller: factories.controller,
+    'source-worker': factories['source-worker'],
+    'ingest-origin': factories['ingest-origin'],
+    edge: factories.edge,
+    standalone: factories.standalone
   };
 }
 

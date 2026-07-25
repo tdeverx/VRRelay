@@ -30,7 +30,7 @@ services:
       - vrrelay-data:/data
       - vrrelay-cache:/cache
     ports:
-      - '${VRRELAY_HTTP_PORT:-8099}:8099'
+      - '${VRRELAY_HTTP_HOST:-127.0.0.1}:${VRRELAY_HTTP_PORT:-8099}:8099'
     healthcheck:
       test:
         [

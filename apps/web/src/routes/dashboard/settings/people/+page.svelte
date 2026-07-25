@@ -13,6 +13,7 @@
   import * as Card from '#lib/new-ui/components/ui/card';
   import * as Select from '#lib/new-ui/components/ui/select';
   import { Switch } from '#lib/new-ui/components/ui/switch';
+  import { loginRoute } from '#lib/new-ui/state.svelte';
 
   type UserRecord = { value: UserIdentity; revision: number };
   let users = $state<UserRecord[]>([]);
@@ -32,8 +33,7 @@
           all.findIndex((item) => item.profileId === profile.profileId) === index
       );
     } catch (reason) {
-      if (isAuthenticatedError(reason))
-        return goto(`/dashboard/login?returnTo=${encodeURIComponent(page.url.pathname)}`);
+      if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       error = reason instanceof Error ? reason.message : 'Could not load people and access.';
     } finally {
       loading = false;

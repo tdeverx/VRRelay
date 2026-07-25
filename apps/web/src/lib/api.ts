@@ -109,7 +109,8 @@ export class ApiClientError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    readonly code = 'request_failed'
+    readonly code = 'request_failed',
+    readonly details?: unknown
   ) {
     super(message);
   }
@@ -155,7 +156,8 @@ generatedClient.interceptors.error.use((error, response) => {
   return new ApiClientError(
     body?.error?.message ?? `Request failed (${response.status})`,
     response.status,
-    body?.error?.code
+    body?.error?.code,
+    error
   );
 });
 
@@ -165,6 +167,29 @@ async function result<T>(operation: Promise<{ data: unknown }>): Promise<T> {
 
 const required = { throwOnError: true } as const;
 
+interface ReadinessResponse {
+  status: 'ready' | 'degraded';
+  version: string;
+  now: string;
+  workers: { active: number; limit: number; queued: number };
+  dependencies: Array<{
+    category: string;
+    kind: string;
+    healthy: boolean;
+    checkedAt: string;
+    restartRequired?: boolean;
+  }>;
+  restartRequired: boolean;
+}
+
+function isReadinessResponse(value: unknown): value is ReadinessResponse {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as { dependencies?: unknown }).dependencies)
+  );
+}
+
 export const api = {
   health: () =>
     result<{
@@ -173,18 +198,15 @@ export const api = {
       now: string;
       workers: { active: number; limit: number; queued: number };
     }>(getHealth(required)),
-  readiness: () =>
-    result<{
-      status: string;
-      checkedAt: string;
-      dependencies: Array<{
-        category: string;
-        kind: string;
-        healthy: boolean;
-        checkedAt: string;
-        restartRequired: boolean;
-      }>;
-    }>(getReadiness(required)),
+  readiness: async (): Promise<ReadinessResponse> => {
+    try {
+      return await result<ReadinessResponse>(getReadiness(required));
+    } catch (reason) {
+      if (reason instanceof ApiClientError && isReadinessResponse(reason.details))
+        return reason.details;
+      throw reason;
+    }
+  },
   runtimeConfiguration: () =>
     result<{
       configuration: RuntimeConfiguration;

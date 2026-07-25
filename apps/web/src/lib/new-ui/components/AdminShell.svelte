@@ -10,6 +10,7 @@
     HardDrive,
     KeyRound,
     Library,
+    ListPlus,
     LogOut,
     Moon,
     Network,
@@ -27,6 +28,7 @@
   import * as Sidebar from '#lib/new-ui/components/ui/sidebar';
   import { Separator } from '#lib/new-ui/components/ui/separator';
   import {
+    loginRoute,
     readThemePreference,
     setThemePreference,
     type ThemePreference
@@ -37,6 +39,8 @@
   let healthLoading = $state(true);
   let theme = $state<ThemePreference>('system');
   let sidebarOpen = $state(false);
+  let sidebarOpenMobile = $state(false);
+  let mobileNavigationTrigger = $state<HTMLButtonElement | null>(null);
   let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
 
   let isOperator = $derived(
@@ -61,6 +65,12 @@
       {
         label: 'Admin',
         items: [
+          {
+            label: 'Advanced relay',
+            href: `${routePrefix}/relay/new`,
+            icon: ListPlus,
+            visible: isAdmin
+          },
           {
             label: 'People & access',
             href: `${routePrefix}/settings/people`,
@@ -130,7 +140,15 @@
 
   onMount(() => {
     const fullSidebar = matchMedia('(min-width: 1536px)');
-    const syncSidebar = () => (sidebarOpen = fullSidebar.matches);
+    const savedSidebar = document.cookie
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith('sidebar_state='))
+      ?.split('=')[1];
+    const syncSidebar = () => {
+      sidebarOpen =
+        savedSidebar === 'true' ? true : savedSidebar === 'false' ? false : fullSidebar.matches;
+    };
     syncSidebar();
     fullSidebar.addEventListener('change', syncSidebar);
 
@@ -143,7 +161,7 @@
     void api
       .me()
       .then((value) => (currentUser = value))
-      .catch(() => (location.href = '/dashboard/login'));
+      .catch(() => (location.href = loginRoute(`${location.pathname}${location.search}`)));
 
     return () => fullSidebar.removeEventListener('change', syncSidebar);
   });
@@ -155,11 +173,19 @@
     }
   }
 
+  function closeMobileNavigationOnEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || !sidebarOpenMobile) return;
+    sidebarOpenMobile = false;
+    requestAnimationFrame(() => mobileNavigationTrigger?.focus());
+  }
+
   async function signOut() {
     await api.logout();
     location.href = '/dashboard/login';
   }
 </script>
+
+<svelte:window onkeydown={closeMobileNavigationOnEscape} />
 
 <a
   href="#new-main-content"
@@ -168,7 +194,7 @@
   Skip to main content
 </a>
 
-<Sidebar.Provider bind:open={sidebarOpen}>
+<Sidebar.Provider bind:open={sidebarOpen} bind:openMobile={sidebarOpenMobile}>
   <Sidebar.Root collapsible="icon">
     <Sidebar.Header>
       <Sidebar.Menu>
@@ -233,7 +259,7 @@
                       tooltipContent={item.label}
                     >
                       {#snippet child({ props })}
-                        <a href={item.href} {...props}>
+                        <a href={item.href} {...props} onclick={() => (sidebarOpenMobile = false)}>
                           <item.icon />
                           <span>{item.label}</span>
                         </a>
@@ -280,7 +306,11 @@
 
   <Sidebar.Inset class="min-w-0">
     <header class="bg-background sticky top-0 z-20 flex h-14 items-center gap-3 border-b px-4">
-      <Sidebar.Trigger class="md:hidden" aria-label="Open navigation" />
+      <Sidebar.Trigger
+        bind:ref={mobileNavigationTrigger}
+        class="md:hidden"
+        aria-label="Open navigation"
+      />
       <Sidebar.Trigger
         class="hidden md:inline-flex"
         aria-label={sidebarOpen ? 'Collapse navigation' : 'Expand navigation'}

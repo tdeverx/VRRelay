@@ -105,6 +105,7 @@ interface JellyfinItemsResult {
 export interface JellyfinProviderOptions {
   resolveTarget?: (rawUrl: string) => Promise<PinnedProviderTarget>;
   requestConnector?: JellyfinRequestConnector;
+  requestTimeoutMs?: number;
 }
 
 export interface JellyfinConnectorRequest {
@@ -125,15 +126,26 @@ const nodeRequestConnector: JellyfinRequestConnector = ({ url, options, body }) 
     outgoing.end(body);
   });
 
+async function awaitWithSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 export class JellyfinProvider implements MediaProvider {
   readonly #applicationVersion: string;
   readonly #resolveTarget: (rawUrl: string) => Promise<PinnedProviderTarget>;
   readonly #requestConnector: JellyfinRequestConnector;
+  readonly #requestTimeoutMs: number;
 
   constructor(applicationVersion = '0.1.0', options: JellyfinProviderOptions = {}) {
     this.#applicationVersion = applicationVersion;
     this.#resolveTarget = options.resolveTarget ?? resolveProviderRequestTarget;
     this.#requestConnector = options.requestConnector ?? nodeRequestConnector;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   }
   readonly type = 'jellyfin' as const;
   readonly capabilities = [
@@ -517,7 +529,9 @@ export class JellyfinProvider implements MediaProvider {
     // Resolve and validate immediately before opening the socket, then make
     // Node's connector use only that result. Host and TLS SNI remain bound to
     // the administrator-approved hostname while DNS cannot be queried again.
-    const target = await this.#resolveTarget(rawUrl);
+    const timeout = AbortSignal.timeout(this.#requestTimeoutMs);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    const target = await awaitWithSignal(this.#resolveTarget(rawUrl), signal);
     if (
       target.url.protocol === 'http:' &&
       !target.privateNetwork &&
@@ -536,7 +550,7 @@ export class JellyfinProvider implements MediaProvider {
           method: options.method ?? 'GET',
           headers,
           agent: false,
-          ...(options.signal ? { signal: options.signal } : {}),
+          signal,
           ...(target.url.protocol === 'https:' && isIP(hostname) === 0
             ? { servername: hostname }
             : {}),

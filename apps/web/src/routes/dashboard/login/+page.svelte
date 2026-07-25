@@ -9,7 +9,7 @@
   import * as Card from '#lib/new-ui/components/ui/card';
   import * as Field from '#lib/new-ui/components/ui/field';
   import { Input } from '#lib/new-ui/components/ui/input';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { safeDashboardReturnTo } from '#lib/new-ui/state.svelte';
 
   let username = $state('');
   let password = $state('');
@@ -21,7 +21,7 @@
       const status = await api.signInStatus();
       providerName = status.providerName ?? 'Jellyfin';
       await api.me();
-      await goto('/dashboard');
+      await goto(safeDashboardReturnTo(page.url.searchParams.get('returnTo')));
     } catch {
       // Signed-out visitors stay on this page.
     }
@@ -37,7 +37,7 @@
           ? { method: 'jellyfin', username: loginUsername, password }
           : { method: 'recovery', password }
       );
-      await goto(adminRoute(page.url.pathname));
+      await goto(safeDashboardReturnTo(page.url.searchParams.get('returnTo')));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Login failed.');
     } finally {
@@ -51,7 +51,8 @@
     <Card.Header>
       <Card.Title><h1>Welcome back</h1></Card.Title>
       <Card.Description>
-        Sign in with your {providerName} account.
+        Sign in with your {providerName} account, or leave the username blank to use the local recovery-owner
+        password.
       </Card.Description>
     </Card.Header>
     <Card.Content>
@@ -70,7 +71,9 @@
               autocomplete="current-password"
             />
             <Field.Description>
-              Your password is exchanged for a session token and is never stored.
+              {username.trim()
+                ? 'Your provider password is exchanged for a session token and is never stored.'
+                : 'The recovery password is verified against its local Argon2id hash.'}
             </Field.Description>
           </Field.Field>
         </Field.Group>

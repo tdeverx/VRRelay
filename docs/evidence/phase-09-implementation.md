@@ -1,6 +1,6 @@
 # Phase 9 implementation checkpoint — automated verification expansion
 
-Date: 2026-07-16
+Date: 2026-07-25
 
 This is an automated-verification checkpoint. It is not the Phase 9 exit gate:
 the repository suite is green, while the media matrix, destructive cluster
@@ -67,6 +67,35 @@ Results:
   provider-neutral workspace packages before validating the generated agent
   protocol schema, so this gate no longer depends on stale local `dist` output.
 
+## Audit-remediation verification — 2026-07-25
+
+The expanded audit-remediation checkout produced the following fresh local
+evidence:
+
+- Vitest: 47 passing files, one intentionally skipped file, 474 passing tests,
+  and 25 intentional skips.
+- Playwright: 13 passing desktop Chromium workflows and 13 passing mobile
+  Chromium workflows, with one intentional skip in each project.
+- Static/build: formatting, generated OpenAPI freshness, generated agent-schema
+  freshness, OpenAPI/domain semantics, all workspace and test-source
+  typechecks, Svelte diagnostics, repository/deployment guards, lint, and
+  production builds passed.
+- Distributed acceptance: regional edge routing, three-viewer persistent VOD
+  behavior, late join/reconnect, divergent seek, slow-viewer isolation,
+  standards-aware proxy revocation, exact process/file cleanup, source failover,
+  controller restart recovery, and regional live fan-out passed.
+- Deployment and native checks: standalone Compose, cluster Compose, the local
+  multi-process cluster, Helm lint/render, OpenTofu format/validate, Swift
+  release build/tests, and Gitleaks history/source scans passed.
+- The production OCI smoke accepted the exact lock with a clean npm 12 install,
+  built the application, pruned development dependencies, and verified Node
+  `26.5.0`, FFmpeg `8.1.2`, `libx264`, subtitle support, and container health.
+
+The dependency lock pins the patched releases, including `@fastify/static`
+`10.1.2` and `find-my-way` `9.7.0`, and was accepted by clean npm 12 host and
+container installs. The final full repository gate and online production audit
+reported zero vulnerabilities.
+
 ## Deferred to the Phase 9 exit gate
 
 - Real MinIO/S3-compatible, Azure Blob, GCS, PostgreSQL, Valkey, platform secret
@@ -79,5 +108,6 @@ Results:
   cancellation, publisher replacement, and rolling-upgrade cluster scenarios.
 - Complete browser coverage for every administrator workflow, plus retained
   logs, manifests, metrics, checksums, and target-environment benchmark reports.
-- Docker-backed and multi-host destructive work could not be promoted by these
-  local tests; it remains an external execution gate.
+- True multi-host and target-environment destructive work is not established by
+  the local Docker and multi-process smoke tests; it remains an external
+  execution gate.

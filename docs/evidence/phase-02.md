@@ -55,7 +55,7 @@ Together, the retained runs covered:
 - provider/node locking, binding ownership, and staged-secret reconciliation;
 - exact schema column/type/nullability/default/check/key/unique/index shape rejection;
 - append-only audit ordering/redaction and audit-write failure behavior;
-- role graph/route ownership and schema-startup policy;
+- runtime composition/route ownership and schema-startup policy;
 - concurrent encrypted file-secret mutation and atomic publication failure handling.
 
 Equivalent repository behavior is also exercised through two independent SQLite connections, including the immediate migration lock, WAL-consistent pre-migration backup, CAS conflicts, transactional rollback, and immutable history checks.

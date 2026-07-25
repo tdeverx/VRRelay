@@ -64,6 +64,7 @@ export class SessionCache {
 
   async recoverPartials(): Promise<void> {
     await rm(join(this.options.cacheDir, 'worker'), { recursive: true, force: true });
+    await rm(join(this.options.cacheDir, 'producer'), { recursive: true, force: true });
     await removePartialFiles(join(this.options.cacheDir, 'vod'));
   }
 
@@ -203,6 +204,10 @@ export class SessionCache {
     return true;
   }
 
+  async removeScratchObject(path: string): Promise<void> {
+    await this.#removeLocalObject(path);
+  }
+
   async cleanupExpired(protectedPaths: readonly string[] = []): Promise<number> {
     const protectedSet = new Set(protectedPaths);
     const now = Date.now();
@@ -242,9 +247,10 @@ export class SessionCache {
       }
     };
     await visit(root);
+    const scratchBytes = await this.#directoryUsageBytes(join(this.options.cacheDir, 'producer'));
     const limit = this.options.cacheLimitBytes;
+    let total = files.reduce((sum, file) => sum + file.size, scratchBytes);
     if (limit) {
-      let total = files.reduce((sum, file) => sum + file.size, 0);
       for (const file of files.sort((left, right) => left.mtimeMs - right.mtimeMs)) {
         if (total <= limit) break;
         if (protectedSet.has(file.path)) continue;
@@ -252,8 +258,8 @@ export class SessionCache {
         total -= file.size;
         removed += 1;
       }
-      this.metrics?.gauge('cache_bytes', total, { layer: 'disk' });
     }
+    this.metrics?.gauge('cache_bytes', total, { layer: 'disk' });
     if (removed) this.events.publish(event('cache.evicted', { count: removed }));
     return removed;
   }
@@ -319,7 +325,30 @@ export class SessionCache {
   }
 
   async usageBytes(): Promise<number> {
-    return (await this.inventory()).reduce((total, object) => total + object.size, 0);
+    const cachedBytes = (await this.inventory()).reduce((total, object) => total + object.size, 0);
+    return cachedBytes + (await this.#directoryUsageBytes(join(this.options.cacheDir, 'producer')));
+  }
+
+  async #directoryUsageBytes(directory: string): Promise<number> {
+    let total = 0;
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return 0;
+    }
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) total += await this.#directoryUsageBytes(path);
+      else {
+        try {
+          total += (await stat(path)).size;
+        } catch {
+          // Producer publication and cleanup can remove a file between readdir and stat.
+        }
+      }
+    }
+    return total;
   }
 
   async #fileSha256(path: string): Promise<string> {

@@ -1044,27 +1044,7 @@ components:
             type: string,
             enum: [object-store, coordination, repository, routing, secrets, metrics]
           }
-        kind:
-          {
-            type: string,
-            enum:
-              [
-                local,
-                s3,
-                azure-blob,
-                gcs,
-                postgres,
-                valkey,
-                builtin,
-                static,
-                webhook,
-                sqlite,
-                keychain,
-                dpapi,
-                encrypted-file,
-                prometheus
-              ]
-          }
+        kind: { type: string, minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9-]*$' }
         healthy: { type: boolean }
         checkedAt: { type: string, format: date-time }
         restartRequired: { type: boolean }
@@ -1287,11 +1267,13 @@ components:
         total: { type: integer, minimum: 0 }
     VideoSettings:
       type: object
+      additionalProperties: false
       required:
         [
           codec,
           encoder,
           hardwareMode,
+          decodeMode,
           pixelFormat,
           width,
           height,
@@ -1304,17 +1286,16 @@ components:
         ]
       properties:
         codec: { type: string, enum: [h264, h265, av1, copy] }
-        encoder: { type: string }
+        encoder:
+          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
         hardwareMode: { type: string, enum: [auto, software, videotoolbox, qsv, vaapi, nvenc, amf] }
         decodeMode:
-          {
-            type: string,
-            enum: [auto, software, videotoolbox, d3d11va, qsv, vaapi, cuda],
-            default: auto
-          }
-        profile: { type: string }
-        level: { type: string }
-        pixelFormat: { type: string }
+          { type: string, enum: [auto, software, videotoolbox, d3d11va, qsv, vaapi, cuda] }
+        profile:
+          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
+        level:
+          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
+        pixelFormat: { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9_]+$' }
         width: { type: integer, minimum: 16, maximum: 7680 }
         height: { type: integer, minimum: 16, maximum: 4320 }
         frameRate: { type: integer, minimum: 1, maximum: 120 }
@@ -1322,17 +1303,21 @@ components:
         maxrateKbps: { type: integer, minimum: 64, maximum: 120000 }
         bufferKbps: { type: integer, minimum: 64, maximum: 240000 }
         quality: { type: integer, minimum: 0, maximum: 63 }
-        preset: { type: string }
-        tune: { type: string }
+        preset:
+          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
+        tune:
+          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
         gop: { type: integer, minimum: 1, maximum: 600 }
         bFrames: { type: integer, minimum: 0, maximum: 16 }
     AudioSettings:
       type: object
+      additionalProperties: false
       required: [codec, channels, layout, sampleRate, bitrateKbps]
       properties:
         codec: { type: string, enum: [aac, opus, ac3, copy] }
         channels: { type: integer, minimum: 1, maximum: 8 }
-        layout: { type: string }
+        layout:
+          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
         sampleRate: { type: integer, minimum: 8000, maximum: 192000 }
         bitrateKbps: { type: integer, minimum: 32, maximum: 1536 }
         defaultLanguage:
@@ -1340,13 +1325,14 @@ components:
             type: string,
             minLength: 2,
             maxLength: 16,
-            pattern: '^[A-Za-z]{2,8}([_-][A-Za-z0-9]{2,8})?$'
+            pattern: '^[a-zA-Z]{2,8}(?:[-_][a-zA-Z0-9]{2,8})?$'
           }
     DeliverySettings:
       type: object
+      additionalProperties: false
       required: [method, container, segmentType, segmentDuration, playlistType, latencyMode]
       properties:
-        method: { type: string, enum: [hls, fragmented_mp4, rtsp, mpegts_http] }
+        method: { type: string, enum: [hls, rtsp, mpegts_http] }
         container: { type: string, enum: [mpegts, fmp4, mp4] }
         segmentType: { type: string, enum: [mpegts, fmp4, none] }
         segmentDuration: { type: number, minimum: 1, maximum: 30 }
@@ -1354,6 +1340,7 @@ components:
         latencyMode: { type: string, enum: [standard, low] }
     ProcessingSettings:
       type: object
+      additionalProperties: false
       required: [toneMap, burnSubtitles, passthrough, maxWorkers]
       properties:
         toneMap: { type: boolean }
@@ -1748,11 +1735,42 @@ components:
           properties: { token: { type: string, writeOnly: true } }
     RelayEvent:
       type: object
+      additionalProperties: false
       required: [version, id, type, timestamp, payload]
       properties:
-        version: { const: 1 }
+        version: { type: number, const: 1 }
         id: { type: string }
-        type: { type: string }
+        type:
+          type: string
+          enum:
+            - session.created
+            - session.updated
+            - session.deleted
+            - worker.started
+            - worker.completed
+            - worker.failed
+            - cache.hit
+            - cache.evicted
+            - viewer.joined
+            - viewer.left
+            - live.publisher.connected
+            - live.publisher.disconnected
+            - live.normalizer.failed
+            - live.channel.deleted
+            - system.capacity
+            - node.joined
+            - node.heartbeat
+            - node.draining
+            - node.offline
+            - node.log
+            - job.log
+            - job.queued
+            - job.leased
+            - job.completed
+            - job.failed
+            - route.selected
+            - storage.uploaded
+            - storage.invalidated
         timestamp: { type: string, format: date-time }
         sessionId: { type: string }
         payload: { type: object, additionalProperties: true }
@@ -1764,6 +1782,7 @@ components:
       }
     NodeCapability:
       type: object
+      additionalProperties: false
       required:
         [
           encoders,
@@ -1780,17 +1799,17 @@ components:
       properties:
         encoders: { type: array, items: { type: string } }
         hardwareDevices: { type: array, items: { type: string } }
-        maxWorkers: { type: integer, minimum: 0 }
-        activeWorkers: { type: integer, minimum: 0 }
-        queuedWorkers: { type: integer, minimum: 0 }
-        cacheBytes: { type: integer, minimum: 0 }
+        maxWorkers: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        activeWorkers: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        queuedWorkers: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        cacheBytes: { type: integer, minimum: 0, maximum: 9007199254740991 }
         cacheLimitBytes: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
         egressMbps:
           type: number
           minimum: 0
           description: Average media payload egress over the trailing 30 seconds.
         providerIds: { type: array, items: { type: string } }
-        vodProducerVersion: { type: integer, minimum: 0, default: 0 }
+        vodProducerVersion: { type: integer, minimum: 0, maximum: 9007199254740991 }
     ClusterNode:
       type: object
       required:
@@ -1812,8 +1831,8 @@ components:
         name: { type: string }
         roles: { type: array, items: { $ref: '#/components/schemas/NodeRole' } }
         region: { type: string }
-        publicUrl: { type: string, format: uri, pattern: '^https?://' }
-        internalUrl: { type: string, format: uri, pattern: '^https?://' }
+        publicUrl: { type: string, format: uri, pattern: '^https?://[^/?#@]+(?:/[^?#]*)?$' }
+        internalUrl: { type: string, format: uri, pattern: '^https?://[^/?#@]+(?:/[^?#]*)?$' }
         state: { type: string, enum: [joining, online, degraded, draining, offline, revoked] }
         capabilities: { $ref: '#/components/schemas/NodeCapability' }
         weight: { type: integer }
@@ -1835,6 +1854,7 @@ components:
       }
     CreateNodeJoinTokenRequest:
       type: object
+      additionalProperties: false
       required: [name, roles, region]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
@@ -1858,8 +1878,8 @@ components:
       properties:
         token: { type: string, minLength: 32, writeOnly: true }
         name: { type: string, minLength: 1, maxLength: 120 }
-        publicUrl: { type: string, format: uri, pattern: '^https?://' }
-        internalUrl: { type: string, format: uri, pattern: '^https?://' }
+        publicUrl: { type: string, format: uri, pattern: '^https?://[^/?#@]+(?:/[^?#]*)?$' }
+        internalUrl: { type: string, format: uri, pattern: '^https?://[^/?#@]+(?:/[^?#]*)?$' }
         capabilities: { $ref: '#/components/schemas/NodeCapability' }
         csrPem:
           type: string
@@ -2028,6 +2048,7 @@ components:
       }
     BackendValidationRequest:
       type: object
+      additionalProperties: false
       required: [category, kind]
       properties:
         category:
@@ -2057,7 +2078,7 @@ components:
               ]
           }
         endpoint: { type: string, format: uri }
-        secretRef: { type: string, writeOnly: true }
+        secretRef: { type: string, minLength: 1, maxLength: 200, writeOnly: true }
         nodeId: { type: string, minLength: 1, maxLength: 200 }
         bucket: { type: string, minLength: 1, maxLength: 255 }
         container: { type: string, minLength: 1, maxLength: 255 }
@@ -2126,6 +2147,7 @@ components:
       allOf: [{ $ref: '#/components/schemas/BackendValidationRequest' }]
     BackendStatus:
       type: object
+      additionalProperties: false
       required: [category, kind, healthy, checkedAt]
       properties:
         category:
@@ -2133,27 +2155,7 @@ components:
             type: string,
             enum: [object-store, coordination, repository, routing, secrets, metrics]
           }
-        kind:
-          {
-            type: string,
-            enum:
-              [
-                local,
-                s3,
-                azure-blob,
-                gcs,
-                postgres,
-                valkey,
-                builtin,
-                static,
-                webhook,
-                sqlite,
-                keychain,
-                dpapi,
-                encrypted-file,
-                prometheus
-              ]
-          }
+        kind: { type: string, minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9-]*$' }
         healthy: { type: boolean }
         message: { type: string }
         checkedAt: { type: string, format: date-time }

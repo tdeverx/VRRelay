@@ -1,6 +1,6 @@
 # Phase 7 implementation checkpoint — generated API and operator workflows
 
-Date: 2026-07-16
+Date: 2026-07-25
 
 This is a build-first implementation checkpoint for the generated API boundary
 and several administrator workflows. It is not evidence that every dashboard,
@@ -14,49 +14,62 @@ browser, accessibility, realtime, or release-candidate workflow is complete.
   authentication/CSRF interceptors, normalized errors, and small
   domain-facing conveniences. The repository check rejects literal API paths or
   use of the generated client's generic request method in that facade.
-- The sessions page now exposes stop/resume, pin/unpin, deletion with
-  confirmation, details, output selection, and copy-link controls while keeping
-  visible pending and error states.
-- The new VOD workflow loads online source workers compatible with the selected
-  provider and encoder, previews scheduler placement, supports region and exact
-  worker preferences, and displays explicit placement rejection reasons before
-  creation. The UI sends `preferredNodeId` only while exact-worker lock is on;
-  the server derives and persists `placementLocked` from that preference before
-  resolving the same worker.
+- The current sessions page exposes copy and revocation, the supported durable
+  session actions. Deletion uses a shared confirmation with pending and
+  recoverable error states. Earlier stop/resume, pin, detail, and output
+  selection controls described by this checkpoint are no longer active UI.
+- The advanced administrator VOD workflow loads online source workers
+  compatible with an administrator-managed provider connection and encoder,
+  previews scheduler placement, supports region and exact worker preferences,
+  and displays explicit placement rejection reasons before creation. Delegated
+  Jellyfin users continue to use the role-aware catalog workflow with their
+  session credential. Connections now exposes explicit delegated, stored user
+  token, and stored API-key modes so the advanced workflow is not dependent on
+  an API-only setup path. The advanced UI sends `preferredNodeId` only while
+  exact-worker lock is on; the server derives and persists `placementLocked`
+  from that preference before resolving the same worker.
 - The application shell now has a working persisted navigation-collapse state,
   a visible-on-focus skip link, mobile open/close focus transfer, Escape
   dismissal, and an accessible collapsed-navigation label.
-- The cluster cache panel continues to target either controller-local cache or
-  a connected source-worker/edge cache. It falls back to local cache if the
-  selected node disconnects or loses its cache-owning role, and sends `nodeId`
-  only for explicit remote inventory/eviction operations.
-- Playwright now runs two administrator workflows against desktop Chromium and
-  a Pixel 7-sized mobile project: first-run setup/login/responsive navigation,
-  and scoped PAT creation/revocation/logout. The tests fail on browser page
-  errors and on serious or critical WCAG A/AA Axe findings. CI builds the app,
-  installs Chromium, runs the suite, and retains failure artifacts.
+- The current jobs-and-cache page exposes controller-local inventory and
+  confirmed bulk eviction. Earlier remote cache targeting described by this
+  checkpoint is no longer an active dashboard workflow.
+- Storage & routing now exposes the existing structured backend validation and
+  activation APIs. Operators choose routing, metrics, or object-store fields,
+  reference pre-provisioned secrets by name rather than value, validate the
+  unchanged configuration, and confirm activation. Object-store activation
+  remains explicitly staged until every role restarts.
+- Jobs expose bounded redacted logs, retry, and confirmed cancellation; revoked
+  node records expose confirmed removal while the server continues to refuse
+  removal when provider bindings remain.
+- The production-build Playwright suite covers theme persistence, responsive
+  loading geometry, every administrator destination, safe authentication
+  returns, degraded readiness, settings read-only behavior, PAT expiry and
+  confirmed revocation, mobile navigation dismissal, persisted desktop
+  collapse, complete advanced relay creation and Sessions handoff, recovery
+  and Jellyfin roles, clipboard-denied partial success, and confirmed session
+  revocation. Every page is monitored for uncaught browser errors, and route
+  coverage retains serious/critical WCAG A/AA Axe checks.
 
-## Focused verification
+## Verification state
 
-Commands observed in this closeout:
+The expanded current-worktree suite was run on 2026-07-25. Desktop Chromium
+passed 13 workflows with one intentional skip, and mobile Chromium independently
+passed the same 13 workflows with one intentional skip. The suite covered every
+administrator destination, route-specific titles, safe authentication returns,
+degraded diagnostics, nonmutating settings navigation, confirmed backend and PAT
+mutations, mobile dismissal, persisted desktop collapse, placement validation,
+and recovery/Jellyfin roles. No workflow test failed.
 
-```text
-npx playwright test
-```
+The same checkout passed formatting, generated-client freshness, contract
+semantics, workspace and test-source typechecks, Svelte diagnostics, repository
+and deployment guards, lint, and production builds. The full Vitest run passed
+474 tests across 47 files, with 25 intentional skips and one skipped file.
 
-Result: all four project cases passed (two workflows on desktop and mobile),
-with no captured page errors and no serious or critical Axe violations.
+## Deferred to broader release qualification
 
-The complete combined closeout also passed `npm run ci` under the pinned Node
-`22.23.1` runtime: 395 tests passed, 23 intentional skips, all formatting,
-generated-client, typecheck, lint, build, and repository gates passed, and the
-npm audit reported zero vulnerabilities.
-
-## Deferred to the final high-pass verification
-
-- Full browser execution of session mutation, placement submission, catalog,
-  live, provider-binding/failover, job history, cache, certificates, metrics,
-  compatibility, and realtime log/event workflows.
+- Full browser execution of live, provider-binding/failover, job history,
+  certificates, metrics, compatibility, and realtime log/event workflows.
 - Browser and destructive multi-process proof that exact locked placement
   remains stable through worker loss and scheduler execution.
 - Broader keyboard/table interaction and focus-managed confirmation coverage

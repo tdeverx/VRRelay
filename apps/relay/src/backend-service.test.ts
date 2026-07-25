@@ -50,7 +50,8 @@ function edgeNode(id: string, region: string, state: ClusterNode['state'] = 'onl
       cacheBytes: 0,
       cacheLimitBytes: 1024,
       egressMbps: 0,
-      providerIds: []
+      providerIds: [],
+      vodProducerVersion: 0
     },
     lastHeartbeatAt: now,
     createdAt: now,
@@ -151,7 +152,8 @@ describe('backend service', () => {
         cacheBytes: 0,
         cacheLimitBytes: 1024,
         egressMbps: 0,
-        providerIds: []
+        providerIds: [],
+        vodProducerVersion: 0
       },
       lastHeartbeatAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),

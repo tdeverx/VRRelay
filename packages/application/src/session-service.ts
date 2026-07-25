@@ -2,7 +2,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { access, mkdir, rm, utimes } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { Writable } from 'node:stream';
 import type {
   CachedObject,
   JobLogEntry,
@@ -300,7 +299,7 @@ export class SessionService {
           this.#remoteSegmentCommand(jobId, session, contentKey, segmentIndex)
       }
     );
-    if (infrastructure.clusterRepository && infrastructure.coordination)
+    if (infrastructure.clusterRepository && infrastructure.coordination && transcoder.produceVod)
       this.#producers = new VodProducerCoordinator(
         infrastructure.clusterRepository,
         infrastructure.coordination,
@@ -393,12 +392,7 @@ export class SessionService {
         throw new ConflictError('Live sessions require a live HLS profile');
       liveChannelRevision = await this.#claimLiveNormalizationProfile(input.liveChannelId, profile);
     }
-    const path =
-      input.kind === 'live'
-        ? 'live.m3u8'
-        : profile.delivery.method === 'fragmented_mp4'
-          ? 'stream.mp4'
-          : 'index.m3u8';
+    const path = input.kind === 'live' ? 'live.m3u8' : 'index.m3u8';
     const session: RelaySession = {
       id,
       name: name ?? 'Untitled relay',
@@ -690,7 +684,9 @@ export class SessionService {
     if (!session) throw new NotFoundError('Session was not found');
     // Read durable ownership before stopping or deleting credentials.  A
     // failed-over producer is not necessarily on the assigned worker.
-    const producer = await this.#producers?.get(id);
+    const producer =
+      (await this.#producers?.get(id)) ??
+      (await this.infrastructure.clusterRepository?.getVodProducer(id));
     await this.#producers?.stop(id);
     const ownerNodeId = producer?.ownerNodeId ?? session.assignedNodeId;
     if (ownerNodeId && ownerNodeId !== this.options.nodeId)
@@ -880,29 +876,6 @@ export class SessionService {
 
   async playbackSession(token: string): Promise<RelaySession> {
     return (await this.#playback(token)).session;
-  }
-
-  async streamFragmentedMp4(token: string, output: Writable, signal?: AbortSignal): Promise<void> {
-    const { session, profile } = await this.#playback(token);
-    if (session.kind !== 'vod' || !session.source || profile.delivery.method !== 'fragmented_mp4') {
-      throw new NotFoundError('Fragmented MP4 output was not found');
-    }
-    const connection = await this.repository.getProvider(session.source.providerId);
-    if (!connection) throw new NotFoundError('Provider connection was not found');
-    const credential = await this.#providerCredential(connection, session);
-    const provider = this.providers.get(connection.type);
-    const source = await provider.resolveSource(
-      credential.connection,
-      credential.secret,
-      session.source,
-      signal
-    );
-    await this.transcoder.streamFragmentedMp4(
-      this.#proxySource(source, provider, session.id),
-      profile,
-      output,
-      signal
-    );
   }
 
   async openSourceProxy(
@@ -1167,7 +1140,7 @@ export class SessionService {
       await mkdir(dirname(destination), { recursive: true });
       await this.transcoder.generateSegment(
         {
-          source: this.#proxySource(source, provider),
+          source: this.#proxySource(source, provider, session.id),
           profile,
           segmentIndex: index,
           startSeconds: index * segmentDuration,
@@ -1307,6 +1280,14 @@ export class SessionService {
     }
   }
 
+  async viewerIdentity(ip: string, userAgent: string | undefined): Promise<string> {
+    return createHmac('sha256', await this.#getViewerSalt())
+      .update(ip)
+      .update('\0')
+      .update((userAgent ?? 'unknown').slice(0, 256))
+      .digest('hex');
+  }
+
   async #edgeGrantSigningKey(create: boolean): Promise<string> {
     const existing = await this.repository.getSetting(EDGE_GRANT_SIGNING_KEY);
     if (existing) return existing;
@@ -1329,7 +1310,11 @@ export class SessionService {
 
   async #resolvePlaybackGrant(token: string): Promise<PlaybackGrant> {
     const edgeGrant = parseEdgeGrant(token);
-    if (!edgeGrant) return this.#validPlaybackGrant(hashToken(token));
+    if (!edgeGrant) {
+      if (this.#isEdgeOnly())
+        throw new UnauthorizedError('An edge-scoped playback link is required');
+      return this.#validPlaybackGrant(hashToken(token));
+    }
     const secret = await this.#edgeGrantSigningKey(false);
     if (!safeEqual(edgeGrant.signature, hmacBase64Url(secret, edgeGrant.body)))
       throw new UnauthorizedError('Edge playback link is invalid');

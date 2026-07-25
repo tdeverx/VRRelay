@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname } from 'node:path';
+import { SupervisedChildProcess } from '@vrrelay/adapters';
 
 export function mediaMtxEnvironment(
   relayPort: number,
@@ -24,8 +24,7 @@ export function mediaMtxEnvironment(
 }
 
 export class ManagedMediaMtx {
-  #child: ChildProcess | undefined;
-  #stopping = false;
+  #process: SupervisedChildProcess | undefined;
 
   constructor(
     private readonly options: {
@@ -36,47 +35,35 @@ export class ManagedMediaMtx {
     }
   ) {}
 
+  running(): boolean {
+    return this.#process?.running() ?? false;
+  }
+
   async start(): Promise<void> {
-    if (this.#child) return;
-    this.#stopping = false;
-    const child = spawn(this.options.executable, [this.options.configPath], {
-      cwd: dirname(this.options.configPath),
-      env: mediaMtxEnvironment(this.options.relayPort),
-      stdio: ['ignore', 'inherit', 'inherit'],
-      windowsHide: true
+    if (this.#process?.running()) return;
+    const process = new SupervisedChildProcess({
+      executable: this.options.executable,
+      arguments: [this.options.configPath],
+      spawnOptions: {
+        cwd: dirname(this.options.configPath),
+        env: mediaMtxEnvironment(this.options.relayPort),
+        stdio: ['ignore', 'inherit', 'pipe'],
+        windowsHide: true
+      },
+      gracefulStopMs: 5_000,
+      maxStderrBytes: 32_768,
+      redact: (value) =>
+        value
+          .replace(/([?&](?:pass(?:phrase|word)?|token|signature)=)[^&\s'"<>]*/gi, '$1[REDACTED]')
+          .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, '[REDACTED_URL]'),
+      onUnexpectedExit: this.options.onUnexpectedExit
     });
-    this.#child = child;
-    child.once('exit', (code, signal) => {
-      this.#child = undefined;
-      if (this.#stopping) return;
-      this.options.onUnexpectedExit(
-        new Error(`Managed MediaMTX exited unexpectedly (${signal ?? code ?? 'unknown'})`)
-      );
-    });
-    await new Promise<void>((resolve, reject) => {
-      const onSpawn = () => {
-        child.off('error', onError);
-        resolve();
-      };
-      const onError = (error: Error) => {
-        child.off('spawn', onSpawn);
-        this.#child = undefined;
-        reject(error);
-      };
-      child.once('spawn', onSpawn);
-      child.once('error', onError);
-    });
+    this.#process = process;
+    await process.start();
   }
 
   async stop(): Promise<void> {
-    this.#stopping = true;
-    const child = this.#child;
-    if (!child || child.exitCode !== null) return;
-    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    child.kill('SIGTERM');
-    const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
-    timer.unref();
-    await exited;
-    clearTimeout(timer);
+    await this.#process?.stop();
+    this.#process = undefined;
   }
 }

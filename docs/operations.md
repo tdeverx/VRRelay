@@ -12,6 +12,13 @@ Use `/api/v1/health` for process liveness and `/api/v1/ready` for dependency
 readiness. Readiness returns HTTP 503 when repository, coordination,
 object-store, routing, metrics, or restart-required backend state is not ready,
 but it only exposes redacted dependency category/kind/status fields.
+Controller and standalone readiness evaluates the configured backend aggregate;
+standalone additionally requires its managed or external MediaMTX API.
+Dedicated source-worker and edge roles also require an established controller
+agent connection; ingest-origin readiness additionally requires its managed
+MediaMTX process and API, while edge readiness requires the configured MediaMTX
+API. Public HTTP is bound only after critical local resources have started, so
+a startup failure cannot briefly expose a nominally live role server.
 
 The native menu/tray controller polls liveness without adding each successful probe to the request
 log. macOS service output rolls at 10 MiB and retains eight historical files beside
@@ -71,6 +78,24 @@ Segment job messages use the same redaction rules, are stored per job, and are
 emitted as `job.log` messages on the authenticated operations event stream.
 `VRRELAY_JOB_LOG_RETENTION_ROWS` controls how many recent rows are kept per job,
 and `VRRELAY_JOB_LOG_QUERY_LIMIT` caps `/api/v1/jobs/{jobId}/logs` responses.
+
+## Live admission and supervision
+
+Live channel creation is bounded by `VRRELAY_LIVE_MAX_CHANNELS_TOTAL` (default 32) and `VRRELAY_LIVE_MAX_CHANNELS_PER_OWNER` (default 4). Normalized live
+channels also share `VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT` (default 2), while
+`VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER` (default 1) prevents one owner from
+consuming every normalizer slot.
+Normalizer children drain stderr, apply bounded exponential restart backoff,
+and receive TERM followed by KILL during forced shutdown. Raise these limits
+only after measuring CPU, memory, ingest bandwidth, and restart behavior on the
+target host.
+
+Edge live-path configuration is demand-managed. Idle paths are deleted from
+MediaMTX after the configured stale interval and are recreated on later demand;
+failed upstream pulls are deleted and retried immediately. Live manifests and
+grant-bearing live segments are served with `no-store`, so deletion or grant
+revocation is revalidated at VRRelay rather than bypassed by an intermediary
+cache.
 
 ## Benchmark runs
 

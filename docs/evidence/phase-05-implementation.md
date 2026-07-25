@@ -16,12 +16,12 @@ media-matrix, real VRChat, deployment, or release-candidate evidence.
   - RTSP and HTTP MPEG-TS delivery;
   - HLS event playlists;
   - mismatched HLS container and segment-type pairs;
-  - fragmented-MP4 profiles that do not use MP4 container, no segment output,
-    and VOD playlist shape;
+  - direct fragmented-MP4 output;
   - passthrough-policy profiles.
 - The dashboard profile form now narrows delivery choices to implemented shapes:
-  HLS with matching MPEG-TS or fMP4 segment settings, and direct fragmented MP4
-  without segment output.
+  HLS with matching MPEG-TS or fMP4 segment settings. The direct fragmented-MP4
+  choice described by the original checkpoint was removed during the 2026-07-25
+  audit remediation because it bypassed admission and had no cluster delivery path.
 - Compatibility policy and implementation-status documentation now distinguish
   blocked schema-only outputs from experimental codecs and processing options
   that still require retained matrix evidence.
@@ -53,7 +53,7 @@ Result: all commands passed.
 ## Deferred to final high-pass verification
 
 - Media matrix evidence for H.265, AV1, copy codecs, hardware-specific encoders,
-  tone mapping, subtitle burn-in, fMP4/fragmented-MP4 concurrency, corrupt-input
+  tone mapping, subtitle burn-in, fMP4 HLS concurrency, corrupt-input
   behavior, and dual PC/Quest output claims.
 - Real VRChat PC HTTPS compatibility evidence and any Quest compatibility
   evidence separately collected on real hardware.

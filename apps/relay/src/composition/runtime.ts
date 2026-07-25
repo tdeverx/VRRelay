@@ -44,20 +44,14 @@ import {
 } from './infrastructure.js';
 import { createRepository } from './repository.js';
 import { ROLE_PLANS, type RolePlan } from './role-plan.js';
-import { createRoleServer, registerRoleInternalRoutes } from './role-server.js';
+import {
+  createRoleServer,
+  registerRoleInternalRoutes,
+  type RoleReadinessDependency
+} from './role-server.js';
 import { repositorySchemaStartupMethod } from './schema-startup.js';
-import { createShutdownSequence } from './shutdown.js';
-
-export const RUNTIME_SHUTDOWN_ORDER = [
-  'background-timers',
-  'live-service',
-  'managed-mediamtx',
-  'node-agent',
-  'agent-controller',
-  'backend-service',
-  'http-server',
-  'repository'
-] as const;
+import { createShutdownSequence, createStartupRollback } from './shutdown.js';
+import { fetchWithTimeout } from '../fetch-timeout.js';
 
 const EDGE_CAPABILITIES: MediaCapabilities = {
   ffmpegVersion: 'not-loaded',
@@ -83,9 +77,6 @@ const EDGE_TRANSCODER: Transcoder = {
   },
   generateSegment: async () => {
     throw new Error('Transcoding is unavailable on an edge');
-  },
-  streamFragmentedMp4: async () => {
-    throw new Error('Fragmented MP4 transcoding is unavailable on an edge');
   }
 };
 
@@ -116,6 +107,8 @@ function liveService(
       hlsUrl: config.mediaMtxHlsUrl,
       internalRtspUrl: config.mediaMtxRtspUrl,
       allowUnauthenticatedInternalRead: config.mediaMtxAllowInternalRead,
+      maxChannelsTotal: config.liveMaxChannelsTotal,
+      maxChannelsPerOwner: config.liveMaxChannelsPerOwner,
       ...(config.backupRtmpUrl ? { backupRtmpUrl: config.backupRtmpUrl } : {}),
       ...(config.backupSrtUrl ? { backupSrtUrl: config.backupSrtUrl } : {})
     },
@@ -124,6 +117,54 @@ function liveService(
     repository,
     metrics
   );
+}
+
+function createNonOverlappingInterval(
+  intervalMs: number,
+  operation: () => Promise<void>,
+  onError: (error: unknown) => void
+): NodeJS.Timeout {
+  let inFlight = false;
+  const timer = setInterval(() => {
+    if (inFlight) return;
+    inFlight = true;
+    void operation()
+      .catch(onError)
+      .finally(() => {
+        inFlight = false;
+      });
+  }, intervalMs);
+  timer.unref();
+  return timer;
+}
+
+async function reconcileMediaMtxPublisherPaths(apiUrl: string, live: LiveService): Promise<void> {
+  const response = await fetchWithTimeout(`${apiUrl}/v3/paths/list`, {}, 5_000);
+  if (!response.ok) throw new Error(`MediaMTX API returned ${response.status}`);
+  const body = (await response.json()) as {
+    items?: Array<{ name?: string; ready?: boolean }>;
+  };
+  await live.reconcilePublisherPaths(
+    new Set((body.items ?? []).filter((path) => path.ready && path.name).map((path) => path.name!))
+  );
+}
+
+async function mediaMtxAvailable(apiUrl: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`${apiUrl}/v3/paths/list`, {}, 750);
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function startCriticalResourcesBeforeHttp(
+  operations: ReadonlyArray<() => Promise<void>>,
+  exposeHttp: () => Promise<unknown>
+): Promise<void> {
+  for (const operation of operations) await operation();
+  await exposeHttp();
 }
 
 function nodeCapabilities(
@@ -299,8 +340,14 @@ function configuredNodeAgent(
 }
 
 function bindShutdown(shutdown: () => Promise<void>): void {
-  process.once('SIGINT', () => void shutdown());
-  process.once('SIGTERM', () => void shutdown());
+  const run = () => {
+    void shutdown().catch(() => {
+      process.exitCode = 1;
+      process.stderr.write('VRRelay shutdown completed with one or more failures.\n');
+    });
+  };
+  process.once('SIGINT', run);
+  process.once('SIGTERM', run);
 }
 
 async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Promise<void> {
@@ -308,253 +355,282 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     throw new Error('The control-plane runtime requires a controller or standalone role plan');
   const listen = parseListenAddress(config.listenAddr);
   const repository = createRepository(config);
-  const schemaStartupMethod = repositorySchemaStartupMethod(plan);
-  if (schemaStartupMethod === 'migrate') await repository.migrate();
-  else await repository.assertSchemaCurrent();
-
-  const secretBackend = resolveSecretBackend(config);
-  const secrets = createSecretStore(config, secretBackend);
-  const registry = new DefaultProviderRegistry();
-  registry.register(new JellyfinProvider(config.applicationVersion));
-  const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
-  const capabilities = await transcoder.discover();
-  const events = new InMemoryEventBus();
-  const coordination = createCoordinationStore(config);
-  const bootstrapObjectStores = createBootstrapObjectStores(config);
-  const objectStore = await resolveConfiguredObjectStore(
-    repository,
-    secrets,
-    bootstrapObjectStores.local,
-    bootstrapObjectStores.configured,
-    config.nodeId
-  );
-  const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
-  const metricsExporter = new SwitchableMetricsExporter();
-  const routing = new SwitchableTrafficDirector(new BuiltinTrafficDirector());
-  const backends = new BackendService(
-    repository,
-    secrets,
-    objectStore,
-    coordination,
-    routing,
-    metricsExporter,
-    {
-      repositoryKind: config.repositoryDriver,
-      secretKind: secretBackend,
-      localObjectStore: bootstrapObjectStores.local,
-      metrics,
-      nodeId: config.nodeId
-    }
-  );
-  await backends.load();
-  const certificateAuthority = new FileCertificateAuthority(secrets);
-  const cluster = new ClusterService(
-    repository,
-    coordination,
-    routing,
-    events,
-    certificateAuthority,
-    {
-      agentLogRetentionRows: config.agentLogRetentionRows,
-      agentLogQueryLimit: config.agentLogQueryLimit,
-      metrics
-    }
-  );
-  // Standalone dispatches work in-process. Starting the cluster agent listener here would make a
-  // default desktop install depend on certificate provisioning even though it has no remote nodes.
-  const agentController =
-    plan.kind === 'controller'
-      ? new AgentController(cluster, certificateAuthority, coordination)
-      : undefined;
-  const providers = new ProviderService(repository, secrets, registry, {
-    nodeId: config.nodeId,
-    ...(agentController ? { remote: agentController } : {})
-  });
-  const profiles = new ProfileService(repository);
-  await profiles.seed(capabilities);
-
-  const sessions = new SessionService(
-    repository,
-    secrets,
-    registry,
-    transcoder,
-    events,
-    {
-      publicUrl: config.playbackUrl,
-      internalUrl: `http://127.0.0.1:${listen.port}`,
-      cacheDir: config.cacheDir,
-      cacheTtlMs: config.cacheTtlMs,
-      cacheLimitBytes: config.cacheLimitBytes,
-      maxWorkers: config.maxWorkers,
-      nodeId: config.nodeId,
-      roles: config.nodeRoles,
-      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
-      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
-      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
-      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
-      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      jobLogRetentionRows: config.jobLogRetentionRows,
-      jobLogQueryLimit: config.jobLogQueryLimit
-    },
-    {
-      objectStore,
-      coordination,
-      clusterRepository: repository,
-      metrics,
-      ...(agentController ? { dispatcher: agentController, providerGateway: agentController } : {})
-    }
-  );
-  agentController?.setEnsureHandler((token, index, signal) =>
-    sessions.segment(token, index, signal).then(() => undefined)
-  );
-
-  const liveNormalizer = plan.managesLiveIngest
-    ? new FFmpegLiveNormalizer({
-        ffmpegPath: config.ffmpegPath
-      })
-    : undefined;
-  const live = liveService(config, repository, events, liveNormalizer, metrics);
-  await live.scrubPersistedPublisherCredentials();
-  await sessions.recover();
-
-  const auth = new AuthService(repository, secrets, providers);
-  const audit = new AuditService(repository);
-  const app = await createServer(
-    config,
-    {
-      repository,
-      auth,
-      audit,
-      providers,
-      profiles,
-      sessions,
-      live,
-      events,
-      capabilities,
-      cluster,
-      objectStore,
-      coordination,
-      metrics,
-      backends,
-      ...(agentController ? { agentController } : {})
-    },
-    plan.kind === 'controller' ? 'controller' : 'standalone'
-  );
-  const loopbackApp =
-    plan.kind === 'standalone'
-      ? await startLoopbackCompanion(listen, (internal) =>
-          registerStandaloneInternalRoutes(internal, config, { live, sessions })
-        )
-      : undefined;
-  const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
-    locallyAvailableProviderIds(repository, secrets)
-  );
-  if (plan.hostsController) {
-    await cluster.registerLocal({
-      id: config.nodeId,
-      name: config.nodeName,
-      roles: config.nodeRoles,
-      region: config.nodeRegion,
-      publicUrl: nodeRoutingPublicUrl(config),
-      state: 'online',
-      capabilities: await currentNodeCapabilities(),
-      weight: 100
-    });
-  }
-
+  const startup = createStartupRollback();
+  startup.defer({ name: 'repository', stop: () => repository.close() });
   try {
-    await app.listen(listen);
-  } catch (error) {
-    await loopbackApp?.close();
-    throw error;
-  }
-  // Assigned after the managed runtime exists; its exit callback closes over this hook.
-  // eslint-disable-next-line prefer-const
-  let shutdown: (() => Promise<void>) | undefined;
-  let runtimeFailure: Error | undefined;
-  const managedMediaMtx =
-    plan.managesLiveIngest && config.mediaMtxExecutable && config.mediaMtxConfig
-      ? new ManagedMediaMtx({
-          executable: config.mediaMtxExecutable,
-          configPath: config.mediaMtxConfig,
-          relayPort: listen.port,
-          onUnexpectedExit: (error) => {
-            runtimeFailure = error;
-            process.exitCode = 1;
-            app.log.error({ err: error }, 'managed MediaMTX stopped');
-            if (shutdown) void shutdown();
-          }
+    const schemaStartupMethod = repositorySchemaStartupMethod(plan);
+    if (schemaStartupMethod === 'migrate') await repository.migrate();
+    else await repository.assertSchemaCurrent();
+
+    const secretBackend = resolveSecretBackend(config);
+    const secrets = createSecretStore(config, secretBackend);
+    const registry = new DefaultProviderRegistry();
+    registry.register(new JellyfinProvider(config.applicationVersion));
+    const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
+    const capabilities = await transcoder.discover();
+    const events = new InMemoryEventBus();
+    const coordination = createCoordinationStore(config);
+    const bootstrapObjectStores = createBootstrapObjectStores(config);
+    const objectStore = await resolveConfiguredObjectStore(
+      repository,
+      secrets,
+      bootstrapObjectStores.local,
+      bootstrapObjectStores.configured,
+      config.nodeId
+    );
+    const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
+    const metricsExporter = new SwitchableMetricsExporter();
+    const routing = new SwitchableTrafficDirector(new BuiltinTrafficDirector());
+    const backends = new BackendService(
+      repository,
+      secrets,
+      objectStore,
+      coordination,
+      routing,
+      metricsExporter,
+      {
+        repositoryKind: config.repositoryDriver,
+        secretKind: secretBackend,
+        localObjectStore: bootstrapObjectStores.local,
+        metrics,
+        nodeId: config.nodeId
+      }
+    );
+    startup.defer({ name: 'backend-service', stop: () => backends.close() });
+    await backends.load();
+    const certificateAuthority = new FileCertificateAuthority(secrets);
+    const cluster = new ClusterService(
+      repository,
+      coordination,
+      routing,
+      events,
+      certificateAuthority,
+      {
+        agentLogRetentionRows: config.agentLogRetentionRows,
+        agentLogQueryLimit: config.agentLogQueryLimit,
+        metrics
+      }
+    );
+    // Standalone dispatches work in-process. Starting the cluster agent listener here would make a
+    // default desktop install depend on certificate provisioning even though it has no remote nodes.
+    const agentController =
+      plan.kind === 'controller'
+        ? new AgentController(cluster, certificateAuthority, coordination)
+        : undefined;
+    startup.defer({ name: 'agent-controller', stop: () => agentController?.stop() });
+    const providers = new ProviderService(repository, secrets, registry, {
+      nodeId: config.nodeId,
+      ...(agentController ? { remote: agentController } : {})
+    });
+    const profiles = new ProfileService(repository, capabilities);
+    await profiles.seed();
+
+    const sessions = new SessionService(
+      repository,
+      secrets,
+      registry,
+      transcoder,
+      events,
+      {
+        publicUrl: config.playbackUrl,
+        internalUrl: `http://127.0.0.1:${listen.port}`,
+        cacheDir: config.cacheDir,
+        cacheTtlMs: config.cacheTtlMs,
+        cacheLimitBytes: config.cacheLimitBytes,
+        maxWorkers: config.maxWorkers,
+        nodeId: config.nodeId,
+        roles: config.nodeRoles,
+        vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+        vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+        vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+        vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+        vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+        jobLogRetentionRows: config.jobLogRetentionRows,
+        jobLogQueryLimit: config.jobLogQueryLimit
+      },
+      {
+        objectStore,
+        coordination,
+        clusterRepository: repository,
+        metrics,
+        ...(agentController
+          ? { dispatcher: agentController, providerGateway: agentController }
+          : {})
+      }
+    );
+    startup.defer({ name: 'vod-producers', stop: () => sessions.close() });
+    agentController?.setEnsureHandler((token, index, signal) =>
+      sessions.segment(token, index, signal).then(() => undefined)
+    );
+
+    const liveNormalizer = plan.managesLiveIngest
+      ? new FFmpegLiveNormalizer({
+          ffmpegPath: config.ffmpegPath,
+          maxConcurrent: config.liveNormalizerMaxConcurrent,
+          maxConcurrentPerOwner: config.liveNormalizerMaxPerOwner
         })
       : undefined;
-  await managedMediaMtx?.start();
-  if (managedMediaMtx)
-    app.log.info({ executable: config.mediaMtxExecutable }, 'managed MediaMTX started');
-  if (agentController) {
-    const agentListen = parseListenAddress(config.agentListenAddr);
-    await agentController.start(agentListen.host, agentListen.port, config.agentTlsNames);
-    app.log.info({ address: config.agentListenAddr }, 'mTLS node agent listener ready');
-  }
+    const live = liveService(config, repository, events, liveNormalizer, metrics);
+    startup.defer({ name: 'live-service', stop: () => live.stop() });
+    await live.scrubPersistedPublisherCredentials();
+    await sessions.recover();
 
-  const cleanup = setInterval(() => {
-    void auth.cleanup().catch((error) => app.log.error({ err: error }, 'auth cleanup failed'));
-    void sessions
-      .cleanupExpiredCache()
-      .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
-  }, 60_000);
-  cleanup.unref();
-  const heartbeat = plan.hostsController
-    ? setInterval(() => {
-        void currentNodeCapabilities()
-          .then((value) => cluster.heartbeat(config.nodeId, value, 'online'))
-          .catch((error) => app.log.error({ err: error }, 'node heartbeat failed'));
-      }, 15_000)
-    : undefined;
-  heartbeat?.unref();
-  const livePoll = plan.managesLiveIngest
-    ? setInterval(() => {
-        void fetch(`${config.mediaMtxApiUrl}/v3/paths/list`)
-          .then(async (response) => {
-            if (!response.ok) throw new Error(`MediaMTX API returned ${response.status}`);
-            const body = (await response.json()) as {
-              items?: Array<{ name?: string; ready?: boolean }>;
-            };
-            return live.reconcilePublisherPaths(
-              new Set(
-                (body.items ?? [])
-                  .filter((path) => path.ready && path.name)
-                  .map((path) => path.name!)
-              )
-            );
+    const auth = new AuthService(repository, secrets, providers);
+    const audit = new AuditService(repository);
+    const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
+      locallyAvailableProviderIds(repository, secrets)
+    );
+    const heartbeatLocalNode = async (): Promise<void> => {
+      await cluster.heartbeat(config.nodeId, await currentNodeCapabilities(), 'online');
+    };
+    const managedMediaMtxRef: { current: ManagedMediaMtx | undefined } = {
+      current: undefined
+    };
+    const app = await createServer(
+      config,
+      {
+        repository,
+        auth,
+        audit,
+        providers,
+        profiles,
+        sessions,
+        live,
+        events,
+        capabilities,
+        cluster,
+        objectStore,
+        coordination,
+        metrics,
+        backends,
+        ...(plan.managesLiveIngest
+          ? {
+              readiness: async (): Promise<RoleReadinessDependency[]> => [
+                {
+                  category: 'routing',
+                  kind: 'mediamtx',
+                  healthy:
+                    (managedMediaMtxRef.current?.running() ?? true) &&
+                    (await mediaMtxAvailable(config.mediaMtxApiUrl)),
+                  checkedAt: new Date().toISOString()
+                }
+              ]
+            }
+          : {}),
+        ...(plan.kind === 'standalone' ? { refreshLocalNodeCapabilities: heartbeatLocalNode } : {}),
+        ...(agentController ? { agentController } : {})
+      },
+      plan.kind === 'controller' ? 'controller' : 'standalone'
+    );
+    startup.defer({ name: 'http-server', stop: () => app.close() });
+    const loopbackApp =
+      plan.kind === 'standalone'
+        ? await startLoopbackCompanion(listen, (internal) =>
+            registerStandaloneInternalRoutes(internal, config, { live, sessions })
+          )
+        : undefined;
+    startup.defer({ name: 'loopback-http-server', stop: () => loopbackApp?.close() });
+    if (plan.hostsController) {
+      await cluster.registerLocal({
+        id: config.nodeId,
+        name: config.nodeName,
+        roles: config.nodeRoles,
+        region: config.nodeRegion,
+        publicUrl: nodeRoutingPublicUrl(config),
+        state: 'online',
+        capabilities: await currentNodeCapabilities(),
+        weight: 100
+      });
+    }
+
+    // Assigned after the managed runtime exists; its exit callback closes over this hook.
+    // eslint-disable-next-line prefer-const
+    let shutdown: (() => Promise<void>) | undefined;
+    let runtimeFailure: Error | undefined;
+    const managedMediaMtx =
+      plan.managesLiveIngest && config.mediaMtxExecutable && config.mediaMtxConfig
+        ? new ManagedMediaMtx({
+            executable: config.mediaMtxExecutable,
+            configPath: config.mediaMtxConfig,
+            relayPort: listen.port,
+            onUnexpectedExit: (error) => {
+              runtimeFailure = error;
+              process.exitCode = 1;
+              app.log.error({ err: error }, 'managed MediaMTX stopped');
+              if (shutdown) void shutdown();
+            }
           })
-          .catch((error) => app.log.debug({ err: error }, 'MediaMTX publisher status unavailable'));
-      }, 3_000)
-    : undefined;
-  livePoll?.unref();
+        : undefined;
+    managedMediaMtxRef.current = managedMediaMtx;
+    startup.defer({ name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() });
+    await startCriticalResourcesBeforeHttp(
+      [
+        async () => {
+          await managedMediaMtx?.start();
+          if (managedMediaMtx)
+            app.log.info({ executable: config.mediaMtxExecutable }, 'managed MediaMTX started');
+        },
+        async () => {
+          if (!agentController) return;
+          const agentListen = parseListenAddress(config.agentListenAddr);
+          await agentController.start(agentListen.host, agentListen.port, config.agentTlsNames);
+          app.log.info({ address: config.agentListenAddr }, 'mTLS node agent listener ready');
+        }
+      ],
+      () => app.listen(listen)
+    );
 
-  const shutdownSequence = createShutdownSequence([
-    {
-      name: 'background-timers',
-      stop: () => {
-        clearInterval(cleanup);
-        if (heartbeat) clearInterval(heartbeat);
-        if (livePoll) clearInterval(livePoll);
-      }
-    },
-    { name: 'live-service', stop: () => live.stop() },
-    { name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() },
-    { name: 'agent-controller', stop: () => agentController?.stop() },
-    { name: 'backend-service', stop: () => backends.close() },
-    { name: 'vod-producers', stop: () => sessions.close() },
-    {
-      name: 'http-server',
-      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
-    },
-    { name: 'repository', stop: () => repository.close() }
-  ]);
-  shutdown = () => shutdownSequence.run();
+    const cleanup = setInterval(() => {
+      void auth.cleanup().catch((error) => app.log.error({ err: error }, 'auth cleanup failed'));
+      void sessions
+        .cleanupExpiredCache()
+        .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
+    }, 60_000);
+    cleanup.unref();
+    const heartbeat = plan.hostsController
+      ? setInterval(() => {
+          void heartbeatLocalNode().catch((error) =>
+            app.log.error({ err: error }, 'node heartbeat failed')
+          );
+        }, 15_000)
+      : undefined;
+    heartbeat?.unref();
+    const livePoll = plan.managesLiveIngest
+      ? createNonOverlappingInterval(
+          3_000,
+          () => reconcileMediaMtxPublisherPaths(config.mediaMtxApiUrl, live),
+          (error) => app.log.debug({ err: error }, 'MediaMTX publisher status unavailable')
+        )
+      : undefined;
 
-  bindShutdown(() => shutdown?.() ?? Promise.resolve());
-  if (runtimeFailure) void shutdown();
+    const shutdownSequence = createShutdownSequence([
+      {
+        name: 'background-timers',
+        stop: () => {
+          clearInterval(cleanup);
+          if (heartbeat) clearInterval(heartbeat);
+          if (livePoll) clearInterval(livePoll);
+        }
+      },
+      { name: 'live-service', stop: () => live.stop() },
+      { name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() },
+      { name: 'agent-controller', stop: () => agentController?.stop() },
+      { name: 'backend-service', stop: () => backends.close() },
+      { name: 'vod-producers', stop: () => sessions.close() },
+      {
+        name: 'http-server',
+        stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+      },
+      { name: 'repository', stop: () => repository.close() }
+    ]);
+    shutdown = () => shutdownSequence.run();
+
+    bindShutdown(() => shutdown?.() ?? Promise.resolve());
+    startup.commit();
+    if (runtimeFailure) void shutdown();
+  } catch (error) {
+    await startup.rollback(error);
+  }
 }
 
 export async function startControllerRuntime(config: RelayConfig): Promise<void> {
@@ -568,309 +644,416 @@ export async function startStandaloneRuntime(config: RelayConfig): Promise<void>
 export async function startSourceWorkerRuntime(config: RelayConfig): Promise<void> {
   const listen = parseListenAddress(config.listenAddr);
   const repository = createRepository(config);
-  await repository.assertSchemaCurrent();
-  const secretBackend = resolveSecretBackend(config);
-  const secrets = createSecretStore(config, secretBackend);
-  const events = new InMemoryEventBus();
-  const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
-  const coordination = createCoordinationStore(config);
-  const bootstrapObjectStores = createBootstrapObjectStores(config);
-  const objectStore = await resolveConfiguredObjectStore(
-    repository,
-    secrets,
-    bootstrapObjectStores.local,
-    bootstrapObjectStores.configured,
-    config.nodeId
-  );
-  const registry = new DefaultProviderRegistry();
-  registry.register(new JellyfinProvider(config.applicationVersion));
-  const providers = new ProviderService(repository, secrets, registry, {
-    nodeId: config.nodeId
-  });
-  const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
-  const capabilities = await transcoder.discover();
-  const sessions = new SessionService(
-    repository,
-    secrets,
-    registry,
-    transcoder,
-    events,
-    {
-      publicUrl: config.playbackUrl,
-      internalUrl: `http://127.0.0.1:${listen.port}`,
-      cacheDir: config.cacheDir,
-      cacheTtlMs: config.cacheTtlMs,
-      cacheLimitBytes: config.cacheLimitBytes,
-      maxWorkers: config.maxWorkers,
-      nodeId: config.nodeId,
-      roles: ['source-worker'],
-      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
-      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
-      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
-      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
-      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      jobLogRetentionRows: config.jobLogRetentionRows,
-      jobLogQueryLimit: config.jobLogQueryLimit
-    },
-    { objectStore, coordination, clusterRepository: repository, metrics }
-  );
-  await sessions.recover();
-  const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
-    locallyAvailableProviderIds(repository, secrets)
-  );
-  const roleServices = {
-    kind: 'source-worker',
-    sessions,
-    capabilities,
-    metrics
-  } as const;
-  const app = await createRoleServer(config, roleServices);
-  const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
-    registerRoleInternalRoutes(internal, config, roleServices)
-  );
+  const startup = createStartupRollback();
+  startup.defer({ name: 'repository', stop: () => repository.close() });
   try {
-    await app.listen(listen);
-  } catch (error) {
-    await loopbackApp?.close();
-    throw error;
-  }
-  const nodeAgent = configuredNodeAgent(
-    config,
-    secrets,
-    currentNodeCapabilities,
-    {
-      onSegment: (command, signal) => sessions.executeRemoteSegment(command, signal),
-      onCancel: (jobId) => sessions.cancelJob(jobId),
-      onProducerStop: (sessionId) => sessions.stopProducer(sessionId),
-      onDrain: (draining) => (draining ? sessions.drainProducers() : Promise.resolve()),
-      onDisconnect: () => sessions.close(),
-      onProvider: providerAgentHandler(providers),
-      onCache: cacheAgentHandler(sessions)
-    },
-    `http://127.0.0.1:${listen.port}`
-  );
-  await nodeAgent?.start();
+    await repository.assertSchemaCurrent();
+    const secretBackend = resolveSecretBackend(config);
+    const secrets = createSecretStore(config, secretBackend);
+    const events = new InMemoryEventBus();
+    const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
+    const capabilities = await transcoder.discover();
+    const services: {
+      sessions?: SessionService;
+      providers?: ProviderService;
+    } = {};
+    const currentNodeCapabilities = () =>
+      nodeCapabilities(config, capabilities, services.sessions, () =>
+        locallyAvailableProviderIds(repository, secrets)
+      )();
+    const nodeAgent = configuredNodeAgent(
+      config,
+      secrets,
+      currentNodeCapabilities,
+      {
+        onSegment: (command, signal) => {
+          if (!services.sessions) throw new Error('Source-worker session service is unavailable');
+          return services.sessions.executeRemoteSegment(command, signal);
+        },
+        onCancel: (jobId) => {
+          if (!services.sessions) throw new Error('Source-worker session service is unavailable');
+          return services.sessions.cancelJob(jobId);
+        },
+        onProducerStop: (sessionId) => {
+          if (!services.sessions) throw new Error('Source-worker session service is unavailable');
+          return services.sessions.stopProducer(sessionId);
+        },
+        onDrain: (draining) => {
+          if (!services.sessions) throw new Error('Source-worker session service is unavailable');
+          return draining ? services.sessions.drainProducers() : Promise.resolve();
+        },
+        onDisconnect: () => services.sessions?.close() ?? Promise.resolve(),
+        onProvider: (operation, payload) => {
+          if (!services.providers) throw new Error('Source-worker provider service is unavailable');
+          return providerAgentHandler(services.providers)(operation, payload);
+        },
+        onCache: (operation, payload) => {
+          if (!services.sessions) throw new Error('Source-worker session service is unavailable');
+          return cacheAgentHandler(services.sessions)(operation, payload);
+        }
+      },
+      `http://127.0.0.1:${listen.port}`
+    );
+    startup.defer({ name: 'node-agent', stop: () => nodeAgent?.stop() });
+    const runtimeNodeId = (await nodeAgent?.prepareIdentity()) ?? config.nodeId;
+    const roleConfig = { ...config, nodeId: runtimeNodeId };
+    const metrics = new PrometheusMetricsSink({
+      node: runtimeNodeId,
+      region: config.nodeRegion
+    });
+    const coordination = createCoordinationStore(config);
+    const bootstrapObjectStores = createBootstrapObjectStores(config);
+    const objectStore = await resolveConfiguredObjectStore(
+      repository,
+      secrets,
+      bootstrapObjectStores.local,
+      bootstrapObjectStores.configured,
+      runtimeNodeId
+    );
+    const registry = new DefaultProviderRegistry();
+    registry.register(new JellyfinProvider(config.applicationVersion));
+    services.providers = new ProviderService(repository, secrets, registry, {
+      nodeId: runtimeNodeId
+    });
+    services.sessions = new SessionService(
+      repository,
+      secrets,
+      registry,
+      transcoder,
+      events,
+      {
+        publicUrl: config.playbackUrl,
+        internalUrl: `http://127.0.0.1:${listen.port}`,
+        cacheDir: config.cacheDir,
+        cacheTtlMs: config.cacheTtlMs,
+        cacheLimitBytes: config.cacheLimitBytes,
+        maxWorkers: config.maxWorkers,
+        nodeId: runtimeNodeId,
+        roles: ['source-worker'],
+        vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+        vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+        vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+        vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+        vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+        jobLogRetentionRows: config.jobLogRetentionRows,
+        jobLogQueryLimit: config.jobLogQueryLimit
+      },
+      { objectStore, coordination, clusterRepository: repository, metrics }
+    );
+    const sessions = services.sessions;
+    startup.defer({ name: 'vod-producers', stop: () => sessions.close() });
+    await sessions.recover();
+    const nodeAgentRef: { current: NodeAgent | undefined } = { current: undefined };
+    const roleServices = {
+      kind: 'source-worker',
+      sessions,
+      capabilities,
+      metrics,
+      readiness: async (): Promise<RoleReadinessDependency[]> => [
+        {
+          category: 'coordination',
+          kind: 'controller-agent',
+          healthy: nodeAgentRef.current?.connected() ?? false,
+          checkedAt: new Date().toISOString()
+        }
+      ]
+    } as const;
+    const app = await createRoleServer(roleConfig, roleServices);
+    startup.defer({ name: 'http-server', stop: () => app.close() });
+    const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
+      registerRoleInternalRoutes(internal, roleConfig, roleServices)
+    );
+    startup.defer({ name: 'loopback-http-server', stop: () => loopbackApp?.close() });
+    nodeAgentRef.current = nodeAgent;
+    await startCriticalResourcesBeforeHttp([async () => void (await nodeAgent?.start())], () =>
+      app.listen(listen)
+    );
 
-  const cleanup = setInterval(() => {
-    void sessions
-      .cleanupExpiredCache()
-      .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
-  }, 60_000);
-  cleanup.unref();
-  const shutdown = createShutdownSequence([
-    { name: 'background-timers', stop: () => clearInterval(cleanup) },
-    { name: 'node-agent', stop: () => nodeAgent?.stop() },
-    { name: 'vod-producers', stop: () => sessions.close() },
-    {
-      name: 'http-server',
-      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
-    },
-    { name: 'repository', stop: () => repository.close() }
-  ]);
-  bindShutdown(() => shutdown.run());
+    const cleanup = setInterval(() => {
+      void sessions
+        .cleanupExpiredCache()
+        .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
+    }, 60_000);
+    cleanup.unref();
+    const shutdown = createShutdownSequence([
+      { name: 'background-timers', stop: () => clearInterval(cleanup) },
+      { name: 'node-agent', stop: () => nodeAgent?.stop() },
+      { name: 'vod-producers', stop: () => sessions.close() },
+      {
+        name: 'http-server',
+        stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+      },
+      { name: 'repository', stop: () => repository.close() }
+    ]);
+    bindShutdown(() => shutdown.run());
+    startup.commit();
+  } catch (error) {
+    await startup.rollback(error);
+  }
 }
 
 export async function startIngestOriginRuntime(config: RelayConfig): Promise<void> {
   const listen = parseListenAddress(config.listenAddr);
   const repository = createRepository(config);
-  await repository.assertSchemaCurrent();
-  const secretBackend = resolveSecretBackend(config);
-  const secrets = createSecretStore(config, secretBackend);
-  const events = new InMemoryEventBus();
-  const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
-  const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
-  const capabilities = await transcoder.discover();
-  const normalizer = new FFmpegLiveNormalizer({
-    ffmpegPath: config.ffmpegPath
-  });
-  const live = liveService(config, repository, events, normalizer, metrics);
-  await live.scrubPersistedPublisherCredentials();
-  const currentNodeCapabilities = nodeCapabilities(config, capabilities);
-  const roleServices = {
-    kind: 'ingest-origin',
-    live,
-    capabilities,
-    metrics
-  } as const;
-  const app = await createRoleServer(config, roleServices);
-  const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
-    registerRoleInternalRoutes(internal, config, roleServices)
-  );
+  const startup = createStartupRollback();
+  startup.defer({ name: 'repository', stop: () => repository.close() });
   try {
-    await app.listen(listen);
-  } catch (error) {
-    await loopbackApp?.close();
-    throw error;
-  }
-
-  // Assigned after the managed runtime exists; its exit callback closes over this hook.
-  // eslint-disable-next-line prefer-const
-  let shutdown: (() => Promise<void>) | undefined;
-  let runtimeFailure: Error | undefined;
-  const managedMediaMtx =
-    config.mediaMtxExecutable && config.mediaMtxConfig
-      ? new ManagedMediaMtx({
-          executable: config.mediaMtxExecutable,
-          configPath: config.mediaMtxConfig,
-          relayPort: listen.port,
-          onUnexpectedExit: (error) => {
-            runtimeFailure = error;
-            process.exitCode = 1;
-            app.log.error({ err: error }, 'managed MediaMTX stopped');
-            if (shutdown) void shutdown();
+    await repository.assertSchemaCurrent();
+    const secretBackend = resolveSecretBackend(config);
+    const secrets = createSecretStore(config, secretBackend);
+    const events = new InMemoryEventBus();
+    const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
+    const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
+    const capabilities = await transcoder.discover();
+    const normalizer = new FFmpegLiveNormalizer({
+      ffmpegPath: config.ffmpegPath,
+      maxConcurrent: config.liveNormalizerMaxConcurrent,
+      maxConcurrentPerOwner: config.liveNormalizerMaxPerOwner
+    });
+    const live = liveService(config, repository, events, normalizer, metrics);
+    startup.defer({ name: 'live-service', stop: () => live.stop() });
+    await live.scrubPersistedPublisherCredentials();
+    const currentNodeCapabilities = nodeCapabilities(config, capabilities);
+    const nodeAgentRef: { current: NodeAgent | undefined } = { current: undefined };
+    const managedMediaMtxRef: { current: ManagedMediaMtx | undefined } = {
+      current: undefined
+    };
+    const roleServices = {
+      kind: 'ingest-origin',
+      live,
+      capabilities,
+      metrics,
+      readiness: async (): Promise<RoleReadinessDependency[]> => {
+        const checkedAt = new Date().toISOString();
+        return [
+          {
+            category: 'coordination',
+            kind: 'controller-agent',
+            healthy: nodeAgentRef.current?.connected() ?? false,
+            checkedAt
+          },
+          {
+            category: 'routing',
+            kind: 'mediamtx',
+            healthy:
+              (managedMediaMtxRef.current?.running() ?? true) &&
+              (await mediaMtxAvailable(config.mediaMtxApiUrl)),
+            checkedAt
           }
-        })
-      : undefined;
-  await managedMediaMtx?.start();
-  if (managedMediaMtx)
-    app.log.info({ executable: config.mediaMtxExecutable }, 'managed MediaMTX started');
-  const nodeAgent = configuredNodeAgent(config, secrets, currentNodeCapabilities, {
-    onSegment: async () => {
-      throw new Error('Segment jobs are unavailable on an ingest origin');
-    },
-    onCancel: async () => undefined,
-    onProducerStop: async () => undefined,
-    onDrain: async () => undefined,
-    onProvider: async () => {
-      throw new Error('Provider operations are unavailable on an ingest origin');
-    },
-    onCache: async () => {
-      throw new Error('Cache operations are unavailable on an ingest origin');
-    }
-  });
-  await nodeAgent?.start();
-  const livePoll = setInterval(() => {
-    void fetch(`${config.mediaMtxApiUrl}/v3/paths/list`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`MediaMTX API returned ${response.status}`);
-        const body = (await response.json()) as {
-          items?: Array<{ name?: string; ready?: boolean }>;
-        };
-        return live.reconcilePublisherPaths(
-          new Set(
-            (body.items ?? []).filter((path) => path.ready && path.name).map((path) => path.name!)
-          )
-        );
-      })
-      .catch((error) => app.log.debug({ err: error }, 'MediaMTX publisher status unavailable'));
-  }, 3_000);
-  livePoll.unref();
-  const shutdownSequence = createShutdownSequence([
-    { name: 'background-timers', stop: () => clearInterval(livePoll) },
-    { name: 'live-service', stop: () => live.stop() },
-    { name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() },
-    { name: 'node-agent', stop: () => nodeAgent?.stop() },
-    {
-      name: 'http-server',
-      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
-    },
-    { name: 'repository', stop: () => repository.close() }
-  ]);
-  shutdown = () => shutdownSequence.run();
-  bindShutdown(() => shutdown?.() ?? Promise.resolve());
-  if (runtimeFailure) void shutdown();
+        ];
+      }
+    } as const;
+    const app = await createRoleServer(config, roleServices);
+    startup.defer({ name: 'http-server', stop: () => app.close() });
+    const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
+      registerRoleInternalRoutes(internal, config, roleServices)
+    );
+    startup.defer({ name: 'loopback-http-server', stop: () => loopbackApp?.close() });
+
+    // Assigned after the managed runtime exists; its exit callback closes over this hook.
+    // eslint-disable-next-line prefer-const
+    let shutdown: (() => Promise<void>) | undefined;
+    let runtimeFailure: Error | undefined;
+    const managedMediaMtx =
+      config.mediaMtxExecutable && config.mediaMtxConfig
+        ? new ManagedMediaMtx({
+            executable: config.mediaMtxExecutable,
+            configPath: config.mediaMtxConfig,
+            relayPort: listen.port,
+            onUnexpectedExit: (error) => {
+              runtimeFailure = error;
+              process.exitCode = 1;
+              app.log.error({ err: error }, 'managed MediaMTX stopped');
+              if (shutdown) void shutdown();
+            }
+          })
+        : undefined;
+    managedMediaMtxRef.current = managedMediaMtx;
+    startup.defer({ name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() });
+    const nodeAgent = configuredNodeAgent(config, secrets, currentNodeCapabilities, {
+      onSegment: async () => {
+        throw new Error('Segment jobs are unavailable on an ingest origin');
+      },
+      onCancel: async () => undefined,
+      onProducerStop: async () => undefined,
+      onDrain: async () => undefined,
+      onProvider: async () => {
+        throw new Error('Provider operations are unavailable on an ingest origin');
+      },
+      onCache: async () => {
+        throw new Error('Cache operations are unavailable on an ingest origin');
+      }
+    });
+    nodeAgentRef.current = nodeAgent;
+    startup.defer({ name: 'node-agent', stop: () => nodeAgent?.stop() });
+    await startCriticalResourcesBeforeHttp(
+      [
+        async () => {
+          await managedMediaMtx?.start();
+          if (managedMediaMtx)
+            app.log.info({ executable: config.mediaMtxExecutable }, 'managed MediaMTX started');
+        },
+        async () => void (await nodeAgent?.start())
+      ],
+      () => app.listen(listen)
+    );
+    const livePoll = createNonOverlappingInterval(
+      3_000,
+      () => reconcileMediaMtxPublisherPaths(config.mediaMtxApiUrl, live),
+      (error) => app.log.debug({ err: error }, 'MediaMTX publisher status unavailable')
+    );
+    const shutdownSequence = createShutdownSequence([
+      { name: 'background-timers', stop: () => clearInterval(livePoll) },
+      { name: 'live-service', stop: () => live.stop() },
+      { name: 'managed-mediamtx', stop: () => managedMediaMtx?.stop() },
+      { name: 'node-agent', stop: () => nodeAgent?.stop() },
+      {
+        name: 'http-server',
+        stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+      },
+      { name: 'repository', stop: () => repository.close() }
+    ]);
+    shutdown = () => shutdownSequence.run();
+    bindShutdown(() => shutdown?.() ?? Promise.resolve());
+    startup.commit();
+    if (runtimeFailure) void shutdown();
+  } catch (error) {
+    await startup.rollback(error);
+  }
 }
 
 export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
   const listen = parseListenAddress(config.listenAddr);
   const repository = createRepository(config);
-  await repository.assertSchemaCurrent();
-  const secretBackend = resolveSecretBackend(config);
-  const secrets = createSecretStore(config, secretBackend);
-  const events = new InMemoryEventBus();
-  const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
-  const coordination = createCoordinationStore(config);
-  const bootstrapObjectStores = createBootstrapObjectStores(config);
-  const objectStore = await resolveConfiguredObjectStore(
-    repository,
-    secrets,
-    bootstrapObjectStores.local,
-    bootstrapObjectStores.configured,
-    config.nodeId
-  );
-  // Assigned after the edge session service exists; its requester closes over the agent.
-  // eslint-disable-next-line prefer-const
-  let nodeAgent: NodeAgent | undefined;
-  const sessions = new SessionService(
-    repository,
-    secrets,
-    EDGE_PROVIDERS,
-    EDGE_TRANSCODER,
-    events,
-    {
-      publicUrl: config.playbackUrl,
-      internalUrl: `http://127.0.0.1:${listen.port}`,
-      cacheDir: config.cacheDir,
-      cacheTtlMs: config.cacheTtlMs,
-      cacheLimitBytes: config.cacheLimitBytes,
-      maxWorkers: config.maxWorkers,
-      nodeId: config.nodeId,
-      roles: ['edge'],
-      vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
-      vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
-      vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
-      vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
-      vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
-      jobLogRetentionRows: config.jobLogRetentionRows,
-      jobLogQueryLimit: config.jobLogQueryLimit
-    },
-    {
-      objectStore,
-      coordination,
-      clusterRepository: repository,
-      metrics,
-      ensureRequester: {
-        ensure: (token, index, signal) => {
-          if (!nodeAgent) throw new Error('Controller agent connection is unavailable');
-          return nodeAgent.ensure(token, index, signal);
+  const startup = createStartupRollback();
+  startup.defer({ name: 'repository', stop: () => repository.close() });
+  try {
+    await repository.assertSchemaCurrent();
+    const secretBackend = resolveSecretBackend(config);
+    const secrets = createSecretStore(config, secretBackend);
+    const events = new InMemoryEventBus();
+    const services: { sessions?: SessionService } = {};
+    const currentNodeCapabilities = () =>
+      nodeCapabilities(config, EDGE_CAPABILITIES, services.sessions)();
+    const nodeAgent = configuredNodeAgent(config, secrets, currentNodeCapabilities, {
+      onSegment: async () => {
+        throw new Error('Segment transcoding is unavailable on an edge');
+      },
+      onCancel: async () => undefined,
+      onProvider: async () => {
+        throw new Error('Provider operations are unavailable on an edge');
+      },
+      onCache: (operation, payload) => {
+        if (!services.sessions) throw new Error('Edge session service is unavailable');
+        return cacheAgentHandler(services.sessions)(operation, payload);
+      }
+    });
+    startup.defer({ name: 'node-agent', stop: () => nodeAgent?.stop() });
+    const runtimeNodeId = (await nodeAgent?.prepareIdentity()) ?? config.nodeId;
+    const roleConfig = { ...config, nodeId: runtimeNodeId };
+    const metrics = new PrometheusMetricsSink({
+      node: runtimeNodeId,
+      region: config.nodeRegion
+    });
+    const coordination = createCoordinationStore(config);
+    const bootstrapObjectStores = createBootstrapObjectStores(config);
+    const objectStore = await resolveConfiguredObjectStore(
+      repository,
+      secrets,
+      bootstrapObjectStores.local,
+      bootstrapObjectStores.configured,
+      runtimeNodeId
+    );
+    services.sessions = new SessionService(
+      repository,
+      secrets,
+      EDGE_PROVIDERS,
+      EDGE_TRANSCODER,
+      events,
+      {
+        publicUrl: config.playbackUrl,
+        internalUrl: `http://127.0.0.1:${listen.port}`,
+        cacheDir: config.cacheDir,
+        cacheTtlMs: config.cacheTtlMs,
+        cacheLimitBytes: config.cacheLimitBytes,
+        maxWorkers: config.maxWorkers,
+        nodeId: runtimeNodeId,
+        roles: ['edge'],
+        vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
+        vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
+        vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+        vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
+        vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
+        jobLogRetentionRows: config.jobLogRetentionRows,
+        jobLogQueryLimit: config.jobLogQueryLimit
+      },
+      {
+        objectStore,
+        coordination,
+        clusterRepository: repository,
+        metrics,
+        ensureRequester: {
+          ensure: (token, index, signal) => {
+            if (!nodeAgent) throw new Error('Controller agent connection is unavailable');
+            return nodeAgent.ensure(token, index, signal);
+          }
         }
       }
-    }
-  );
-  const currentNodeCapabilities = nodeCapabilities(config, EDGE_CAPABILITIES, sessions);
-  const roleServices = {
-    kind: 'edge',
-    sessions,
-    capabilities: EDGE_CAPABILITIES,
-    metrics
-  } as const;
-  const app = await createRoleServer(config, roleServices);
-  const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
-    registerRoleInternalRoutes(internal, config, roleServices)
-  );
-  try {
-    await app.listen(listen);
-  } catch (error) {
-    await loopbackApp?.close();
-    throw error;
-  }
-  nodeAgent = configuredNodeAgent(config, secrets, currentNodeCapabilities, {
-    onSegment: async () => {
-      throw new Error('Segment transcoding is unavailable on an edge');
-    },
-    onCancel: async () => undefined,
-    onProvider: async () => {
-      throw new Error('Provider operations are unavailable on an edge');
-    },
-    onCache: cacheAgentHandler(sessions)
-  });
-  await nodeAgent?.start();
+    );
+    const sessions = services.sessions;
+    startup.defer({ name: 'vod-producers', stop: () => sessions.close() });
+    const roleServices = {
+      kind: 'edge',
+      sessions,
+      capabilities: EDGE_CAPABILITIES,
+      metrics,
+      readiness: async (): Promise<RoleReadinessDependency[]> => {
+        const checkedAt = new Date().toISOString();
+        return [
+          {
+            category: 'coordination',
+            kind: 'controller-agent',
+            healthy: nodeAgent?.connected() ?? false,
+            checkedAt
+          },
+          {
+            category: 'routing',
+            kind: 'mediamtx',
+            healthy: await mediaMtxAvailable(config.mediaMtxApiUrl),
+            checkedAt
+          }
+        ];
+      }
+    } as const;
+    const app = await createRoleServer(roleConfig, roleServices);
+    startup.defer({ name: 'http-server', stop: () => app.close() });
+    const loopbackApp = await startLoopbackCompanion(listen, (internal) =>
+      registerRoleInternalRoutes(internal, roleConfig, roleServices)
+    );
+    startup.defer({ name: 'loopback-http-server', stop: () => loopbackApp?.close() });
+    await startCriticalResourcesBeforeHttp([async () => void (await nodeAgent?.start())], () =>
+      app.listen(listen)
+    );
 
-  const cleanup = setInterval(() => {
-    void sessions
-      .cleanupExpiredCache()
-      .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
-  }, 60_000);
-  cleanup.unref();
-  const shutdown = createShutdownSequence([
-    { name: 'background-timers', stop: () => clearInterval(cleanup) },
-    { name: 'node-agent', stop: () => nodeAgent?.stop() },
-    { name: 'vod-producers', stop: () => sessions.close() },
-    {
-      name: 'http-server',
-      stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
-    },
-    { name: 'repository', stop: () => repository.close() }
-  ]);
-  bindShutdown(() => shutdown.run());
+    const cleanup = setInterval(() => {
+      void sessions
+        .cleanupExpiredCache()
+        .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
+    }, 60_000);
+    cleanup.unref();
+    const shutdown = createShutdownSequence([
+      { name: 'background-timers', stop: () => clearInterval(cleanup) },
+      { name: 'node-agent', stop: () => nodeAgent?.stop() },
+      { name: 'vod-producers', stop: () => sessions.close() },
+      {
+        name: 'http-server',
+        stop: () => Promise.all([app.close(), loopbackApp?.close()]).then(() => undefined)
+      },
+      { name: 'repository', stop: () => repository.close() }
+    ]);
+    bindShutdown(() => shutdown.run());
+    startup.commit();
+  } catch (error) {
+    await startup.rollback(error);
+  }
 }

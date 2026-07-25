@@ -118,3 +118,12 @@ jobs:
         run: |
           helm template vrrelay deploy/kubernetes --set sourceWorker.enabled=false --set ingestOrigin.enabled=false --set edge.enabled=false > controller-only.yaml
           if grep -q vrrelay-mediamtx-origin controller-only.yaml; then exit 1; fi
+  opentofu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          tofu_version: 1.12.4
+          tofu_wrapper: false
+      - run: tofu fmt -check -recursive deploy/opentofu

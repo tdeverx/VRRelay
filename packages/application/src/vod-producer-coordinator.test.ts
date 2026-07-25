@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocalObjectStore, MemoryCoordinationStore, SqliteRepository } from '@vrrelay/adapters';
 import type { ProfileRevision, RelaySession, VodProducer } from '@vrrelay/domain';
@@ -80,7 +79,7 @@ function session(id = 'session-producer'): RelaySession {
   };
 }
 
-function continuousTranscoder(starts: number[]): Transcoder {
+function continuousTranscoder(starts: number[], publishedPaths: string[]): Transcoder {
   return {
     discover: async () => ({
       ffmpegVersion: 'fixture',
@@ -97,15 +96,13 @@ function continuousTranscoder(starts: number[]): Transcoder {
         const path = join(directory, `segment-${index}.ts`);
         await writeFile(path, `segment-${index}`);
         await onSegment({ index, path });
+        publishedPaths.push(path);
       }
       await new Promise<never>((_resolve, reject) => {
         const stop = () => reject(signal?.reason ?? new Error('producer stopped'));
         if (signal?.aborted) stop();
         else signal?.addEventListener('abort', stop, { once: true });
       });
-    },
-    streamFragmentedMp4: async (_source, _profile, output: Writable) => {
-      output.end();
     }
   };
 }
@@ -124,6 +121,13 @@ class ReleaseFailingCoordination extends MemoryCoordinationStore {
   }
 }
 
+class LeaseRejectingCoordination extends MemoryCoordinationStore {
+  override async acquire(key: string, owner: string, ttlMs: number): Promise<boolean> {
+    if (key.includes('lease-rejected')) return false;
+    return super.acquire(key, owner, ttlMs);
+  }
+}
+
 async function fixture(
   idleTimeoutMs = 60_000,
   coordination: MemoryCoordinationStore = new MemoryCoordinationStore(),
@@ -134,6 +138,7 @@ async function fixture(
     bufferHighWatermarkMs?: number;
     maxConcurrentProducers?: number;
     maxConcurrentProducersPerProvider?: number;
+    waitForSegmentMs?: number;
   } = {}
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'vrrelay-producer-'));
@@ -148,12 +153,13 @@ async function fixture(
     new InMemoryEventBus()
   );
   const starts: number[] = [];
+  const publishedPaths: string[] = [];
   let sourcePacing: VodProducerSourcePacing | undefined;
   const coordinator = new VodProducerCoordinator(
     repository,
     coordination,
     objectStore,
-    continuousTranscoder(starts),
+    continuousTranscoder(starts, publishedPaths),
     cache,
     {
       prepare: async (_session, selectedProfile, startSegmentIndex, _signal, pacing) => {
@@ -181,7 +187,14 @@ async function fixture(
       ...timing
     }
   );
-  return { coordinator, coordination, repository, starts, sourcePacing: () => sourcePacing };
+  return {
+    coordinator,
+    coordination,
+    repository,
+    starts,
+    publishedPaths,
+    sourcePacing: () => sourcePacing
+  };
 }
 
 describe('durable VOD producer coordination', () => {
@@ -310,6 +323,55 @@ describe('durable VOD producer coordination', () => {
       'source worker has reached its VOD producer capacity'
     );
 
+    await coordinator.close();
+    repository.close();
+  });
+
+  it('releases reserved capacity when a distributed lease cannot be acquired', async () => {
+    const coordination = new LeaseRejectingCoordination();
+    const { coordinator, repository, starts } = await fixture(60_000, coordination, {
+      maxConcurrentProducers: 1,
+      maxConcurrentProducersPerProvider: 1,
+      waitForSegmentMs: 1_000
+    });
+    const rejected = session('session-lease-rejected');
+    await expect(coordinator.ensure(rejected, profile, 0)).rejects.toThrow(
+      'Timed out waiting for the persistent producer'
+    );
+
+    const admitted = session('session-after-rejected-lease');
+    await coordination.recordSegmentDemand({
+      sessionId: admitted.id,
+      viewerHash: 'viewer-after-rejection',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await coordinator.ensure(admitted, profile, 0);
+    expect(starts).toEqual([0]);
+    await coordinator.close();
+    repository.close();
+  });
+
+  it('removes each published producer scratch segment while the producer remains active', async () => {
+    const { coordinator, coordination, repository, publishedPaths } = await fixture();
+    const selectedSession = session('session-scratch-cleanup');
+    await coordination.recordSegmentDemand({
+      sessionId: selectedSession.id,
+      viewerHash: 'viewer-scratch',
+      segmentIndex: 0,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+    await coordinator.ensure(selectedSession, profile, 0);
+    expect(publishedPaths.length).toBeGreaterThan(0);
+    for (const path of publishedPaths) {
+      await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(`${path}.vrrelay-object.json`)).rejects.toMatchObject({
+        code: 'ENOENT'
+      });
+    }
+    expect(coordinator.isActive(selectedSession.id)).toBe(true);
     await coordinator.close();
     repository.close();
   });

@@ -25,6 +25,7 @@ import type {
   AuditQuery,
   AuditRepository,
   ClusterRepository,
+  LiveChannelCapacityWriteResult,
   NodeCertificateRotation,
   NodeDrainUpdate,
   NodeHeartbeatUpdate,
@@ -1118,6 +1119,55 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
     );
     return { value, revision: Number(result.rows[0]?.revision) };
   }
+  async createLiveChannelWithinCapacity(
+    value: LiveChannel,
+    limits: { maxTotal: number; maxPerOwner: number }
+  ): Promise<LiveChannelCapacityWriteResult> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('vrrelay:live-channels'))");
+      const total = Number(
+        (await client.query('SELECT COUNT(*) AS count FROM live_channels')).rows[0]?.count ?? 0
+      );
+      if (total >= limits.maxTotal) {
+        await client.query('ROLLBACK');
+        return { created: false, reason: 'installation-limit' };
+      }
+      if (value.ownerId) {
+        const owned = Number(
+          (
+            await client.query(
+              `SELECT COUNT(*) AS count
+                 FROM live_channels
+                WHERE document->>'ownerId' = $1`,
+              [value.ownerId]
+            )
+          ).rows[0]?.count ?? 0
+        );
+        if (owned >= limits.maxPerOwner) {
+          await client.query('ROLLBACK');
+          return { created: false, reason: 'owner-limit' };
+        }
+      }
+      const result = await client.query(
+        `INSERT INTO live_channels(id,document,created_at,revision)
+         VALUES($1,$2,$3,1)
+         RETURNING revision`,
+        [value.id, value, value.createdAt]
+      );
+      await client.query('COMMIT');
+      return {
+        created: true,
+        record: { value, revision: Number(result.rows[0]?.revision) }
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async listLiveChannels() {
     return this.#list<LiveChannel>('live_channels', 'created_at DESC');
   }
@@ -1274,6 +1324,70 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
     return current
       ? { applied: false, reason: 'revision-conflict', current }
       : { applied: false, reason: 'not-found' };
+  }
+
+  async compareAndSetUserIdentityPreservingOwner(
+    value: UserIdentity,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<UserIdentity>> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('vrrelay:user-owners'))");
+      const row = (
+        await client.query('SELECT document,revision FROM user_identities WHERE id=$1 FOR UPDATE', [
+          value.id
+        ])
+      ).rows[0] as { document: UserIdentity; revision: number } | undefined;
+      if (!row) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'not-found' };
+      }
+      const current = { value: row.document, revision: Number(row.revision) };
+      if (current.revision !== expectedRevision) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'revision-conflict', current };
+      }
+      if (current.value.roles.includes('owner') && !value.roles.includes('owner')) {
+        const ownerCount = Number(
+          (
+            await client.query(
+              `SELECT COUNT(*) AS count
+               FROM user_identities
+               WHERE document->'roles' ? 'owner'`
+            )
+          ).rows[0]?.count ?? 0
+        );
+        if (ownerCount <= 1) {
+          await client.query('ROLLBACK');
+          return {
+            applied: false,
+            reason: 'dependency-conflict',
+            current,
+            dependencies: ['assigned-owner']
+          };
+        }
+      }
+      const result = await client.query(
+        `UPDATE user_identities
+         SET document=$1,updated_at=$2,revision=revision+1
+         WHERE id=$3 AND revision=$4
+         RETURNING revision`,
+        [value, value.lastSeenAt, value.id, expectedRevision]
+      );
+      const revision = Number(result.rows[0]?.revision);
+      if (!Number.isFinite(revision)) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'revision-conflict', current };
+      }
+      await client.query('COMMIT');
+      return { applied: true, record: { value, revision } };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async putSetting(key: string, value: string): Promise<void> {

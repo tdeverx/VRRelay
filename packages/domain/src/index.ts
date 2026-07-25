@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from 'zod';
 
-export const ProviderTypeSchema = z.enum(['jellyfin', 'fake']);
+export const ProviderTypeSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9-]*$/, 'Provider type must be a lowercase provider identifier');
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
 
 export const AuthenticationModeSchema = z.enum(['user_token', 'api_key', 'delegated']);
@@ -118,16 +122,27 @@ export type PlatformMode = z.infer<typeof PlatformModeSchema>;
 export const CompatibilityStateSchema = z.enum(['experimental', 'verified', 'broken', 'retired']);
 export type CompatibilityState = z.infer<typeof CompatibilityStateSchema>;
 
+const FfmpegOptionValueSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    /^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$/,
+    'FFmpeg option values must be one bounded name without filtergraph delimiters'
+  );
+
 export const VideoSettingsSchema = z.object({
   codec: z.enum(['h264', 'h265', 'av1', 'copy']),
-  encoder: z.string().min(1),
+  encoder: FfmpegOptionValueSchema,
   hardwareMode: z.enum(['auto', 'software', 'videotoolbox', 'qsv', 'vaapi', 'nvenc', 'amf']),
-  decodeMode: z
-    .enum(['auto', 'software', 'videotoolbox', 'd3d11va', 'qsv', 'vaapi', 'cuda'])
-    .default('auto'),
-  profile: z.string().optional(),
-  level: z.string().optional(),
-  pixelFormat: z.string().min(1),
+  decodeMode: z.enum(['auto', 'software', 'videotoolbox', 'd3d11va', 'qsv', 'vaapi', 'cuda']),
+  profile: FfmpegOptionValueSchema.optional(),
+  level: FfmpegOptionValueSchema.optional(),
+  pixelFormat: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_]+$/, 'Pixel format must be a single FFmpeg pixel-format name'),
   width: z.number().int().min(16).max(7680),
   height: z.number().int().min(16).max(4320),
   frameRate: z.number().int().min(1).max(120),
@@ -135,8 +150,8 @@ export const VideoSettingsSchema = z.object({
   maxrateKbps: z.number().int().min(64).max(120_000),
   bufferKbps: z.number().int().min(64).max(240_000),
   quality: z.number().int().min(0).max(63).optional(),
-  preset: z.string().optional(),
-  tune: z.string().optional(),
+  preset: FfmpegOptionValueSchema.optional(),
+  tune: FfmpegOptionValueSchema.optional(),
   gop: z.number().int().min(1).max(600),
   bFrames: z.number().int().min(0).max(16)
 });
@@ -145,7 +160,7 @@ export type VideoSettings = z.infer<typeof VideoSettingsSchema>;
 export const AudioSettingsSchema = z.object({
   codec: z.enum(['aac', 'opus', 'ac3', 'copy']),
   channels: z.number().int().min(1).max(8),
-  layout: z.string().min(1),
+  layout: FfmpegOptionValueSchema,
   sampleRate: z.number().int().min(8_000).max(192_000),
   bitrateKbps: z.number().int().min(32).max(1_536),
   /** Preferred ISO 639-2 or BCP-47 source language when no track is selected. */
@@ -160,7 +175,7 @@ export const AudioSettingsSchema = z.object({
 export type AudioSettings = z.infer<typeof AudioSettingsSchema>;
 
 export const DeliverySettingsSchema = z.object({
-  method: z.enum(['hls', 'fragmented_mp4', 'rtsp', 'mpegts_http']),
+  method: z.enum(['hls', 'rtsp', 'mpegts_http']),
   container: z.enum(['mpegts', 'fmp4', 'mp4']),
   segmentType: z.enum(['mpegts', 'fmp4', 'none']),
   segmentDuration: z.number().min(1).max(30),
@@ -351,7 +366,7 @@ export const NodeCapabilitySchema = z.object({
   cacheLimitBytes: z.number().int().min(0).nullable(),
   egressMbps: z.number().min(0),
   providerIds: z.array(z.string()),
-  vodProducerVersion: z.number().int().min(0).optional()
+  vodProducerVersion: z.number().int().min(0)
 });
 export type NodeCapability = z.infer<typeof NodeCapabilitySchema>;
 
@@ -594,22 +609,11 @@ export const EdgeRouteSchema = z.object({
 });
 export type EdgeRoute = z.infer<typeof EdgeRouteSchema>;
 
-export const BackendKindSchema = z.enum([
-  'local',
-  's3',
-  'azure-blob',
-  'gcs',
-  'postgres',
-  'valkey',
-  'builtin',
-  'static',
-  'webhook',
-  'sqlite',
-  'keychain',
-  'dpapi',
-  'encrypted-file',
-  'prometheus'
-]);
+export const BackendKindSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9-]*$/, 'Backend kind must be a lowercase backend identifier');
 export type BackendKind = z.infer<typeof BackendKindSchema>;
 
 export const BackendStatusSchema = z.object({

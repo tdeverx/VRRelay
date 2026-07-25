@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Readable, Writable } from 'node:stream';
+import type { Readable } from 'node:stream';
 import type {
   BackendStatus,
   CachedObject,
@@ -388,6 +388,16 @@ export interface PersonalTokenUse {
   touchBefore: string;
 }
 
+export type LiveChannelCapacityWriteResult =
+  | {
+      created: true;
+      record: VersionedRecord<LiveChannel>;
+    }
+  | {
+      created: false;
+      reason: 'installation-limit' | 'owner-limit';
+    };
+
 export interface AuditQuery {
   category?: AuditCategory;
   actorId?: string;
@@ -545,6 +555,10 @@ export interface Repository {
   deleteSessionAndRevokePlaybackGrants(sessionId: string, revokedAt?: string): Promise<void>;
   getPlaybackGrant(tokenHash: string): Promise<PlaybackGrant | undefined>;
   createLiveChannel(channel: LiveChannel): Promise<VersionedRecord<LiveChannel>>;
+  createLiveChannelWithinCapacity(
+    channel: LiveChannel,
+    limits: { maxTotal: number; maxPerOwner: number }
+  ): Promise<LiveChannelCapacityWriteResult>;
   listLiveChannels(): Promise<LiveChannel[]>;
   getLiveChannel(id: string): Promise<LiveChannel | undefined>;
   getVersionedLiveChannel(id: string): Promise<VersionedRecord<LiveChannel> | undefined>;
@@ -573,6 +587,10 @@ export interface Repository {
   listUserIdentities(): Promise<Array<VersionedRecord<UserIdentity>>>;
   getUserIdentity(id: string): Promise<VersionedRecord<UserIdentity> | undefined>;
   compareAndSetUserIdentity(
+    identity: UserIdentity,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<UserIdentity>>;
+  compareAndSetUserIdentityPreservingOwner(
     identity: UserIdentity,
     expectedRevision: number
   ): Promise<AtomicWriteResult<UserIdentity>>;
@@ -633,17 +651,13 @@ export interface Transcoder {
     onSegment: (segment: ProducedVodSegment) => Promise<void>,
     signal?: AbortSignal
   ): Promise<void>;
-  streamFragmentedMp4(
-    source: ResolvedSource,
-    profile: ProfileRevision,
-    output: Writable,
-    signal?: AbortSignal
-  ): Promise<void>;
 }
 
 export interface LiveNormalizer {
+  canStart?(channelId: string, ownerId?: string): boolean;
   start(
     channelId: string,
+    ownerId: string | undefined,
     sourceUrl: string,
     destinationUrl: string,
     profile: ProfileRevision,

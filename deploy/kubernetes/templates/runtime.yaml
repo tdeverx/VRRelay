@@ -105,7 +105,7 @@ spec:
             - { name: cache, mountPath: /var/cache/vrrelay }
             - { name: tmp, mountPath: /tmp }
             {{- with $settings.extraVolumeMounts }}{{ toYaml . | nindent 12 }}{{- end }}
-          readinessProbe: { httpGet: { path: /api/v1/health, port: http }, initialDelaySeconds: 5, periodSeconds: 10, failureThreshold: 3 }
+          readinessProbe: { httpGet: { path: /api/v1/ready, port: http }, initialDelaySeconds: 5, periodSeconds: 10, failureThreshold: 3 }
           livenessProbe: { httpGet: { path: /api/v1/health, port: http }, initialDelaySeconds: 20, periodSeconds: 20, failureThreshold: 5 }
           startupProbe: { httpGet: { path: /api/v1/health, port: http }, periodSeconds: 5, failureThreshold: 30 }
           resources: {{ toYaml $settings.resources | nindent 12 }}

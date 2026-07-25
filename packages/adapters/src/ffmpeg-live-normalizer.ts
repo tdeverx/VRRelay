@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawn, type ChildProcess } from 'node:child_process';
 import type { LiveNormalizer } from '@vrrelay/application';
 import type { ProfileRevision } from '@vrrelay/domain';
+import { redactFfmpegError } from './ffmpeg-transcoder.js';
+import { SupervisedChildProcess, type SpawnChildProcess } from './supervised-child-process.js';
 
 export interface FFmpegLiveNormalizerOptions {
   ffmpegPath: string;
+  maxConcurrent?: number;
+  maxConcurrentPerOwner?: number;
+  restartBackoffMinMs?: number;
+  restartBackoffMaxMs?: number;
+  maxStderrBytes?: number;
+  spawnChild?: SpawnChildProcess;
 }
 
 function optionalArgs(condition: unknown, args: string[]): string[] {
@@ -71,7 +78,11 @@ export function liveNormalizerArgs(
 }
 
 export class FFmpegLiveNormalizer implements LiveNormalizer {
-  readonly #processes = new Map<string, ChildProcess>();
+  readonly #processes = new Map<string, SupervisedChildProcess>();
+  readonly #owners = new Map<string, string>();
+  readonly #restartFailures = new Map<string, number>();
+  readonly #restartNotBefore = new Map<string, number>();
+  readonly #recentErrors = new Map<string, string>();
 
   constructor(private readonly options: FFmpegLiveNormalizerOptions) {}
 
@@ -79,49 +90,89 @@ export class FFmpegLiveNormalizer implements LiveNormalizer {
     return this.#processes.has(channelId);
   }
 
+  canStart(channelId: string, ownerId?: string): boolean {
+    if (this.#processes.has(channelId)) return true;
+    if (this.#processes.size >= (this.options.maxConcurrent ?? 2)) return false;
+    const owner = ownerId ?? '__unowned__';
+    const ownerProcesses = [...this.#owners.values()].filter(
+      (candidate) => candidate === owner
+    ).length;
+    if (ownerProcesses >= (this.options.maxConcurrentPerOwner ?? Number.MAX_SAFE_INTEGER))
+      return false;
+    return (this.#restartNotBefore.get(channelId) ?? 0) <= Date.now();
+  }
+
+  recentError(channelId: string): string | undefined {
+    return this.#recentErrors.get(channelId);
+  }
+
   async start(
     channelId: string,
+    ownerId: string | undefined,
     sourceUrl: string,
     destinationUrl: string,
     profile: ProfileRevision,
     signal?: AbortSignal
   ): Promise<void> {
-    await this.stop(channelId);
-    const args = liveNormalizerArgs(sourceUrl, destinationUrl, profile);
-    const child = spawn(this.options.ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    this.#processes.set(channelId, child);
-    child.once('exit', () => this.#processes.delete(channelId));
-    signal?.addEventListener('abort', () => void this.stop(channelId), { once: true });
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        settled = true;
-        resolve();
-      }, 250);
-      child.once('error', (error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.once('exit', (code) => {
-        if (!settled && code !== 0) {
-          settled = true;
-          clearTimeout(timer);
-          reject(new Error(`Live normalizer exited during startup (${code})`));
-        }
-      });
+    if (this.#processes.has(channelId)) await this.stop(channelId);
+    if (!this.canStart(channelId, ownerId))
+      throw new Error('Live normalizer capacity or restart backoff is active');
+    const supervisor = new SupervisedChildProcess({
+      executable: this.options.ffmpegPath,
+      arguments: liveNormalizerArgs(sourceUrl, destinationUrl, profile),
+      spawnOptions: { stdio: ['ignore', 'ignore', 'pipe'] },
+      startupGraceMs: 250,
+      gracefulStopMs: 3_000,
+      maxStderrBytes: this.options.maxStderrBytes ?? 32_768,
+      redact: redactFfmpegError,
+      ...(this.options.spawnChild ? { spawnChild: this.options.spawnChild } : {}),
+      onUnexpectedExit: (error) => {
+        if (this.#processes.get(channelId) !== supervisor) return;
+        this.#processes.delete(channelId);
+        this.#owners.delete(channelId);
+        this.#recentErrors.set(channelId, error.message);
+        this.#recordFailure(channelId, startedAt);
+      }
     });
+    const startedAt = Date.now();
+    this.#processes.set(channelId, supervisor);
+    this.#owners.set(channelId, ownerId ?? '__unowned__');
+    try {
+      await supervisor.start(signal);
+      this.#recentErrors.delete(channelId);
+    } catch (error) {
+      if (this.#processes.get(channelId) === supervisor) {
+        this.#processes.delete(channelId);
+        this.#owners.delete(channelId);
+        this.#recentErrors.set(
+          channelId,
+          redactFfmpegError(error instanceof Error ? error.message : String(error))
+        );
+        this.#recordFailure(channelId, startedAt);
+      }
+      throw error;
+    }
   }
 
   async stop(channelId: string): Promise<void> {
-    const child = this.#processes.get(channelId);
-    if (!child) return;
+    const supervisor = this.#processes.get(channelId);
     this.#processes.delete(channelId);
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    child.kill('SIGTERM');
-    const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
-    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    clearTimeout(timer);
+    this.#owners.delete(channelId);
+    this.#restartFailures.delete(channelId);
+    this.#restartNotBefore.delete(channelId);
+    if (!supervisor) return;
+    await supervisor.stop();
+  }
+
+  #recordFailure(channelId: string, startedAt: number): void {
+    const stable = Date.now() - startedAt >= 30_000;
+    const failures = stable ? 1 : (this.#restartFailures.get(channelId) ?? 0) + 1;
+    this.#restartFailures.set(channelId, failures);
+    const minimum = this.options.restartBackoffMinMs ?? 1_000;
+    const maximum = this.options.restartBackoffMaxMs ?? 60_000;
+    this.#restartNotBefore.set(
+      channelId,
+      Date.now() + Math.min(maximum, minimum * 2 ** Math.min(failures - 1, 10))
+    );
   }
 }

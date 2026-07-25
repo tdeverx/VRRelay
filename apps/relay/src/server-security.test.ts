@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -71,8 +71,10 @@ const provider: MediaProvider = {
 
 const transcoder: Transcoder = {
   discover: async () => capabilities,
-  generateSegment: async () => {},
-  streamFragmentedMp4: async () => {}
+  generateSegment: async (_request, destination) => {
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, 'fixture-segment');
+  }
 };
 
 interface SecurityFixture {
@@ -679,6 +681,13 @@ describe('HTTP playback-grant boundary', () => {
     expect(manifest.headers['cache-control']).toBe('no-store');
     expect(manifest.body).toContain('#EXT-X-PLAYLIST-TYPE:VOD');
     expect(manifest.body).toContain('#EXT-X-ENDLIST');
+    const segment = await app.inject({
+      method: 'GET',
+      url: `/play/${valid.token}/segment/0.ts`,
+      headers: { 'user-agent': 'HTTP security fixture' }
+    });
+    expect(segment.statusCode).toBe(200);
+    expect(segment.headers['cache-control']).toBe('private, no-store');
 
     const edgeGrant = await sessions.createEdgePlaybackGrant(valid.token, 'edge-a');
     expect(

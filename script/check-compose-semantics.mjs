@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const standaloneFile = resolve(root, 'deploy/docker/docker-compose.yml');
 const multiHostFile = resolve(root, 'deploy/docker/compose.multi-host.yml');
 
 function fail(message) {
@@ -16,18 +17,22 @@ function assert(condition, message) {
   if (!condition) fail(message);
 }
 
-function renderProfile(profile) {
+function render(file, arguments_ = []) {
   const result = spawnSync(
     'docker',
-    ['compose', '-f', multiHostFile, '--profile', profile, 'config', '--format', 'json'],
+    ['compose', '-f', file, ...arguments_, 'config', '--format', 'json'],
     { cwd: root, encoding: 'utf8', env: process.env }
   );
   if (result.error) throw result.error;
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout);
-    throw new Error(`docker compose config failed for profile ${profile}`);
+    throw new Error(`docker compose config failed for ${file}`);
   }
   return JSON.parse(result.stdout);
+}
+
+function renderProfile(profile) {
+  return render(multiHostFile, ['--profile', profile]);
 }
 
 function ports(service) {
@@ -75,6 +80,16 @@ function expectServices(profile, expected) {
 
 const rawMultiHost = readFileSync(multiHostFile, 'utf8');
 assert(!/\bextends\s*:/.test(rawMultiHost), 'multi-host Compose must not use service extends');
+
+const standalone = render(standaloneFile);
+const standaloneHttp = (standalone.services?.relay?.ports ?? []).find(
+  (port) => Number(port.target) === 8099
+);
+assert(standaloneHttp, 'standalone relay must publish its HTTP administration port');
+assert(
+  standaloneHttp?.host_ip === '127.0.0.1',
+  `standalone relay HTTP must bind loopback by default, received ${standaloneHttp?.host_ip ?? '(all interfaces)'}`
+);
 
 expectServices('controller', {
   services: ['controller'],

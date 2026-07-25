@@ -173,25 +173,29 @@ export const CreatePersonalTokenRequestSchema = z.object({
 });
 export type CreatePersonalTokenRequest = z.infer<typeof CreatePersonalTokenRequestSchema>;
 
-export const CreateNodeJoinTokenRequestSchema = z.object({
-  name: z.string().min(1).max(120),
-  roles: z.array(NodeRoleSchema).min(1),
-  region: z.string().min(1).max(80),
-  expiresInSeconds: z.number().int().min(60).max(3600).default(600)
-});
+export const CreateNodeJoinTokenRequestSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    roles: z.array(NodeRoleSchema).min(1),
+    region: z.string().min(1).max(80),
+    expiresInSeconds: z.number().int().min(60).max(3600).default(600)
+  })
+  .strict();
 export type CreateNodeJoinTokenRequest = z.infer<typeof CreateNodeJoinTokenRequestSchema>;
 
-export const EnrollNodeRequestSchema = z.object({
-  token: z.string().min(32),
-  name: z.string().min(1).max(120),
-  publicUrl: HttpUrlSchema,
-  internalUrl: HttpUrlSchema.optional(),
-  capabilities: NodeCapabilitySchema,
-  csrPem: z
-    .string()
-    .min(1)
-    .max(16 * 1024)
-});
+export const EnrollNodeRequestSchema = z
+  .object({
+    token: z.string().min(32),
+    name: z.string().min(1).max(120),
+    publicUrl: HttpUrlSchema,
+    internalUrl: HttpUrlSchema.optional(),
+    capabilities: NodeCapabilitySchema,
+    csrPem: z
+      .string()
+      .min(1)
+      .max(16 * 1024)
+  })
+  .strict();
 export type EnrollNodeRequest = z.infer<typeof EnrollNodeRequestSchema>;
 
 export const AgentProtocolMessageSchema = AgentEnvelopeSchema;
@@ -257,35 +261,44 @@ export const CacheEvictionRequestSchema = z
   );
 export type CacheEvictionRequest = z.infer<typeof CacheEvictionRequestSchema>;
 
-export const BackendValidationRequestSchema = z.object({
-  category: z.enum(['object-store', 'coordination', 'repository', 'routing', 'secrets', 'metrics']),
-  kind: z.enum([
-    'local',
-    's3',
-    'azure-blob',
-    'gcs',
-    'postgres',
-    'valkey',
-    'builtin',
-    'static',
-    'webhook',
-    'sqlite',
-    'keychain',
-    'dpapi',
-    'encrypted-file',
-    'prometheus'
-  ]),
-  endpoint: z.url().optional(),
-  secretRef: z.string().min(1).max(200).optional(),
-  nodeId: z.string().min(1).max(200).optional(),
-  bucket: z.string().min(1).max(255).optional(),
-  container: z.string().min(1).max(255).optional(),
-  region: z.string().min(1).max(100).optional(),
-  prefix: z.string().min(1).max(500).optional(),
-  projectId: z.string().min(1).max(200).optional(),
-  forcePathStyle: z.boolean().optional(),
-  intervalSeconds: z.number().int().min(5).max(300).optional()
-});
+export const BackendValidationRequestSchema = z
+  .object({
+    category: z.enum([
+      'object-store',
+      'coordination',
+      'repository',
+      'routing',
+      'secrets',
+      'metrics'
+    ]),
+    kind: z.enum([
+      'local',
+      's3',
+      'azure-blob',
+      'gcs',
+      'postgres',
+      'valkey',
+      'builtin',
+      'static',
+      'webhook',
+      'sqlite',
+      'keychain',
+      'dpapi',
+      'encrypted-file',
+      'prometheus'
+    ]),
+    endpoint: z.url().optional(),
+    secretRef: z.string().min(1).max(200).optional(),
+    nodeId: z.string().min(1).max(200).optional(),
+    bucket: z.string().min(1).max(255).optional(),
+    container: z.string().min(1).max(255).optional(),
+    region: z.string().min(1).max(100).optional(),
+    prefix: z.string().min(1).max(500).optional(),
+    projectId: z.string().min(1).max(200).optional(),
+    forcePathStyle: z.boolean().optional(),
+    intervalSeconds: z.number().int().min(5).max(300).optional()
+  })
+  .strict();
 export type BackendValidationRequest = z.infer<typeof BackendValidationRequestSchema>;
 export const BackendActivationRequestSchema = BackendValidationRequestSchema;
 export type BackendActivationRequest = z.infer<typeof BackendActivationRequestSchema>;
@@ -391,6 +404,7 @@ export const RelayEventSchema = z.object({
     'viewer.left',
     'live.publisher.connected',
     'live.publisher.disconnected',
+    'live.normalizer.failed',
     'live.channel.deleted',
     'system.capacity',
     'node.joined',

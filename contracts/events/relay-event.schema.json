@@ -22,6 +22,7 @@
         "viewer.left",
         "live.publisher.connected",
         "live.publisher.disconnected",
+        "live.normalizer.failed",
         "live.channel.deleted",
         "system.capacity",
         "node.joined",

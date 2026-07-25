@@ -15,9 +15,10 @@ function assertImplementedProfile(input: CreateProfileRevisionRequest): void {
   if (input.processing.passthrough !== 'never')
     throw new ConflictError('Passthrough policy profiles are not implemented');
 
+  if ((input.delivery.method as string) === 'fragmented_mp4')
+    throw new ConflictError('Direct fragmented MP4 delivery is not supported');
   if (input.delivery.method === 'rtsp' || input.delivery.method === 'mpegts_http')
     throw new ConflictError('RTSP and HTTP MPEG-TS delivery profiles are not implemented');
-
   if (input.delivery.method === 'hls') {
     if (input.delivery.playlistType === 'event')
       throw new ConflictError('HLS event playlists are not implemented');
@@ -25,21 +26,24 @@ function assertImplementedProfile(input: CreateProfileRevisionRequest): void {
     if (input.delivery.container === 'fmp4' && input.delivery.segmentType === 'fmp4') return;
     throw new ConflictError('HLS profiles must use matching MPEG-TS or fMP4 segment settings');
   }
-
-  if (
-    input.delivery.container !== 'mp4' ||
-    input.delivery.segmentType !== 'none' ||
-    input.delivery.playlistType !== 'vod'
-  )
-    throw new ConflictError(
-      'Fragmented MP4 profiles must use MP4 container, no segment output, and VOD playlist type'
-    );
 }
 
 export class ProfileService {
-  constructor(private readonly repository: Repository) {}
+  #capabilities: MediaCapabilities | undefined;
 
-  async seed(capabilities: MediaCapabilities): Promise<void> {
+  constructor(
+    private readonly repository: Repository,
+    capabilities?: MediaCapabilities
+  ) {
+    this.#capabilities = capabilities;
+  }
+
+  async seed(capabilities = this.#capabilities): Promise<void> {
+    if (!capabilities)
+      throw new ConflictError(
+        'Media capabilities must be discovered before profiles can be seeded'
+      );
+    this.#capabilities = capabilities;
     if ((await this.repository.listProfiles()).length > 0) return;
     const available = new Set(
       capabilities.encoders.filter((encoder) => encoder.available).map((encoder) => encoder.name)
@@ -161,24 +165,6 @@ export class ProfileService {
         state: 'experimental',
         delivery: { ...base.delivery, container: 'fmp4', segmentType: 'fmp4' },
         createdAt: now
-      },
-      {
-        ...base,
-        profileId: 'fragmented-mp4',
-        revision: 1,
-        name: 'Fragmented MP4',
-        description: 'Experimental direct fragmented MP4 for Unity-player compatibility testing.',
-        platform: 'pc',
-        state: 'experimental',
-        delivery: {
-          method: 'fragmented_mp4',
-          container: 'mp4',
-          segmentType: 'none',
-          segmentDuration: 4,
-          playlistType: 'vod',
-          latencyMode: 'standard'
-        },
-        createdAt: now
       }
     ];
     for (const profile of profiles) await this.repository.putProfile(profile);
@@ -190,6 +176,19 @@ export class ProfileService {
 
   async createRevision(input: CreateProfileRevisionRequest): Promise<ProfileRevision> {
     assertImplementedProfile(input);
+    const capabilities = this.#capabilities;
+    if (!capabilities)
+      throw new ConflictError(
+        'Media capabilities must be discovered before profiles can be created'
+      );
+    if (
+      !capabilities.encoders.some(
+        (encoder) => encoder.available && encoder.name === input.video.encoder
+      )
+    )
+      throw new ConflictError('The selected video encoder is not available on this relay');
+    if (!capabilities.pixelFormats.includes(input.video.pixelFormat))
+      throw new ConflictError('The selected pixel format is not available on this relay');
     const profileId = input.profileId ?? randomUUID();
     const previous = await this.repository.getProfile(profileId);
     const profile: ProfileRevision = {

@@ -15,7 +15,7 @@ import type {
   MetricsSink,
   Repository
 } from './index.js';
-import { ConflictError, NotFoundError } from './errors.js';
+import { CapacityError, ConflictError, NotFoundError } from './errors.js';
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 
 const MAX_LIVE_CHANNEL_WRITE_ATTEMPTS = 5;
@@ -30,6 +30,8 @@ export interface LiveServiceOptions {
   backupRtmpUrl?: string;
   backupSrtUrl?: string;
   allowUnauthenticatedInternalRead?: boolean;
+  maxChannelsTotal?: number;
+  maxChannelsPerOwner?: number;
 }
 
 export interface PublisherConnectionDetails {
@@ -121,7 +123,15 @@ export class LiveService {
         : {}),
       createdAt: new Date().toISOString()
     };
-    await this.repository.createLiveChannel(channel);
+    const created = await this.repository.createLiveChannelWithinCapacity(channel, {
+      maxTotal: this.options.maxChannelsTotal ?? 32,
+      maxPerOwner: this.options.maxChannelsPerOwner ?? 4
+    });
+    if (!created.created) {
+      if (created.reason === 'owner-limit')
+        throw new CapacityError('The user has reached the live-channel limit');
+      throw new CapacityError('The installation has reached its live-channel limit');
+    }
     this.metrics?.increment('live_channels_total', {
       outcome: 'created',
       normalize: String(input.normalize)
@@ -298,7 +308,7 @@ export class LiveService {
       (await this.repository.listSessions()).some((session) => session.liveChannelId === channelId)
     )
       throw new ConflictError('Delete live playback sessions that use this channel first');
-    if (this.normalizer?.running(channelId)) await this.normalizer.stop(channelId);
+    if (this.normalizer) await this.normalizer.stop(channelId);
     const deleted = await this.repository.deleteLiveChannel(channelId, stored.revision);
     if (!deleted.applied) {
       if (deleted.reason === 'not-found') throw new NotFoundError('Live channel was not found');
@@ -361,14 +371,29 @@ export class LiveService {
         if (this.normalizer.running(channel.id)) await this.normalizer.stop(channel.id);
         continue;
       }
-      if (online && !this.normalizer.running(channel.id)) {
-        await this.normalizer.start(
-          channel.id,
-          `${this.options.internalRtspUrl}/${ingestPath}`,
-          `${this.options.internalRtspUrl}/${channel.path}`,
-          profile
-        );
-        this.metrics?.increment('live_normalizer_transitions_total', { state: 'running' });
+      if (
+        online &&
+        !this.normalizer.running(channel.id) &&
+        (this.normalizer.canStart?.(channel.id, channel.ownerId) ?? true)
+      ) {
+        try {
+          await this.normalizer.start(
+            channel.id,
+            channel.ownerId,
+            `${this.options.internalRtspUrl}/${ingestPath}`,
+            `${this.options.internalRtspUrl}/${channel.path}`,
+            profile
+          );
+          this.metrics?.increment('live_normalizer_transitions_total', { state: 'running' });
+        } catch (error) {
+          this.metrics?.increment('live_normalizer_transitions_total', { state: 'failed' });
+          this.events?.publish(
+            event('live.normalizer.failed', {
+              channelId: channel.id,
+              reason: error instanceof Error ? error.name : 'unknown'
+            })
+          );
+        }
       } else if (!online && this.normalizer.running(channel.id)) {
         await this.normalizer.stop(channel.id);
         this.metrics?.increment('live_normalizer_transitions_total', { state: 'stopped' });
@@ -393,8 +418,14 @@ export class LiveService {
 
   async stop(): Promise<void> {
     if (!this.normalizer) return;
-    for (const channel of await this.repository.listLiveChannels())
-      await this.normalizer.stop(channel.id);
+    const results = await Promise.allSettled(
+      (await this.repository.listLiveChannels()).map((channel) => this.normalizer!.stop(channel.id))
+    );
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result): unknown => result.reason);
+    if (failures.length)
+      throw new AggregateError(failures, 'One or more live normalizers failed to stop');
   }
 
   async authorizeMediaMtx(
@@ -408,6 +439,7 @@ export class LiveService {
     },
     readToken: string
   ): Promise<boolean> {
+    const channels = await this.repository.listLiveChannels();
     if (input.action === 'read' || input.action === 'playback') {
       if (
         this.options.allowUnauthenticatedInternalRead &&
@@ -416,13 +448,12 @@ export class LiveService {
         !input.password &&
         !input.token
       )
-        return true;
+        return channels.some((channel) => channel.normalize && channel.ingestPath === input.path);
       return (
         input.user === 'vrrelay-read' && (input.password === readToken || input.token === readToken)
       );
     }
     if (input.action !== 'publish') return false;
-    const channels = await this.repository.listLiveChannels();
     // FFmpeg reads and republishes over the private RTSP listener. The bundled
     // deployments never expose this listener publicly; allowing only RTSP and
     // only a generated normalized-output path avoids placing a reusable secret

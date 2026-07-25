@@ -12,10 +12,11 @@
   } from '@vrrelay/domain';
   import type { SignInConfigurationRequest, RuntimeConfiguration } from '@vrrelay/contracts';
   import { api, isAuthenticatedError } from '#lib/api';
-  import { adminRoute } from '#lib/new-ui/state.svelte';
+  import { adminRoute, loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import StatusBadge from '#lib/new-ui/components/StatusBadge.svelte';
+  import ConfirmAction from '#lib/new-ui/components/ConfirmAction.svelte';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Alert from '#lib/new-ui/components/ui/alert';
   import * as AlertDialog from '#lib/new-ui/components/ui/alert-dialog';
@@ -37,6 +38,10 @@
   let publicHostname = $state('');
   let name = $state('Jellyfin');
   let baseUrl = $state('http://127.0.0.1:8096/jellyfin');
+  let providerAuthMode = $state<'delegated' | 'user_token' | 'api_key'>('delegated');
+  let providerUsername = $state('');
+  let providerPassword = $state('');
+  let providerApiKey = $state('');
   let allowPublicHttp = $state(false);
   let signInProviderId = $state('');
   let signInConfigured = $state(false);
@@ -44,6 +49,9 @@
   let allowedProfileIds = $state<string[]>([]);
   let reportPlaybackActivity = $state(true);
   let tokenName = $state('Unity client');
+  let tokenExpiresAt = $state(
+    new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString().slice(0, 16)
+  );
   let newToken = $state('');
   let scopeState = $state<Record<Exclude<Scope, 'admin'>, boolean>>({
     'catalog:read': true,
@@ -52,6 +60,7 @@
     'sessions:control': true
   });
   let pendingProvider = $state<PublicProviderConnection | null>(null);
+  let pendingToken = $state<Omit<PersonalAccessToken, 'tokenHash'> | null>(null);
   let busy = $state(false);
   let validatingProviderId = $state('');
   let runtimeValidated = $state(false);
@@ -71,58 +80,78 @@
     return [...latest.values()];
   });
 
+  function preferredVodProfileId(): string {
+    return (
+      profileChoices.find((profile) => profile.profileId === 'universal-h264-hls-vod')?.profileId ??
+      profileChoices.find(
+        (profile) =>
+          profile.delivery.method === 'hls' &&
+          profile.delivery.container === 'mpegts' &&
+          profile.delivery.segmentType === 'mpegts' &&
+          profile.delivery.playlistType === 'vod'
+      )?.profileId ??
+      ''
+    );
+  }
+
   onMount(async () => {
-    try {
-      const [providerResult, profileResult, signInResult, tokenResult, runtimeResult] =
-        await Promise.all([
-          api.providers(),
-          api.profiles(),
-          api.signInConfiguration(),
-          api.tokens(),
-          api.runtimeConfiguration()
-        ]);
-      providers = providerResult.items;
-      profiles = profileResult.items;
-      if (signInResult.configuration) {
-        signInProviderId = signInResult.configuration.providerId;
-        defaultProfileId = signInResult.configuration.defaultProfileId;
-        allowedProfileIds = signInResult.configuration.allowedProfileIds;
-        reportPlaybackActivity = signInResult.configuration.reportPlaybackActivity;
-      } else {
-        signInProviderId =
-          providerResult.items.find((provider) => provider.authMode === 'delegated')?.id ?? '';
-        defaultProfileId = profileChoices[0]?.profileId ?? '';
-        allowedProfileIds = defaultProfileId ? [defaultProfileId] : [];
-      }
-      tokens = tokenResult.items;
-      runtime = runtimeResult;
-      runtimeDraft = structuredClone(runtimeResult.configuration);
-      trustedProxyCidrs = runtimeResult.configuration.trustedProxyCidrs.join(', ');
-      const configuredOrigin = new URL(runtimeResult.configuration.publicUrl);
-      publicHostname = configuredOrigin.hostname;
-      if (
-        !['localhost', '::1'].includes(configuredOrigin.hostname) &&
-        !configuredOrigin.hostname.startsWith('127.')
-      ) {
-        accessMode = 'advanced';
-      }
-      signInConfigured = Boolean(signInResult.configuration);
-      if (!signInConfigured && signInProviderId) {
-        try {
-          if (await enableSignIn(signInProviderId))
-            toast.success('Interactive sign-in enabled with the default profile.');
-        } catch (reason) {
-          toast.error(
-            reason instanceof Error ? reason.message : 'Could not enable interactive sign-in.'
-          );
+    let results: PromiseSettledResult<unknown>[] = [];
+    if (initialSection === 'connections') {
+      const connectionResults = await Promise.allSettled([
+        api.providers(),
+        api.profiles(),
+        api.signInConfiguration()
+      ] as const);
+      results = connectionResults;
+      const [providerResult, profileResult, signInResult] = connectionResults;
+      if (providerResult.status === 'fulfilled') providers = providerResult.value.items;
+      if (profileResult.status === 'fulfilled') profiles = profileResult.value.items;
+      if (signInResult.status === 'fulfilled') {
+        if (signInResult.value.configuration) {
+          signInProviderId = signInResult.value.configuration.providerId;
+          defaultProfileId = signInResult.value.configuration.defaultProfileId;
+          allowedProfileIds = signInResult.value.configuration.allowedProfileIds;
+          reportPlaybackActivity = signInResult.value.configuration.reportPlaybackActivity;
+        } else {
+          signInProviderId =
+            providers.find((provider) => provider.authMode === 'delegated')?.id ?? '';
+          defaultProfileId = preferredVodProfileId();
+          allowedProfileIds = defaultProfileId ? [defaultProfileId] : [];
         }
+        signInConfigured = Boolean(signInResult.value.configuration);
       }
-    } catch (reason) {
-      if (isAuthenticatedError(reason)) return goto(adminRoute(page.url.pathname, '/login'));
-      loadError = reason instanceof Error ? reason.message : 'Could not load settings.';
-    } finally {
-      loading = false;
+    } else if (initialSection === 'tokens') {
+      const tokenResult = await Promise.allSettled([api.tokens()] as const);
+      results = tokenResult;
+      if (tokenResult[0].status === 'fulfilled') tokens = tokenResult[0].value.items;
+    } else {
+      const runtimeResult = await Promise.allSettled([api.runtimeConfiguration()] as const);
+      results = runtimeResult;
+      if (runtimeResult[0].status === 'fulfilled') {
+        runtime = runtimeResult[0].value;
+        runtimeDraft = structuredClone(runtimeResult[0].value.configuration);
+        trustedProxyCidrs = runtimeResult[0].value.configuration.trustedProxyCidrs.join(', ');
+        const configuredOrigin = new URL(runtimeResult[0].value.configuration.publicUrl);
+        publicHostname = configuredOrigin.hostname;
+        if (
+          !['localhost', '::1'].includes(configuredOrigin.hostname) &&
+          !configuredOrigin.hostname.startsWith('127.')
+        )
+          accessMode = 'advanced';
+      }
     }
+    const authenticationFailure = results.find(
+      (result) => result.status === 'rejected' && isAuthenticatedError(result.reason)
+    );
+    if (authenticationFailure?.status === 'rejected') {
+      loading = false;
+      return goto(loginRoute(page.url.pathname));
+    }
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected')
+      loadError =
+        failure.reason instanceof Error ? failure.reason.message : 'Could not load settings.';
+    loading = false;
   });
 
   async function connect() {
@@ -132,11 +161,17 @@
         type: 'jellyfin',
         name,
         baseUrl,
-        authMode: 'delegated',
+        authMode: providerAuthMode,
+        ...(providerAuthMode === 'user_token'
+          ? { username: providerUsername, password: providerPassword }
+          : {}),
+        ...(providerAuthMode === 'api_key' ? { apiKey: providerApiKey } : {}),
         allowPublicHttp
       });
+      providerPassword = '';
+      providerApiKey = '';
       providers = [provider, ...providers];
-      if (!signInConfigured) {
+      if (!signInConfigured && provider.authMode === 'delegated') {
         signInProviderId = provider.id;
         try {
           if (await enableSignIn(provider.id)) {
@@ -170,11 +205,7 @@
   }
 
   async function enableSignIn(providerId: string): Promise<boolean> {
-    const preferredProfileId =
-      defaultProfileId ||
-      profileChoices.find((profile) => profile.delivery.playlistType === 'vod')?.profileId ||
-      profileChoices[0]?.profileId ||
-      '';
+    const preferredProfileId = defaultProfileId || preferredVodProfileId();
     if (!preferredProfileId) return false;
     defaultProfileId = preferredProfileId;
     allowedProfileIds = allowedProfileIds.includes(preferredProfileId)
@@ -240,7 +271,11 @@
 
   async function createToken() {
     try {
-      const result = await api.createToken({ name: tokenName, scopes, expiresAt: null });
+      const result = await api.createToken({
+        name: tokenName,
+        scopes,
+        expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : null
+      });
       newToken = result.token;
       const { token: _token, ...record } = result;
       tokens = [record, ...tokens];
@@ -251,15 +286,11 @@
   }
 
   async function revokeToken(id: string) {
-    try {
-      await api.revokeToken(id);
-      tokens = tokens.map((token) =>
-        token.id === id ? { ...token, revokedAt: new Date().toISOString() } : token
-      );
-      toast.success('Token revoked.');
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : 'Could not revoke token.');
-    }
+    await api.revokeToken(id);
+    tokens = tokens.map((token) =>
+      token.id === id ? { ...token, revokedAt: new Date().toISOString() } : token
+    );
+    toast.success('Token revoked.');
   }
 
   function runtimeRequest(): RuntimeConfiguration | null {
@@ -437,7 +468,10 @@
       <Card.Root>
         <Card.Header>
           <Card.Title>Add endpoint</Card.Title>
-          <Card.Description>No administrator Jellyfin credential is required.</Card.Description>
+          <Card.Description>
+            Use per-user sign-in for the dashboard catalog, or store an administrator-managed
+            credential for placement-aware relay workflows.
+          </Card.Description>
         </Card.Header>
         <Card.Content>
           <Field.Group>
@@ -449,6 +483,56 @@
               <Field.Label for="connection-url">Jellyfin URL</Field.Label>
               <Input id="connection-url" type="url" bind:value={baseUrl} />
             </Field.Field>
+            <Field.Field>
+              <Field.Label>Credential mode</Field.Label>
+              <Select.Root type="single" bind:value={providerAuthMode}>
+                <Select.Trigger class="w-full">
+                  {providerAuthMode === 'delegated'
+                    ? 'Per-user sign-in'
+                    : providerAuthMode === 'user_token'
+                      ? 'Stored user token'
+                      : 'Stored API key'}
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="delegated">Per-user sign-in</Select.Item>
+                  <Select.Item value="user_token">Stored user token</Select.Item>
+                  <Select.Item value="api_key">Stored API key</Select.Item>
+                </Select.Content>
+              </Select.Root>
+              <Field.Description>
+                Stored credentials are written to the configured secret backend and are never
+                returned by the API.
+              </Field.Description>
+            </Field.Field>
+            {#if providerAuthMode === 'user_token'}
+              <Field.Field>
+                <Field.Label for="connection-username">Jellyfin username</Field.Label>
+                <Input
+                  id="connection-username"
+                  autocomplete="username"
+                  bind:value={providerUsername}
+                />
+              </Field.Field>
+              <Field.Field>
+                <Field.Label for="connection-password">Jellyfin password</Field.Label>
+                <Input
+                  id="connection-password"
+                  type="password"
+                  autocomplete="new-password"
+                  bind:value={providerPassword}
+                />
+              </Field.Field>
+            {:else if providerAuthMode === 'api_key'}
+              <Field.Field>
+                <Field.Label for="connection-api-key">Jellyfin API key</Field.Label>
+                <Input
+                  id="connection-api-key"
+                  type="password"
+                  autocomplete="off"
+                  bind:value={providerApiKey}
+                />
+              </Field.Field>
+            {/if}
             <label
               class="flex items-center justify-between rounded-lg border p-3"
               for="public-http"
@@ -456,7 +540,14 @@
               <span class="text-sm">Allow public HTTP</span>
               <Switch id="public-http" bind:checked={allowPublicHttp} />
             </label>
-            <Button disabled={busy || !name || !baseUrl} onclick={connect}>Add endpoint</Button>
+            <Button
+              disabled={busy ||
+                !name ||
+                !baseUrl ||
+                (providerAuthMode === 'user_token' && (!providerUsername || !providerPassword)) ||
+                (providerAuthMode === 'api_key' && !providerApiKey)}
+              onclick={connect}>Add endpoint</Button
+            >
           </Field.Group>
         </Card.Content>
       </Card.Root>
@@ -560,6 +651,14 @@
                 id="token-name"
                 bind:value={tokenName}
               /></Field.Field
+            ><Field.Field
+              ><Field.Label for="token-expiry">Expiry</Field.Label><Input
+                id="token-expiry"
+                type="datetime-local"
+                bind:value={tokenExpiresAt}
+              /><Field.Description
+                >Leave blank only for a deliberately non-expiring integration token.</Field.Description
+              ></Field.Field
             >{#each Object.keys(scopeState) as scope}<label
                 class="flex items-center justify-between rounded-lg border p-3"
                 for={`scope-${scope}`}
@@ -583,22 +682,38 @@
                 ><Button
                   variant="outline"
                   size="sm"
-                  onclick={() => navigator.clipboard.writeText(newToken)}
-                  ><Copy data-icon="inline-start" />Copy</Button
+                  onclick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(newToken);
+                      toast.success('Token copied.');
+                    } catch {
+                      toast.error(
+                        'Clipboard access was denied. Select and copy the token manually.'
+                      );
+                    }
+                  }}><Copy data-icon="inline-start" />Copy</Button
                 ></Alert.Action
               ></Alert.Root
-            >{/if}{#each tokens as token}<div class="flex items-center gap-3 rounded-lg border p-3">
+            >{/if}{#each tokens as token}<div
+              class="flex items-center gap-3 rounded-lg border p-3"
+              data-testid={`personal-token-${token.id}`}
+            >
               <div class="min-w-0 flex-1">
                 <strong class="block">{token.name}</strong><span
                   class="text-muted-foreground text-xs">{token.scopes.join(', ')}</span
                 >
+                <span class="text-muted-foreground block text-xs">
+                  {token.expiresAt
+                    ? `Expires ${new Date(token.expiresAt).toLocaleString()}`
+                    : 'Does not expire'}
+                </span>
               </div>
               <StatusBadge
                 value={token.revokedAt ? 'revoked' : 'active'}
               />{#if !token.revokedAt}<Button
                   variant="destructive"
                   size="sm"
-                  onclick={() => revokeToken(token.id)}>Revoke</Button
+                  onclick={() => (pendingToken = token)}>Revoke</Button
                 >{/if}
             </div>{/each}</Card.Content
         ></Card.Root
@@ -967,9 +1082,8 @@
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >Stops the continuous source connection after demand goes quiet. The shared
-                single-producer guarantee currently applies to HLS VOD profiles only; experimental
-                direct fragmented-MP4 streams remain per request.</Field.Description
+                >Stops the continuous source connection after demand goes quiet. HLS VOD viewers
+                share one fenced producer generation for each session.</Field.Description
               ></Field.Field
             ><Field.Field
               ><Field.Label for="producer-buffer-low"
@@ -1060,3 +1174,16 @@
     ></AlertDialog.Content
   ></AlertDialog.Root
 >
+
+<ConfirmAction
+  open={Boolean(pendingToken)}
+  onOpenChange={(open) => !open && (pendingToken = null)}
+  title="Revoke personal access token?"
+  description={`Revoke ${pendingToken?.name ?? 'this token'} immediately. Clients using it will need a replacement token.`}
+  confirmLabel="Revoke token"
+  onConfirm={async () => {
+    if (!pendingToken) return;
+    await revokeToken(pendingToken.id);
+    pendingToken = null;
+  }}
+/>

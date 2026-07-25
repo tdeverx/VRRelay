@@ -17,9 +17,10 @@ processing, and MediaMTX handles RTMP, SRT, and WHIP live ingest.
 ## Project status
 
 The major private-production v1 implementation and repository reconciliation
-pass is complete. A fresh pinned-runtime checkout passes formatting, generated
-contract checks, type checks, lint, the automated test suite, production
-builds, the dependency audit, and the desktop/mobile browser smoke suite.
+pass has an implementation checkpoint. The current audit-remediation worktree
+must still complete its final pinned-runtime CI, deployment, media, and
+desktop/mobile browser verification before those results can be claimed for the
+current source.
 
 That engineering checkpoint is not a release claim. Remaining product work
 includes broader live/binding/failover, dependency-management,
@@ -69,9 +70,8 @@ requirements.
 
 > [!NOTE]
 > The one-producer guarantee currently covers HLS VOD, including MPEG-TS and
-> fMP4-segmented HLS. Experimental direct fragmented-MP4 streaming remains
-> request-oriented and can open more than one provider pull; do not use that
-> profile when the upstream single-producer guarantee is required.
+> fMP4-segmented HLS. Direct fragmented-MP4 streaming is not exposed: all VOD
+> playback uses the admitted, fenced HLS producer path.
 
 ## Requirements
 

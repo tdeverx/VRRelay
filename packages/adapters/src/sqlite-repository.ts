@@ -28,6 +28,7 @@ import type {
   AuditQuery,
   AuditRepository,
   ClusterRepository,
+  LiveChannelCapacityWriteResult,
   NodeCertificateRotation,
   NodeDrainUpdate,
   NodeHeartbeatUpdate,
@@ -1196,6 +1197,39 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
     return { value: channel, revision: 1 };
   }
 
+  async createLiveChannelWithinCapacity(
+    channel: LiveChannel,
+    limits: { maxTotal: number; maxPerOwner: number }
+  ): Promise<LiveChannelCapacityWriteResult> {
+    return this.#db
+      .transaction(() => {
+        const total = this.#db.prepare('SELECT COUNT(*) AS count FROM live_channels').get() as {
+          count: number;
+        };
+        if (total.count >= limits.maxTotal)
+          return { created: false, reason: 'installation-limit' } as const;
+        if (channel.ownerId) {
+          const owned = this.#db
+            .prepare(
+              `SELECT COUNT(*) AS count
+                 FROM live_channels
+                WHERE json_extract(json, '$.ownerId') = ?`
+            )
+            .get(channel.ownerId) as { count: number };
+          if (owned.count >= limits.maxPerOwner)
+            return { created: false, reason: 'owner-limit' } as const;
+        }
+        this.#db
+          .prepare('INSERT INTO live_channels(id, json, created_at, revision) VALUES (?, ?, ?, 1)')
+          .run(channel.id, JSON.stringify(channel), channel.createdAt);
+        return {
+          created: true,
+          record: { value: channel, revision: 1 }
+        } as const;
+      })
+      .immediate();
+  }
+
   async listLiveChannels(): Promise<LiveChannel[]> {
     return this.#list<LiveChannel>('live_channels', 'created_at DESC');
   }
@@ -1353,6 +1387,48 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
       identity.lastSeenAt,
       expectedRevision
     );
+  }
+
+  async compareAndSetUserIdentityPreservingOwner(
+    identity: UserIdentity,
+    expectedRevision: number
+  ): Promise<AtomicWriteResult<UserIdentity>> {
+    const operation = this.#db.transaction((): AtomicWriteResult<UserIdentity> => {
+      const current = this.#getVersioned<UserIdentity>('user_identities', 'id', identity.id);
+      if (!current) return { applied: false, reason: 'not-found' };
+      if (current.revision !== expectedRevision)
+        return { applied: false, reason: 'revision-conflict', current };
+      if (current.value.roles.includes('owner') && !identity.roles.includes('owner')) {
+        const owners = this.#db
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM user_identities
+             WHERE EXISTS (
+               SELECT 1
+               FROM json_each(user_identities.json, '$.roles')
+               WHERE json_each.value = 'owner'
+             )`
+          )
+          .get() as { count: number };
+        if (owners.count <= 1)
+          return {
+            applied: false,
+            reason: 'dependency-conflict',
+            current,
+            dependencies: ['assigned-owner']
+          };
+      }
+      return this.#compareAndSetVersioned(
+        'user_identities',
+        'id',
+        identity.id,
+        identity,
+        'updated_at',
+        identity.lastSeenAt,
+        expectedRevision
+      );
+    });
+    return operation.immediate();
   }
 
   async putSetting(key: string, value: string): Promise<void> {

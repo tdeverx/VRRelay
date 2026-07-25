@@ -26,6 +26,7 @@ import type {
   SignedCertificate
 } from '@vrrelay/application';
 import { ClusterService } from '@vrrelay/application';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 const MAX_MESSAGE_BYTES = 256 * 1024;
 const MAX_MESSAGES_PER_MINUTE = 240;
@@ -1160,6 +1161,17 @@ export class NodeAgent {
     return this.#connection?.pending.size ?? 0;
   }
 
+  connected(): boolean {
+    const connection = this.#connection;
+    return Boolean(
+      connection?.opened && !connection.closed && connection.socket.readyState === WebSocket.OPEN
+    );
+  }
+
+  async prepareIdentity(): Promise<string> {
+    return (await this.#loadState()).nodeId;
+  }
+
   async start(): Promise<void> {
     this.#stopping = false;
     await this.#connect();
@@ -1234,19 +1246,23 @@ export class NodeAgent {
       signingRequest = { version: 1, ...created };
       await this.options.secretStore.put(NODE_ENROLLMENT_REFERENCE, JSON.stringify(signingRequest));
     }
-    const response = await fetch(enrollmentUrl, {
-      method: 'POST',
-      redirect: 'error',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        token: this.options.joinToken,
-        name: this.options.nodeName,
-        publicUrl: this.options.publicUrl,
-        ...(this.options.internalUrl ? { internalUrl: this.options.internalUrl } : {}),
-        capabilities: await this.options.capabilities(),
-        csrPem: signingRequest.csrPem
-      })
-    });
+    const response = await fetchWithTimeout(
+      enrollmentUrl,
+      {
+        method: 'POST',
+        redirect: 'error',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          token: this.options.joinToken,
+          name: this.options.nodeName,
+          publicUrl: this.options.publicUrl,
+          ...(this.options.internalUrl ? { internalUrl: this.options.internalUrl } : {}),
+          capabilities: await this.options.capabilities(),
+          csrPem: signingRequest.csrPem
+        })
+      },
+      30_000
+    );
     if (!response.ok) throw new Error('Node enrollment failed (' + response.status + ')');
     const body = z
       .object({
@@ -1416,12 +1432,17 @@ export class NodeAgent {
     connection.closed = true;
     this.#clearConnectionTimers(connection);
     rejectAllPending(connection.pending, new Error('Controller connection closed'));
-    if (this.#connection === connection) this.#connection = undefined;
+    const wasCurrentConnection = this.#connection === connection;
+    if (wasCurrentConnection) {
+      this.#connection = undefined;
+      for (const job of this.#jobs.values()) job.abort(new Error('Controller connection closed'));
+      this.#jobs.clear();
+    }
     if (connection.identitySlot === 'pending' && !connection.opened)
       this.#preferActiveIdentity = true;
     else if (connection.identitySlot === 'active' && !connection.opened)
       this.#preferActiveIdentity = false;
-    if (connection.opened)
+    if (connection.opened && wasCurrentConnection)
       await this.options
         .onDisconnect?.()
         .catch((error) =>

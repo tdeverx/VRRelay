@@ -68,6 +68,13 @@ value that exactly matches a configured node-region label. Untrusted, duplicate,
 unknown values are ignored and counted with a bounded fallback metric. Raw client IP addresses are
 not passed to the application routing contract or webhook.
 
+Dedicated edge roles accept only short-lived, signed edge-scoped playback grants; raw durable
+controller grants are rejected. Viewer affinity is derived with an installation-keyed HMAC whose
+random salt is created atomically in the shared repository, so controller and edge observations
+remain stable without persisting or logging raw addresses or user agents. Grant-bearing manifests
+and segments use private, no-store cache policy so a revoked grant must be revalidated at the
+relay.
+
 Upgrades may temporarily retain a false-like `VRRELAY_TRUST_PROXY` value from
 the previous sample environment; it is treated as a no-op so existing
 standalone installs still start. True or ambiguous values fail closed. Remove
