@@ -6,6 +6,65 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Replaced per-version GitHub release tags with one GitHub Actions-managed lightweight `latest`
+  tag and release. Product build 100 seeds the explicit build-number sequence; every workflow
+  attempt appends collision-safe, build-numbered native packages, source archives, metadata,
+  checksums, and a manifest without overwriting history. OCI builds are staged by immutable digest
+  and roll only `latest` after the completed release publishes, while manifests retain historical
+  image digests. Selective failed-job retries reuse the gate-authored identity, and release
+  publication moves the lightweight ref only after all assets exist so workflow-changing builds
+  remain retryable. Interrupted zero-byte GitHub upload placeholders are removed only when their
+  exact build asset is retried; completed assets stay append-only. Release metadata now packages a
+  Helm chart pinned to the same immutable OCI digest, while the source chart falls back to the only
+  mutable tag the workflow publishes: `latest`. Public releases also require an anonymous pull of
+  the staged digest so a default-private GHCR package cannot produce an unusable chart. Release
+  checks fail closed on asset collisions, release immutability, source-revision drift, signing
+  failures, or the archive safety threshold.
+- Hardened native release signing on both desktop platforms. macOS signs every nested Mach-O with
+  the same Developer ID, gives the directly launched Node runtime only its required JIT
+  entitlements, retains library validation, and executes the packaged SQLite and Argon2 add-ons
+  before notarization. Windows now checks every native tool exit, signs and verifies nested
+  executables, DLLs, and Node add-ons, and refuses a missing or unsigned final installer.
+- Made production media behavior portable across macOS, Windows, and Linux. Every packaged FFmpeg
+  binary must report the exact shared source revision, automatic decode remains software on every
+  host, and built-in profiles now use `libx264`/software instead of selecting a host-specific
+  hardware encoder. Untouched hardware-selected built-in revision 1 profiles receive a portable
+  revision 2; custom accelerated profiles remain explicit opt-ins.
+- Added administrator-configured inactivity deletion for unpinned sessions and stale ordinary-user
+  purging, both disabled by default. Successful media delivery refreshes session activity,
+  deletion-pending cleanup is retried without a restart, protected or resource-owning users cannot
+  starve later purge candidates, and owners can manually delete eligible accumulated users from the
+  dashboard.
+- Persisted a non-secret index for browser-session provider credentials so logout, expiry, restart
+  recovery, and user deletion can reliably remove Keychain, DPAPI, or encrypted-file secrets.
+  Login, cleanup, and deletion are serialized so no race can publish an orphan credential or
+  browser session.
+- Fixed transient HLS freezes after seeks and producer buffer cycles by aligning FFmpeg's initial
+  source-read allowance with the configured high watermark. This keeps FFmpeg's 2× safety ceiling
+  from competing with the application watermark pacer. A generation-local progress watchdog now
+  restarts only a catching-up producer that has already published, has a pending segment response,
+  and then stops publishing for a bounded grace period; buffered and unobserved producers are left
+  alone.
+- Stopped and awaited active FFmpeg VOD producers when segment publication fails, preventing
+  orphaned transcoders and scratch-directory races during recovery.
+- Fixed long-running Jellyfin VOD source pulls being reset by the metadata request timeout after
+  their response had already opened. Media streams now retain producer cancellation while the
+  30-second timeout applies only to resolving and opening the upstream response.
+- Kept persistent VOD producers alive while segment responses are still waiting for publication,
+  preventing a slow in-flight segment from being mistaken for an idle stream. Normal idle shutdown
+  resumes as soon as the last waiter finishes or disconnects.
+- Stopped pending segment requests from restarting a VOD producer after its durable session was
+  deleted or stopped, preventing orphaned generations from repeatedly requesting a removed
+  session-owned source credential.
+- Hardened persistent VOD producer recovery: truncated code-zero transcodes now fail unless they
+  publish through the terminal segment, immediate failures use shared bounded retry backoff, and
+  pending starts plus remotely deleted or stopped sessions are fenced before they can keep sourcing
+  media. Pending segment responses now keep their owning producer generation alive until they
+  finish, disconnect, or time out, avoiding an idle restart while a viewer is still waiting.
+  Dashboard stops now reach the durable remote producer owner after failover, and seek arbitration
+  scales its forward join window with the profile's actual segment duration. A controller restart
+  now drains active source-worker producers without permanently closing their reusable coordinator,
+  so the reconnected worker can serve the next segment immediately.
 - Bound the standalone Compose administration port to loopback by default so
   the localhost first-run policy cannot expose owner setup to LAN clients.
   Standalone VOD placement now refreshes local provider capabilities
@@ -45,11 +104,12 @@ semantic versioning after the first public release.
   accept the exact lockfile, the full repository gate and online audit report
   zero vulnerabilities, and the production OCI, standalone Compose, cluster
   Compose, and local multi-process cluster smoke tests pass.
-- Stabilized persistent HLS VOD after seeks. Producers no longer make an initial FFmpeg read-rate
-  burst that stalls at the throttle boundary; demand selection now uses the active playback window
-  rather than the deliberately buffered encoded head; individual client disconnects no longer cancel
-  a warming shared producer; fMP4 initialization is stored under one deterministic key even for a
-  direct nonzero seek; and terminal producer history is capped to protect the runtime and dashboard.
+- Stabilized persistent HLS VOD after seeks. Producers no longer use a short, independent FFmpeg
+  read-rate burst that can stall before the application buffer is full; demand selection now uses
+  the active playback window rather than the deliberately buffered encoded head; individual client
+  disconnects no longer cancel a warming shared producer; fMP4 initialization is stored under one
+  deterministic key even for a direct nonzero seek; and terminal producer history is capped to
+  protect the runtime and dashboard.
 
 - Fixed Jellyfin catalog search presentation so discovery rows are hidden while a search is active,
   results are clearly labeled, and stale responses cannot replace the latest query.

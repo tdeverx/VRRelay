@@ -385,6 +385,15 @@ describe('mTLS node agent transport', () => {
     expect(await controller.evictCache(enrollment.node.id, { all: true })).toEqual({
       removed: 0
     });
+    controller.setEnsureHandler(async () => {
+      throw new Error('Transient controller recovery race');
+    });
+    await expect(restartedAgent.ensure('recovery-grant', 2)).rejects.toThrow(
+      'Transient controller recovery race'
+    );
+    expect(controller.connected(enrollment.node.id)).toBe(true);
+    controller.setEnsureHandler(async () => undefined);
+    await expect(restartedAgent.ensure('recovery-grant', 2)).resolves.toBeUndefined();
     await restartedAgent.stop();
 
     await cluster.revoke(enrollment.node.id);

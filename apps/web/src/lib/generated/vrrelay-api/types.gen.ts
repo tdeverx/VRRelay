@@ -123,6 +123,17 @@ export type UpdateUserRequest = {
     allowedProfileIds: Array<string>;
 };
 
+export type RetentionConfiguration = {
+    /**
+     * Hours without successful media delivery before an unpinned session is deleted.
+     */
+    sessionInactivityDeletionHours: number | null;
+    /**
+     * Days since sign-in before an inactive non-administrator identity is purged.
+     */
+    staleUserPurgeDays: number | null;
+};
+
 export type AuthenticationMode = 'user_token' | 'api_key' | 'delegated';
 
 export type PlatformMode = 'universal' | 'pc' | 'quest' | 'dual';
@@ -349,6 +360,8 @@ export type RelaySession = {
     placementLocked: boolean;
     preferredRegion?: string;
     ownerId?: string;
+    lastPlaybackActivityAt?: string;
+    deletionPending?: boolean;
     outputUrls: {
         [key: string]: string;
     };
@@ -383,6 +396,7 @@ export type SessionRuntimeStats = {
     cacheHits: number;
     cacheMisses: number;
     cacheHitRatio: number | null;
+    lastPlaybackActivityAt?: string;
     observedAt: string;
 };
 
@@ -940,6 +954,8 @@ export type ActivateBackend = BackendActivationRequestWritable;
 
 export type RuntimeConfiguration2 = RuntimeConfiguration;
 
+export type RetentionConfiguration2 = RetentionConfiguration;
+
 export type EvictCache = CacheEvictionRequest;
 
 export type GetHealthData = {
@@ -1082,6 +1098,47 @@ export type RestartRuntimeResponses = {
 };
 
 export type RestartRuntimeResponse = RestartRuntimeResponses[keyof RestartRuntimeResponses];
+
+export type GetRetentionConfigurationData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/configuration/retention';
+};
+
+export type GetRetentionConfigurationResponses = {
+    /**
+     * Automatic idle-session deletion and stale-user purge policy
+     */
+    200: RetentionConfiguration;
+};
+
+export type GetRetentionConfigurationResponse = GetRetentionConfigurationResponses[keyof GetRetentionConfigurationResponses];
+
+export type UpdateRetentionConfigurationData = {
+    body: RetentionConfiguration2;
+    path?: never;
+    query?: never;
+    url: '/configuration/retention';
+};
+
+export type UpdateRetentionConfigurationErrors = {
+    /**
+     * Request failed
+     */
+    400: ApiError;
+};
+
+export type UpdateRetentionConfigurationError = UpdateRetentionConfigurationErrors[keyof UpdateRetentionConfigurationErrors];
+
+export type UpdateRetentionConfigurationResponses = {
+    /**
+     * Automatic idle-session deletion and stale-user purge policy
+     */
+    200: RetentionConfiguration;
+};
+
+export type UpdateRetentionConfigurationResponse = UpdateRetentionConfigurationResponses[keyof UpdateRetentionConfigurationResponses];
 
 export type GetSetupStatusData = {
     body?: never;
@@ -1346,6 +1403,39 @@ export type ListUsersResponses = {
 };
 
 export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses];
+
+export type DeleteUserData = {
+    body?: never;
+    path: {
+        userId: string;
+    };
+    query: {
+        expectedRevision: number;
+    };
+    url: '/users/{userId}';
+};
+
+export type DeleteUserErrors = {
+    /**
+     * Request failed
+     */
+    404: ApiError;
+    /**
+     * Request failed
+     */
+    409: ApiError;
+};
+
+export type DeleteUserError = DeleteUserErrors[keyof DeleteUserErrors];
+
+export type DeleteUserResponses = {
+    /**
+     * User identity and active browser sessions deleted
+     */
+    204: void;
+};
+
+export type DeleteUserResponse = DeleteUserResponses[keyof DeleteUserResponses];
 
 export type UpdateUserData = {
     body: UpdateUser;

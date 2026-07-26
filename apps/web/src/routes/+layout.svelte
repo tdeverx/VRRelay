@@ -19,6 +19,7 @@
       ['/dashboard/settings/connections', 'Connections'],
       ['/dashboard/settings/profiles', 'Profiles'],
       ['/dashboard/settings/people', 'People & Access'],
+      ['/dashboard/settings/retention', 'Retention'],
       ['/dashboard/settings/network', 'Network'],
       ['/dashboard/settings/runtime', 'Runtime'],
       ['/dashboard/settings/api', 'API Access'],

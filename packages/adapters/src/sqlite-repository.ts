@@ -37,6 +37,7 @@ import type {
   PersonalTokenUse,
   ProviderBindingCreateResult,
   Repository,
+  SessionDeletionOptions,
   SegmentJobCreateResult,
   SettingInsertResult,
   VersionedRecord
@@ -1096,6 +1097,11 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
     if (grant.sessionId !== session.id)
       throw new Error('Playback grant must belong to the session being created');
     const operation = this.#db.transaction((): AtomicWriteResult<RelaySession> => {
+      if (
+        session.ownerId &&
+        !this.#db.prepare('SELECT 1 FROM user_identities WHERE id = ?').get(session.ownerId)
+      )
+        return { applied: false, reason: 'not-found' };
       if (session.kind === 'vod') {
         if (!session.source?.providerId)
           throw new Error('VOD session creation requires a provider reference');
@@ -1176,6 +1182,100 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
     return this.compareAndSetSession({ ...current.value, viewers, updatedAt }, expectedRevision);
   }
 
+  async touchSessionPlaybackActivity(
+    sessionId: string,
+    observedAt: string,
+    touchBefore: string
+  ): Promise<boolean> {
+    const updated = this.#db
+      .prepare(
+        `UPDATE sessions
+         SET json = json_set(json, '$.lastPlaybackActivityAt', ?),
+             revision = revision + 1
+         WHERE id = ?
+           AND COALESCE(json_extract(json, '$.deletionPending'), 0) = 0
+           AND COALESCE(
+             json_extract(json, '$.lastPlaybackActivityAt'),
+             json_extract(json, '$.createdAt')
+           ) <= ?`
+      )
+      .run(observedAt, sessionId, touchBefore);
+    return updated.changes === 1;
+  }
+
+  async listInactiveSessions(inactiveBefore: string, limit = 100): Promise<RelaySession[]> {
+    const rows = this.#db
+      .prepare(
+        `SELECT json
+         FROM sessions
+         WHERE COALESCE(json_extract(json, '$.pinned'), 0) = 0
+           AND COALESCE(json_extract(json, '$.deletionPending'), 0) = 0
+           AND COALESCE(
+             json_extract(json, '$.lastPlaybackActivityAt'),
+             json_extract(json, '$.createdAt')
+           ) <= ?
+         ORDER BY COALESCE(
+           json_extract(json, '$.lastPlaybackActivityAt'),
+           json_extract(json, '$.createdAt')
+         ) ASC
+         LIMIT ?`
+      )
+      .all(inactiveBefore, Math.max(1, Math.min(1_000, Math.trunc(limit)))) as Array<{
+      json: string;
+    }>;
+    return rows.map(({ json }) => JSON.parse(json) as RelaySession);
+  }
+
+  async listSessionDeletionPending(limit = 100): Promise<RelaySession[]> {
+    const rows = this.#db
+      .prepare(
+        `SELECT json
+         FROM sessions
+         WHERE json_extract(json, '$.deletionPending') = 1
+         ORDER BY updated_at ASC
+         LIMIT ?`
+      )
+      .all(Math.max(1, Math.min(1_000, Math.trunc(limit)))) as Array<{ json: string }>;
+    return rows.map(({ json }) => JSON.parse(json) as RelaySession);
+  }
+
+  async beginSessionDeletion(
+    sessionId: string,
+    options: SessionDeletionOptions
+  ): Promise<AtomicWriteResult<RelaySession>> {
+    const operation = this.#db.transaction((): AtomicWriteResult<RelaySession> => {
+      const current = this.#getVersioned<RelaySession>('sessions', 'id', sessionId);
+      if (!current) return { applied: false, reason: 'not-found' };
+      if (current.value.deletionPending)
+        return { applied: false, reason: 'invalid-state', current };
+      if (options.requireUnpinned && current.value.pinned)
+        return { applied: false, reason: 'invalid-state', current };
+      const activityAt = current.value.lastPlaybackActivityAt ?? current.value.createdAt;
+      if (options.inactiveBefore && activityAt > options.inactiveBefore)
+        return { applied: false, reason: 'invalid-state', current };
+      const value: RelaySession = {
+        ...current.value,
+        state: 'stopped',
+        deletionPending: true,
+        updatedAt: options.observedAt
+      };
+      const result = this.#db
+        .prepare(
+          `UPDATE sessions
+           SET json = ?, updated_at = ?, revision = revision + 1
+           WHERE id = ? AND revision = ?`
+        )
+        .run(JSON.stringify(value), value.updatedAt, sessionId, current.revision);
+      if (result.changes !== 1) throw new Error('Locked session deletion was lost');
+      this.#revokePlaybackGrants(sessionId, options.observedAt);
+      return {
+        applied: true,
+        record: { value, revision: current.revision + 1 }
+      };
+    });
+    return operation.immediate();
+  }
+
   async deleteSessionAndRevokePlaybackGrants(
     sessionId: string,
     revokedAt = new Date().toISOString()
@@ -1209,6 +1309,8 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
         if (total.count >= limits.maxTotal)
           return { created: false, reason: 'installation-limit' } as const;
         if (channel.ownerId) {
+          if (!this.#db.prepare('SELECT 1 FROM user_identities WHERE id = ?').get(channel.ownerId))
+            return { created: false, reason: 'owner-not-found' } as const;
           const owned = this.#db
             .prepare(
               `SELECT COUNT(*) AS count
@@ -1431,6 +1533,112 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
     return operation.immediate();
   }
 
+  async listUserIdentitiesLastSeenBefore(
+    lastSeenBefore: string,
+    limit = 100
+  ): Promise<Array<VersionedRecord<UserIdentity>>> {
+    const rows = this.#db
+      .prepare(
+        `SELECT json, revision
+         FROM user_identities AS candidate
+         WHERE json_extract(candidate.json, '$.lastSeenAt') <= ?
+           AND NOT EXISTS (
+             SELECT 1
+             FROM json_each(candidate.json, '$.roles') AS role
+             WHERE role.value IN ('admin', 'owner')
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM sessions
+             WHERE json_extract(sessions.json, '$.ownerId') = candidate.id
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM live_channels
+             WHERE json_extract(live_channels.json, '$.ownerId') = candidate.id
+           )
+         ORDER BY json_extract(candidate.json, '$.lastSeenAt') ASC, candidate.id ASC
+         LIMIT ?`
+      )
+      .all(lastSeenBefore, Math.max(1, Math.min(1_000, Math.trunc(limit)))) as Array<{
+      json: string;
+      revision: number;
+    }>;
+    return rows.map(({ json, revision }) => ({
+      value: JSON.parse(json) as UserIdentity,
+      revision
+    }));
+  }
+
+  async deleteUserIdentityPreservingOwner(
+    id: string,
+    expectedRevision: number,
+    lastSeenBefore?: string
+  ): Promise<AtomicDeleteResult<UserIdentity>> {
+    const operation = this.#db.transaction((): AtomicDeleteResult<UserIdentity> => {
+      const current = this.#getVersioned<UserIdentity>('user_identities', 'id', id);
+      if (!current) return { applied: false, reason: 'not-found' };
+      if (current.revision !== expectedRevision)
+        return { applied: false, reason: 'revision-conflict', current };
+      if (lastSeenBefore && current.value.lastSeenAt > lastSeenBefore)
+        return { applied: false, reason: 'invalid-state', current };
+      if (current.value.roles.includes('owner')) {
+        const owners = this.#db
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM user_identities
+             WHERE EXISTS (
+               SELECT 1
+               FROM json_each(user_identities.json, '$.roles')
+               WHERE json_each.value = 'owner'
+             )`
+          )
+          .get() as { count: number };
+        if (owners.count <= 1)
+          return {
+            applied: false,
+            reason: 'dependency-conflict',
+            current,
+            dependencies: ['assigned-owner']
+          };
+      }
+      const dependencies: string[] = [];
+      if (
+        this.#db
+          .prepare(
+            `SELECT 1 FROM sessions
+             WHERE json_extract(json, '$.ownerId') = ?
+             LIMIT 1`
+          )
+          .get(id)
+      )
+        dependencies.push('owned-sessions');
+      if (
+        this.#db
+          .prepare(
+            `SELECT 1 FROM live_channels
+             WHERE json_extract(json, '$.ownerId') = ?
+             LIMIT 1`
+          )
+          .get(id)
+      )
+        dependencies.push('owned-live-channels');
+      if (dependencies.length > 0)
+        return {
+          applied: false,
+          reason: 'dependency-conflict',
+          current,
+          dependencies
+        };
+      const deleted = this.#db
+        .prepare('DELETE FROM user_identities WHERE id = ? AND revision = ?')
+        .run(id, expectedRevision);
+      if (deleted.changes !== 1) throw new Error('Locked user deletion was lost');
+      return { applied: true, deleted: current };
+    });
+    return operation.immediate();
+  }
+
   async putSetting(key: string, value: string): Promise<void> {
     this.#db
       .prepare(
@@ -1447,6 +1655,22 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
     const row = this.#db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
       { value: string } | undefined;
     return row?.value;
+  }
+
+  async listSettingsByPrefix(prefix: string): Promise<Array<{ key: string; value: string }>> {
+    const escaped = prefix.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+    return this.#db
+      .prepare(
+        `SELECT key, value
+         FROM settings
+         WHERE key LIKE ? ESCAPE '\\'
+         ORDER BY key ASC`
+      )
+      .all(`${escaped}%`) as Array<{ key: string; value: string }>;
+  }
+
+  async deleteSetting(key: string): Promise<void> {
+    this.#db.prepare('DELETE FROM settings WHERE key = ?').run(key);
   }
 
   async getVersionedSetting(key: string): Promise<VersionedRecord<string> | undefined> {

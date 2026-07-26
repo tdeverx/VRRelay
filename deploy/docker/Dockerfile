@@ -34,7 +34,7 @@ RUN set -eu; \
     echo "$sha256  /tmp/ffmpeg.tar.xz" | sha256sum --check --strict; \
     mkdir -p /opt/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1; \
-    /opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep -F '8.1.2'; \
+    /opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep -F 'ffmpeg version n8.1.2-22-g94138f6973'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -F 'libx264'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -filters | grep -F 'subtitles'
 

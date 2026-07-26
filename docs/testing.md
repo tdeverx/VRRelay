@@ -185,7 +185,7 @@ npm run test:cluster-compose
 helm lint deploy/kubernetes
 helm template vrrelay deploy/kubernetes > /dev/null
 swift build --package-path apps/macos -c release --arch arm64
-script/verify-macos-dmg.sh dist/VRRelay-<version>-macOS-arm64.dmg <version> <build-number>
+script/verify-macos-dmg.sh dist/VRRelay-<build-id>-macOS-arm64.dmg <version> <build-number>
 ```
 
 The container smoke test performs a fresh native-architecture image build, validates the pinned Node and FFmpeg versions and required media capabilities, proves the runtime user is non-root, then boots the relay with a read-only root filesystem and empty tmpfs-backed data/cache directories. It requires a healthy Docker daemon and removes its temporary image and container on exit. CI separately builds both amd64 and arm64 images through Buildx after this runnable native test passes.

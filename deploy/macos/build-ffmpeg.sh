@@ -40,17 +40,25 @@ const manifest = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const ffmpeg = manifest.components.find((component) => component.name === 'ffmpeg');
 const recipe = ffmpeg?.sourceBuilds?.['darwin-arm64'];
 if (!recipe) throw new Error('runtime manifest is missing the darwin-arm64 FFmpeg source build');
-for (const field of ['target', 'minimumMacOS', 'linkage']) {
+for (const field of ['target', 'minimumMacOS', 'linkage', 'ffmpegCommit']) {
   if (!recipe[field] || /[\t\r\n]/.test(recipe[field]))
     throw new Error(`invalid darwin-arm64 FFmpeg source build field: ${field}`);
 }
-process.stdout.write(`${recipe.target}\t${recipe.minimumMacOS}\t${recipe.linkage}`);
+if (!/^[0-9a-f]{40}$/.test(recipe.ffmpegCommit))
+  throw new Error('invalid darwin-arm64 FFmpeg source revision');
+const ffmpegInput = recipe.inputs?.find((input) => input.name === 'ffmpeg');
+if (ffmpegInput?.revision !== recipe.ffmpegCommit)
+  throw new Error('macOS FFmpeg input revision does not match the shared runtime revision');
+process.stdout.write(
+  `${recipe.target}\t${recipe.minimumMacOS}\t${recipe.linkage}\t${recipe.ffmpegCommit}`
+);
 NODE
 )"
-IFS=$'\t' read -r BUILD_TARGET MINIMUM_MACOS BUILD_LINKAGE <<< "$recipe_fields"
+IFS=$'\t' read -r BUILD_TARGET MINIMUM_MACOS BUILD_LINKAGE FFMPEG_COMMIT <<< "$recipe_fields"
 [[ "$BUILD_TARGET" == arm64-apple-darwin ]] || { echo "Unsupported FFmpeg build target: $BUILD_TARGET" >&2; exit 1; }
 [[ "$MINIMUM_MACOS" == 15.0 ]] || { echo "Unsupported minimum macOS version: $MINIMUM_MACOS" >&2; exit 1; }
 [[ "$BUILD_LINKAGE" == static-third-party ]] || { echo "Unsupported FFmpeg linkage: $BUILD_LINKAGE" >&2; exit 1; }
+FFMPEG_SHORT_COMMIT="${FFMPEG_COMMIT[1,10]}"
 
 typeset -a SOURCE_NAMES
 typeset -A SOURCE_VERSION SOURCE_LICENSE SOURCE_FILE SOURCE_URL SOURCE_SHA256 SOURCE_DIR
@@ -130,6 +138,15 @@ for name in "${SOURCE_NAMES[@]}"; do
   }
   SOURCE_DIR[$name]="${directories[1]}"
 done
+
+FFMPEG_DEMUX_SOURCE="${SOURCE_DIR[ffmpeg]}/fftools/ffmpeg_demux.c"
+grep -Fq 'DemuxStream *slowest = NULL;' "$FFMPEG_DEMUX_SOURCE" &&
+  grep -Fq 'int64_t progress = INT64_MAX;' "$FFMPEG_DEMUX_SOURCE" &&
+  grep -Fq 'd->resume_progress = progress;' "$FFMPEG_DEMUX_SOURCE" &&
+  grep -Fq 'av_usleep(progress - limit);' "$FFMPEG_DEMUX_SOURCE" || {
+  echo "Pinned FFmpeg revision $FFMPEG_COMMIT lacks the shared read-rate fix" >&2
+  exit 1
+}
 
 SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
 CC="$(xcrun --find clang)"
@@ -234,6 +251,7 @@ FFMPEG_CONFIGURE_ARGS=(
   --disable-ffprobe
   --disable-doc
   --disable-debug
+  "--extra-version=22-g$FFMPEG_SHORT_COMMIT"
   --pkg-config-flags=--static
   "--extra-cflags=$CFLAGS"
   "--extra-cxxflags=$CXXFLAGS"
@@ -267,7 +285,8 @@ fi
 "$OUTPUT_DIR/ffmpeg" -nostdin -hide_banner -filters > "$WORK/ffmpeg-filters.txt" 2>/dev/null
 "$OUTPUT_DIR/ffmpeg" -nostdin -hide_banner -muxers > "$WORK/ffmpeg-muxers.txt" 2>/dev/null
 "$OUTPUT_DIR/ffmpeg" -nostdin -hide_banner -protocols > "$WORK/ffmpeg-protocols.txt" 2>/dev/null
-grep -Fq "ffmpeg version ${SOURCE_VERSION[ffmpeg]}" "$WORK/ffmpeg-version.txt"
+grep -Fq "ffmpeg version ${SOURCE_VERSION[ffmpeg]}-22-g$FFMPEG_SHORT_COMMIT" \
+  "$WORK/ffmpeg-version.txt"
 grep -Fq -- '--enable-gpl' "$WORK/ffmpeg-version.txt"
 grep -Fq -- '--enable-version3' "$WORK/ffmpeg-version.txt"
 if grep -Fq -- '--enable-nonfree' "$WORK/ffmpeg-version.txt"; then

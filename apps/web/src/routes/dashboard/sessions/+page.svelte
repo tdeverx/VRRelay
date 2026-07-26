@@ -8,6 +8,7 @@
     Database,
     Gauge,
     Network,
+    Pin,
     Plus,
     RefreshCw,
     Trash2,
@@ -23,6 +24,7 @@
   import * as Alert from '#lib/new-ui/components/ui/alert';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
+  import { Switch } from '#lib/new-ui/components/ui/switch';
 
   let sessions = $state<RelaySession[]>([]);
   let runtime = $state<SessionRuntimeStats[]>([]);
@@ -30,6 +32,7 @@
   let loading = $state(true);
   let error = $state('');
   let pendingDelete = $state<RelaySession | null>(null);
+  let pinBusyId = $state('');
   let refreshInFlight = false;
   let runtimeBySession = $derived(new Map(runtime.map((stats) => [stats.sessionId, stats])));
   let createdSessionId = $derived(page.url.searchParams.get('created') ?? '');
@@ -89,6 +92,18 @@
     sessions = sessions.filter((item) => item.id !== session.id);
     toast.success('Session deleted.');
   }
+  async function changePinned(session: RelaySession, pinned: boolean) {
+    pinBusyId = session.id;
+    try {
+      const updated = await api.controlSession(session.id, { pinned });
+      sessions = sessions.map((candidate) => (candidate.id === updated.id ? updated : candidate));
+      toast.success(pinned ? 'Playback link will be kept.' : 'Playback link can now expire.');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : 'Could not update link retention.');
+    } finally {
+      pinBusyId = '';
+    }
+  }
   function mbps(value: number | undefined) {
     return `${(value ?? 0).toFixed((value ?? 0) >= 10 ? 1 : 2)} Mbps`;
   }
@@ -96,6 +111,9 @@
     if (value === undefined) return 'No demand yet';
     if (value < 1_000) return 'Demand now';
     return `Demand ${Math.round(value / 1_000)}s ago`;
+  }
+  function lastPlayback(value: string | undefined) {
+    return value ? `Last media ${new Date(value).toLocaleString()}` : 'No media delivered yet';
   }
   function producerStatus(stats: SessionRuntimeStats | undefined) {
     switch (stats?.producerState) {
@@ -171,6 +189,24 @@
             <StatusBadge value={stats?.activity ?? session.state} />
           </div></Card.Header
         ><Card.Content class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div
+            class="flex items-center justify-between gap-4 rounded-md border p-3 sm:col-span-2 xl:col-span-3"
+          >
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 text-sm font-medium">
+                <Pin class="size-4" />Keep link
+              </div>
+              <div class="text-muted-foreground text-xs">
+                Pinned links are exempt from automatic inactivity deletion.
+              </div>
+            </div>
+            <Switch
+              aria-label={`Keep ${session.name} from expiring`}
+              checked={session.pinned}
+              disabled={pinBusyId === session.id}
+              onCheckedChange={(checked) => changePinned(session, checked)}
+            />
+          </div>
           <code class="break-all rounded-md border p-3 text-xs sm:col-span-2 xl:col-span-3">
             {session.outputUrls.primary ?? Object.values(session.outputUrls)[0] ?? ''}
           </code>
@@ -229,6 +265,9 @@
               </div>
               <div class="text-xs text-muted-foreground">
                 Demanded {stats?.demandedSegmentIndex ?? '—'} · {demandAge(stats?.demandAgeMs)}
+                <br />{lastPlayback(
+                  stats?.lastPlaybackActivityAt ?? session.lastPlaybackActivityAt
+                )}
               </div>
             </div>
             <div class="rounded-md border p-3">

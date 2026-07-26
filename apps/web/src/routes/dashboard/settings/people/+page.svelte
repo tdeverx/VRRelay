@@ -2,12 +2,13 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { ShieldCheck, UserRound } from '@lucide/svelte';
+  import { ShieldCheck, Trash2, UserRound } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import type { ProfileRevision, UserIdentity, UserRole } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
+  import ConfirmAction from '#lib/new-ui/components/ConfirmAction.svelte';
   import { Badge } from '#lib/new-ui/components/ui/badge';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
@@ -18,16 +19,23 @@
   type UserRecord = { value: UserIdentity; revision: number };
   let users = $state<UserRecord[]>([]);
   let profiles = $state<ProfileRevision[]>([]);
+  let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
   let loading = $state(true);
   let error = $state('');
   let busyId = $state('');
+  let pendingDelete = $state<UserRecord | null>(null);
 
   onMount(load);
 
   async function load() {
     try {
-      const [userResult, profileResult] = await Promise.all([api.users(), api.profiles()]);
+      const [userResult, profileResult, me] = await Promise.all([
+        api.users(),
+        api.profiles(),
+        api.me()
+      ]);
       users = userResult.items;
+      currentUser = me;
       profiles = profileResult.items.filter(
         (profile, index, all) =>
           all.findIndex((item) => item.profileId === profile.profileId) === index
@@ -100,6 +108,15 @@
       `Profile access updated for ${record.value.displayName}.`
     );
   }
+
+  async function deletePendingUser() {
+    const record = pendingDelete;
+    if (!record) return;
+    await api.deleteUser(record.value.id, record.revision);
+    users = users.filter((candidate) => candidate.value.id !== record.value.id);
+    pendingDelete = null;
+    toast.success(`${record.value.displayName} was deleted.`);
+  }
 </script>
 
 <div class="space-y-6 p-4 md:p-6">
@@ -160,6 +177,16 @@
                 <Select.Item value="owner">Owner</Select.Item>
               </Select.Content>
             </Select.Root>
+            <Button
+              variant="destructive"
+              size="icon"
+              disabled={busyId === record.value.id || currentUser?.id === record.value.id}
+              aria-label={`Delete ${record.value.displayName}`}
+              title={currentUser?.id === record.value.id
+                ? 'You cannot delete your own user.'
+                : `Delete ${record.value.displayName}`}
+              onclick={() => (pendingDelete = record)}><Trash2 /></Button
+            >
           </Card.Header>
           <Card.Content class="grid gap-5 border-t pt-5 lg:grid-cols-[16rem_1fr]">
             <div class="space-y-2">
@@ -214,3 +241,12 @@
     </div>
   {/if}
 </div>
+
+<ConfirmAction
+  open={Boolean(pendingDelete)}
+  onOpenChange={(open) => !open && (pendingDelete = null)}
+  title="Delete user?"
+  description={`Delete ${pendingDelete?.value.displayName ?? 'this user'}, revoke their active dashboard sessions, and remove their saved access settings. Users who still own relay sessions or live channels cannot be deleted.`}
+  confirmLabel="Delete user"
+  onConfirm={deletePendingUser}
+/>

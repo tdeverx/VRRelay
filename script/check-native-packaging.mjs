@@ -8,6 +8,10 @@ const manifest = JSON.parse(readFileSync(resolve(root, 'deploy/runtime-manifest.
 const macPackage = readFileSync(resolve(root, 'deploy/macos/package.sh'), 'utf8');
 const macFfmpegBuild = readFileSync(resolve(root, 'deploy/macos/build-ffmpeg.sh'), 'utf8');
 const macVerifier = readFileSync(resolve(root, 'script/verify-macos-dmg.sh'), 'utf8');
+const macNodeEntitlements = readFileSync(
+  resolve(root, 'deploy/macos/node-entitlements.plist'),
+  'utf8'
+);
 const macInstaller = readFileSync(resolve(root, 'deploy/macos/install-service.sh'), 'utf8');
 const windowsPackage = readFileSync(resolve(root, 'deploy/windows/package.ps1'), 'utf8');
 const windowsHost = readFileSync(resolve(root, 'apps/windows/VRRelayTray.cpp'), 'utf8');
@@ -18,8 +22,14 @@ const windowsSource = readFileSync(
   resolve(root, 'deploy/windows/build-corresponding-source.sh'),
   'utf8'
 );
+const dockerfile = readFileSync(resolve(root, 'deploy/docker/Dockerfile'), 'utf8');
+const runtimeProvenance = readFileSync(resolve(root, 'script/runtime-provenance.mjs'), 'utf8');
 const ciWorkflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8');
+const rollingReleasePublisher = readFileSync(
+  resolve(root, 'script/publish-rolling-release.mjs'),
+  'utf8'
+);
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 const macApp = readFileSync(
   resolve(root, 'apps/macos/Sources/VRRelayMac/VRRelayMacApp.swift'),
@@ -200,6 +210,7 @@ if (!macFfmpegRecipe) {
   const ffmpegSourceArtifact = ffmpeg?.artifacts?.source;
   if (
     ffmpegSourceInput?.file !== ffmpegSourceArtifact?.file ||
+    ffmpegSourceInput?.url !== ffmpegSourceArtifact?.url ||
     ffmpegSourceInput?.sha256 !== ffmpegSourceArtifact?.sha256
   )
     failures.push('macOS and release-metadata FFmpeg source pins must match');
@@ -216,6 +227,57 @@ if (!macFfmpegRecipe) {
       if (!values.has(value)) failures.push(`ffmpeg darwin-arm64 ${field} is missing ${value}`);
     }
   }
+}
+
+const sharedFfmpegRevision = ffmpeg?.artifacts?.source?.ffmpegCommit;
+const expectedFfmpegRuntimeVersion = `${ffmpeg?.version}-22-g${sharedFfmpegRevision?.slice(0, 10)}`;
+const macFfmpegInput = macFfmpegRecipe?.inputs?.find((input) => input.name === 'ffmpeg');
+const platformFfmpegRevisions = new Map([
+  ['macOS recipe', macFfmpegRecipe?.ffmpegCommit],
+  ['macOS source input', macFfmpegInput?.revision],
+  ['shared source artifact', sharedFfmpegRevision],
+  ['Linux x64 runtime', ffmpeg?.artifacts?.['linux-x64']?.buildRecipe?.ffmpegCommit],
+  ['Linux arm64 runtime', ffmpeg?.artifacts?.['linux-arm64']?.buildRecipe?.ffmpegCommit],
+  ['Windows x64 runtime', ffmpeg?.artifacts?.['windows-x64']?.buildRecipe?.ffmpegCommit]
+]);
+if (!/^[0-9a-f]{40}$/.test(sharedFfmpegRevision ?? ''))
+  failures.push('FFmpeg shared source artifact must declare one full source revision');
+if (ffmpeg?.runtimeVersion !== expectedFfmpegRuntimeVersion)
+  failures.push('FFmpeg exact runtime version must derive from the shared source revision');
+for (const [platform, revision] of platformFfmpegRevisions) {
+  if (revision !== sharedFfmpegRevision)
+    failures.push(`${platform} FFmpeg revision must match the shared source revision`);
+}
+if (macFfmpegInput?.version !== ffmpeg?.version)
+  failures.push('macOS FFmpeg source version must match the shared runtime version');
+for (const platform of ['linux-x64', 'linux-arm64', 'windows-x64']) {
+  if (!ffmpeg?.artifacts?.[platform]?.file?.includes(ffmpeg.version))
+    failures.push(`${platform} FFmpeg artifact must identify the shared runtime version`);
+}
+if (
+  !macFfmpegInput?.url?.includes(sharedFfmpegRevision ?? 'missing') ||
+  !macFfmpegInput?.file?.includes(sharedFfmpegRevision ?? 'missing') ||
+  ffmpeg?.artifacts?.source?.url !== ffmpeg?.source
+)
+  failures.push('shared FFmpeg source location must be pinned independently of platform recipes');
+for (const [source, required, message] of [
+  [
+    dockerfile,
+    `ffmpeg version n${expectedFfmpegRuntimeVersion}`,
+    'OCI packaging must verify the exact shared FFmpeg runtime revision'
+  ],
+  [
+    windowsPackage,
+    '$ExpectedFfmpegRuntimeVersion',
+    'Windows packaging must verify the exact shared FFmpeg runtime revision'
+  ],
+  [
+    runtimeProvenance,
+    'component.runtimeVersion ?? component.version',
+    'runtime provenance must verify exact component runtime revisions'
+  ]
+]) {
+  requireText(source, required, message);
 }
 
 for (const [source, text, message] of [
@@ -246,6 +308,16 @@ for (const [source, text, message] of [
   ],
   [
     macPackage,
+    'VRRELAY_BUILD_ID is required for release packaging',
+    'macOS release packaging must require the authoritative GitHub Actions build identity'
+  ],
+  [
+    macPackage,
+    'VRRelay-$BUILD_ID-macOS-arm64.dmg',
+    'macOS release artifact names must include the collision-safe build identity'
+  ],
+  [
+    macPackage,
     'APPLE_DEVELOPER_ID is required for release packaging',
     'macOS release packaging must require a Developer ID application identity'
   ],
@@ -263,6 +335,21 @@ for (const [source, text, message] of [
     macPackage,
     'codesign --force --options runtime --timestamp --sign "$APPLE_DEVELOPER_ID" "$binary"',
     'macOS release packaging must hardened-sign and timestamp nested runtime binaries'
+  ],
+  [
+    macPackage,
+    'find "$APP/Contents" -depth -type f -print0',
+    'macOS release packaging must discover every nested Mach-O binary'
+  ],
+  [
+    macPackage,
+    '/usr/bin/file -b "$candidate"',
+    'macOS release packaging must classify nested code by executable format'
+  ],
+  [
+    macPackage,
+    '--entitlements "$NODE_ENTITLEMENTS"',
+    'macOS release packaging must give the directly launched Node runtime its entitlements'
   ],
   [
     macPackage,
@@ -311,6 +398,26 @@ for (const [source, text, message] of [
   [macVerifier, 'spctl --assess', 'macOS DMG verifier must support Gatekeeper assessment'],
   [
     macVerifier,
+    'APP_SIGNING_TEAM',
+    'macOS DMG verification must compare every nested signing team with the application'
+  ],
+  [
+    macVerifier,
+    'Hardened runtime is not enabled',
+    'macOS DMG verification must require hardened runtime on every nested Mach-O binary'
+  ],
+  [
+    macVerifier,
+    "require('better-sqlite3')",
+    'macOS DMG verification must load the packaged SQLite native add-on'
+  ],
+  [
+    macVerifier,
+    "require('@node-rs/argon2')",
+    'macOS DMG verification must load the packaged Argon2 native add-on'
+  ],
+  [
+    macVerifier,
     '*.dylib(N)',
     'macOS package verification must allow an empty library directory for static FFmpeg'
   ],
@@ -355,6 +462,21 @@ for (const [source, text, message] of [
   ],
   [
     windowsPackage,
+    'VRRELAY_BUILD_ID is required for release packaging',
+    'Windows release packaging must require the authoritative GitHub Actions build identity'
+  ],
+  [
+    windowsPackage,
+    'VRRelay-$BuildId-Windows-x64.exe',
+    'Windows release artifact names must include the collision-safe build identity'
+  ],
+  [
+    windowsPackage,
+    'runtime\\build-id.txt',
+    'Windows packaging must embed the product build number in its runtime'
+  ],
+  [
+    windowsPackage,
     'WINDOWS_CERTIFICATE is required for release packaging',
     'Windows release packaging must require a signing certificate'
   ],
@@ -380,7 +502,26 @@ for (const [source, text, message] of [
   ],
   [windowsPackage, 'THIRD_PARTY_NOTICES.md', 'Windows packaging must include third-party notices'],
   [windowsPackage, 'FFmpeg-GPLv3.txt', 'Windows packaging must include FFmpeg license material'],
-  [windowsPackage, 'signtool sign', 'Windows packaging must sign release binaries and installer'],
+  [
+    windowsPackage,
+    '& $SignTool sign',
+    'Windows packaging must sign release binaries and installer'
+  ],
+  [
+    windowsPackage,
+    '& $SignTool verify /pa /all /v',
+    'Windows packaging must verify every Authenticode signature'
+  ],
+  [
+    windowsPackage,
+    "$_.Extension -in @('.exe', '.dll', '.node')",
+    'Windows packaging must sign nested native Node add-ons as well as executables'
+  ],
+  [
+    windowsPackage,
+    "Assert-NativeSuccess 'Inno Setup installer build'",
+    'Windows packaging must fail when Inno Setup exits unsuccessfully'
+  ],
   [
     windowsPackage,
     'build-tray.ps1',
@@ -412,6 +553,11 @@ for (const [source, text, message] of [
     windowsInstaller,
     'VRRelay\\config"; Permissions: admins-full system-full users-readexec',
     'Windows installer must expose only the non-secret runtime configuration to the tray user'
+  ],
+  [
+    windowsInstaller,
+    'OutputBaseFilename=VRRelay-{#BuildId}-Windows-x64',
+    'Windows installer output must preserve the collision-safe build identity'
   ],
   [
     windowsService,
@@ -482,13 +628,84 @@ for (const [source, text, message] of [
     releaseWorkflow,
     'VRRELAY_FFMPEG_SOURCE_BUNDLE=$bundle',
     'release workflow must pass the verified FFmpeg source bundle to Windows packaging'
+  ],
+  [
+    releaseWorkflow,
+    "default: '100'",
+    'release workflow must seed the explicit product build number at 100'
+  ],
+  [
+    releaseWorkflow,
+    'push-by-digest=true',
+    'release workflow must stage OCI images by digest without a per-build tag'
+  ],
+  [
+    releaseWorkflow,
+    'docker buildx imagetools create',
+    'release workflow must advance the rolling latest OCI tag after publication'
+  ],
+  [
+    releaseWorkflow,
+    'Verify anonymous OCI access for a public repository',
+    'public release workflow must reject a default-private OCI package'
+  ],
+  [
+    releaseWorkflow,
+    'script/publish-rolling-release.mjs publish',
+    'release workflow must use the append-only rolling release publisher'
+  ],
+  [
+    releaseWorkflow,
+    'node script/pin-release-chart.mjs',
+    'release metadata must pin its Helm chart to the authoritative OCI digest'
+  ],
+  [
+    releaseWorkflow,
+    'VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}',
+    'release jobs must reuse the build identity authored by the successful gate attempt'
   ]
 ]) {
   requireText(source, text, message);
 }
+for (const entitlement of [
+  'com.apple.security.cs.allow-jit',
+  'com.apple.security.cs.allow-unsigned-executable-memory'
+]) {
+  requireText(
+    macNodeEntitlements,
+    entitlement,
+    `packaged Node is missing required hardened-runtime entitlement ${entitlement}`
+  );
+}
+rejectText(
+  macNodeEntitlements,
+  'com.apple.security.cs.disable-library-validation',
+  'packaged Node must validate that native add-ons use the same Developer ID team'
+);
+if (
+  releaseWorkflow.indexOf('script/publish-rolling-release.mjs publish') >
+  releaseWorkflow.indexOf('docker buildx imagetools create')
+)
+  failures.push('release workflow advances OCI latest before the complete release is published');
+if (/^\s+tags:/m.test(releaseWorkflow))
+  failures.push('release workflow must not retain staging or per-build OCI tags');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
+  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
+if (
+  rollingReleasePublisher.indexOf('await client.updateTag(context.sha)') >
+  rollingReleasePublisher.indexOf('await client.updateRelease(')
+)
+  failures.push('rolling release publisher must move latest before refreshing the release body');
 
 if (releaseWorkflow.includes('brew install ffmpeg@7'))
   failures.push('release workflow must not source the macOS FFmpeg runtime from Homebrew');
+for (const [source, description] of [
+  [macPackage, 'macOS package'],
+  [releaseWorkflow, 'release workflow']
+]) {
+  if (source.includes('https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz'))
+    failures.push(`${description} must consume shared FFmpeg source metadata from the manifest`);
+}
 for (const forbidden of ['pkgbuild', 'productsign', 'APPLE_INSTALLER_ID']) {
   if (`${macPackage}\n${releaseWorkflow}`.includes(forbidden))
     failures.push(`macOS DMG packaging must not retain PKG-only dependency ${forbidden}`);
@@ -497,6 +714,10 @@ if (!ciWorkflow.includes('vrrelay-macos-dmg'))
   failures.push('normal CI must publish a verified development DMG artifact');
 if (/electron/i.test(windowsPackage))
   failures.push('Windows packaging must not download or bundle Electron');
+for (const forbidden of ["tags: ['v*']", 'softprops/action-gh-release@']) {
+  if (releaseWorkflow.includes(forbidden))
+    failures.push(`release workflow must not retain per-build tag publication: ${forbidden}`);
+}
 
 if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join('\n'));

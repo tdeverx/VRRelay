@@ -215,6 +215,8 @@ for (const required of [
 }
 if (!releaseWorkflow.includes('permissions: { contents: read }'))
   failures.push('release workflow does not default jobs to read-only repository access');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
+  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
 
 const securityPolicy = await readFile(resolve(root, 'SECURITY.md'), 'utf8');
 for (const required of [
@@ -295,19 +297,97 @@ const macosPackageScript = await readFile(resolve(root, 'deploy/macos/package.sh
 if (!macosPackageScript.includes('script/verify-macos-dmg.sh'))
   failures.push('macOS packaging does not verify the completed disk image payload');
 for (const required of [
-  'script/release-version.mjs',
+  'workflow_dispatch:',
+  "default: '100'",
+  'queue: max',
+  'script/publish-rolling-release.mjs identity',
   'build-args: VRRELAY_VERSION=',
+  'push-by-digest=true',
+  'docker buildx imagetools create',
+  'Verify anonymous OCI access for a public repository',
+  'docker logout ghcr.io',
+  'docker buildx imagetools inspect',
+  'io.vrrelay.build.id=${{ needs.gate.outputs.build_id }}',
+  'provenance: true',
   'VRRELAY_FFMPEG_SOURCE_BUNDLE_URL',
-  'ffmpeg-btbn-corresponding-source.tar.xz',
+  'FFmpeg-BtbN-source.tar.xz',
   'script/windows-source-bundle.mjs --verify',
   "pattern: 'vrrelay-*'",
-  'draft: true',
-  'VRRelay-release-metadata-SHA256SUMS',
-  'docs/releasing.md'
+  'merge-multiple: true',
+  'actions/attest@',
+  'script/publish-rolling-release.mjs prepare',
+  'script/publish-rolling-release.mjs publish',
+  'node script/pin-release-chart.mjs',
+  'needs: [gate, oci]',
+  'docs/releasing.md',
+  'VRRELAY_BUILD_ID',
+  'VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}'
 ]) {
   if (!releaseWorkflow.includes(required))
     failures.push(`release workflow does not enforce release metadata ${required}`);
 }
+const kubernetesValues = await readFile(resolve(root, 'deploy/kubernetes/values.yaml'), 'utf8');
+if (
+  !kubernetesValues.includes(
+    "image: { repository: ghcr.io/tdeverx/vrrelay, tag: 'latest', digest: ''"
+  )
+)
+  failures.push('source Helm chart must default to the rolling OCI tag that is actually published');
+if (
+  releaseWorkflow.indexOf('script/publish-rolling-release.mjs publish') >
+  releaseWorkflow.indexOf('docker buildx imagetools create')
+)
+  failures.push('release workflow advances OCI latest before publishing the complete release');
+if (/^\s+tags:/m.test(releaseWorkflow))
+  failures.push('release workflow must not retain staging or per-build OCI tags');
+for (const forbidden of [
+  "tags: ['v*']",
+  'softprops/action-gh-release@',
+  'actions/attest-build-provenance@',
+  'overwrite_files'
+]) {
+  if (releaseWorkflow.includes(forbidden))
+    failures.push(
+      `release workflow retains forbidden per-build or overwriting behavior ${forbidden}`
+    );
+}
+const rollingReleasePublisher = await readFile(
+  resolve(root, 'script/publish-rolling-release.mjs'),
+  'utf8'
+);
+if (
+  rollingReleasePublisher.indexOf('await client.updateTag(context.sha)') >
+  rollingReleasePublisher.indexOf('await client.updateRelease(')
+)
+  failures.push('rolling release publisher must move latest before refreshing the release body');
+for (const required of [
+  "rollingReleaseTag = 'latest'",
+  'rollingReleaseAssetLimit = 900',
+  'Refusing to overwrite historical release asset',
+  'The first rolling release deliverable must be product build 100',
+  'assets.push(await describeFile(directory, manifestName))',
+  'draft: true',
+  'force: true',
+  'immutable',
+  'digest'
+]) {
+  if (!rollingReleasePublisher.includes(required))
+    failures.push(`rolling release publisher is missing append-only guardrail ${required}`);
+}
+for (const required of [
+  "asset.state === 'starter'",
+  "asset.state === undefined || asset.state === 'uploaded'",
+  'client.deleteIncompleteAsset(asset.id)',
+  "positiveInteger(assetId, 'GitHub release asset id')"
+]) {
+  if (!rollingReleasePublisher.includes(required))
+    failures.push(`rolling release publisher is missing incomplete-upload guardrail ${required}`);
+}
+if (
+  rollingReleasePublisher.includes("method: 'DELETE'") &&
+  !rollingReleasePublisher.includes('deleteIncompleteAsset(assetId)')
+)
+  failures.push('rolling release publisher contains an unscoped destructive request');
 
 const dockerfile = await readFile(resolve(root, 'deploy/docker/Dockerfile'), 'utf8');
 for (const required of [
@@ -325,11 +405,11 @@ const helmTemplates = await Promise.all(
     (path) => readFile(resolve(root, path), 'utf8')
   )
 );
-if (!/tag:\s*['"]{2}/.test(helmValues))
-  failures.push('Helm image tag must default to the packaged chart appVersion');
+if (!/tag:\s*['"]latest['"]/.test(helmValues))
+  failures.push('Helm image tag must default to the published rolling tag');
 for (const template of helmTemplates) {
-  if (!template.includes('.Chart.AppVersion'))
-    failures.push('Helm workload does not fall back to the packaged chart appVersion');
+  if (!template.includes('default "latest" .Values.image.tag'))
+    failures.push('Helm workload does not fall back to the published rolling tag');
 }
 
 const versionedSources = await Promise.all(
@@ -342,6 +422,32 @@ const versionedSources = await Promise.all(
 for (const source of versionedSources) {
   if (source.includes("'0.1.0'") || source.includes('v0.1.0'))
     failures.push('runtime or dashboard contains a hard-coded application version');
+}
+for (const path of [
+  'packages/adapters/src/ffmpeg-transcoder.ts',
+  'packages/adapters/src/jellyfin-provider.ts',
+  'packages/adapters/src/ffmpeg-live-normalizer.ts',
+  'packages/adapters/src/supervised-child-process.ts',
+  'packages/application/src/vod-producer-coordinator.ts',
+  'packages/application/src/profile-service.ts',
+  'packages/application/src/session-service.ts',
+  'packages/application/src/live-service.ts',
+  'packages/application/src/session-cache.ts',
+  'packages/application/src/session-jobs.ts',
+  'packages/application/src/vod-source-pacing.ts'
+]) {
+  const source = await readFile(resolve(root, path), 'utf8');
+  for (const forbidden of [
+    /\bprocess\.platform\b/,
+    /from ['"]node:os['"]/,
+    /\bDeno\.build\.os\b/,
+    /['"](?:darwin|win32|linux)['"]/
+  ]) {
+    if (forbidden.test(source))
+      failures.push(
+        `${path} contains OS-specific streaming behavior; core media fixes must be global`
+      );
+  }
 }
 for (const retiredPath of [
   'apps/web/src/hooks.ts',
@@ -373,6 +479,43 @@ const ffmpegWindows = runtimeComponents.get('ffmpeg')?.artifacts?.['windows-x64'
 const ffmpegLinux = ['linux-x64', 'linux-arm64'].map(
   (target) => runtimeComponents.get('ffmpeg')?.artifacts?.[target]
 );
+const ffmpegComponent = runtimeComponents.get('ffmpeg');
+const sharedFfmpegRevision = ffmpegComponent?.artifacts?.source?.ffmpegCommit;
+const expectedFfmpegRuntimeVersion = `${ffmpegComponent?.version}-22-g${sharedFfmpegRevision?.slice(0, 10)}`;
+const macFfmpegRecipe = ffmpegComponent?.sourceBuilds?.['darwin-arm64'];
+const macFfmpegInput = macFfmpegRecipe?.inputs?.find((input) => input.name === 'ffmpeg');
+for (const [platform, revision] of [
+  ['shared source', sharedFfmpegRevision],
+  ['macOS recipe', macFfmpegRecipe?.ffmpegCommit],
+  ['macOS source input', macFfmpegInput?.revision],
+  ['Linux x64', ffmpegLinux[0]?.buildRecipe?.ffmpegCommit],
+  ['Linux arm64', ffmpegLinux[1]?.buildRecipe?.ffmpegCommit],
+  ['Windows x64', ffmpegWindows?.buildRecipe?.ffmpegCommit]
+]) {
+  if (!/^[0-9a-f]{40}$/.test(revision ?? '') || revision !== sharedFfmpegRevision)
+    failures.push(`${platform} FFmpeg source revision differs from the shared production revision`);
+}
+if (ffmpegComponent?.runtimeVersion !== expectedFfmpegRuntimeVersion)
+  failures.push('FFmpeg exact runtime version does not derive from its shared source revision');
+if (
+  macFfmpegInput?.version !== ffmpegComponent?.version ||
+  macFfmpegInput?.file !== ffmpegComponent?.artifacts?.source?.file ||
+  macFfmpegInput?.url !== ffmpegComponent?.artifacts?.source?.url ||
+  ffmpegComponent?.artifacts?.source?.url !== ffmpegComponent?.source ||
+  macFfmpegInput?.sha256 !== ffmpegComponent?.artifacts?.source?.sha256
+)
+  failures.push('FFmpeg platform recipe does not consume the shared versioned source artifact');
+if (!dockerfile.includes(`ffmpeg version n${expectedFfmpegRuntimeVersion}`))
+  failures.push('OCI packaging does not verify the exact shared FFmpeg runtime revision');
+const profileService = await readFile(
+  resolve(root, 'packages/application/src/profile-service.ts'),
+  'utf8'
+);
+if (
+  !profileService.includes("encoder: 'libx264'") ||
+  !profileService.includes("hardwareMode: 'software'")
+)
+  failures.push('built-in media profiles must use the same software encoder on every platform');
 const linuxFfmpegInstaller = await readFile(
   resolve(root, 'script/install-pinned-ffmpeg-linux.sh'),
   'utf8'
@@ -428,6 +571,7 @@ for (const artifact of ffmpegLinux) {
 const windowsPackager = await readFile(resolve(root, 'deploy/windows/package.ps1'), 'utf8');
 for (const required of [
   runtimeComponents.get('ffmpeg')?.artifacts?.['windows-x64']?.file,
+  '$ExpectedFfmpegRuntimeVersion',
   'runtime-provenance.mjs',
   'build-tray.ps1',
   'VRRelayTray.exe'
@@ -435,6 +579,9 @@ for (const required of [
   if (required && !windowsPackager.includes(required))
     failures.push(`Windows packager does not consume pinned runtime ${required}`);
 }
+const runtimeProvenance = await readFile(resolve(root, 'script/runtime-provenance.mjs'), 'utf8');
+if (!runtimeProvenance.includes('component.runtimeVersion ?? component.version'))
+  failures.push('runtime provenance does not verify exact component runtime revisions');
 if (runtimeComponents.has('electron') || /electron/i.test(windowsPackager))
   failures.push('Windows packaging must not retain the removed Electron runtime');
 for (const required of ['release-version.mjs', 'VRRELAY_VERSION', '__VRRELAY_VERSION__']) {

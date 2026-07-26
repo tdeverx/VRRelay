@@ -1,11 +1,27 @@
 name: Release
 on:
-  push: { tags: ['v*'] }
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Product build number (increment for each deliverable)
+        required: true
+        default: '100'
+        type: string
 permissions: { contents: read }
+env:
+  VRRELAY_BUILD_NUMBER: ${{ inputs.build_number }}
+concurrency:
+  group: vrrelay-rolling-latest
+  # actionlint 1.7.12 predates GitHub's multi-run concurrency queue.
+  queue: max
 jobs:
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      build_id: ${{ steps.identity.outputs.build_id }}
+      run_attempt: ${{ steps.identity.outputs.run_attempt }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -18,8 +34,17 @@ jobs:
           runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
           printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
       - run: npm ci
-      - name: Validate release tag
-        run: test "$(node script/release-version.mjs '${{ github.ref_name }}')" = "${GITHUB_REF_NAME#v}"
+      - name: Validate the authoritative build identity
+        id: identity
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          version="$(node -p "require('./package.json').version")"
+          build_id="$(VRRELAY_VERSION="$version" node script/publish-rolling-release.mjs identity)"
+          {
+            echo "version=$version"
+            echo "build_id=$build_id"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
       - run: script/check-workflows.sh
       - run: npm run ci
       - run: npx playwright install --with-deps chromium
@@ -37,8 +62,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          version="$(node -p "require('./package.json').version")"
           script/check-compose.sh
-          script/container-smoke.sh "${GITHUB_REF_NAME#v}"
+          script/container-smoke.sh "$version"
           script/compose-smoke.sh
           npm run test:cluster-compose 2>&1 | tee cluster-compose.log
           npm run test:local-cluster 2>&1 | tee local-cluster.log
@@ -56,6 +82,7 @@ jobs:
             cluster-compose.log
             acceptance.log
           if-no-files-found: ignore
+          overwrite: true
   security:
     needs: gate
     runs-on: ubuntu-latest
@@ -74,7 +101,13 @@ jobs:
           }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
-        with: { name: release-trivy-sarif, path: trivy.sarif, if-no-files-found: ignore }
+        with:
+          {
+            name: release-trivy-sarif,
+            path: trivy.sarif,
+            if-no-files-found: ignore,
+            overwrite: true
+          }
       - uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
         if: always() && github.event.repository.private == false
         with: { sarif_file: trivy.sarif }
@@ -82,6 +115,11 @@ jobs:
     needs: [gate, security]
     runs-on: ubuntu-latest
     permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    env:
+      VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
+    outputs:
+      repository: ${{ steps.image.outputs.repository }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -91,21 +129,29 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: version
-        run: echo "version=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_OUTPUT"
       - id: image
         shell: bash
         run: echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: deploy/docker/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.image.outputs.repository }}:${{ github.ref_name }}
-          build-args: VRRELAY_VERSION=${{ steps.version.outputs.version }}
+          outputs: type=image,name=${{ steps.image.outputs.repository }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.version }}
+            io.vrrelay.build.id=${{ needs.gate.outputs.build_id }}
+          build-args: VRRELAY_VERSION=${{ needs.gate.outputs.version }}
           provenance: true
           sbom: true
+      - name: Verify anonymous OCI access for a public repository
+        if: github.event.repository.private == false
+        run: |
+          docker logout ghcr.io
+          docker buildx imagetools inspect \
+            "${{ steps.image.outputs.repository }}@${{ steps.build.outputs.digest }}"
   native:
     needs: [gate, security]
     strategy:
@@ -116,6 +162,10 @@ jobs:
           }
       }
     runs-on: ${{ matrix.os }}
+    env:
+      VRRELAY_VERSION: ${{ needs.gate.outputs.version }}
+      VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}
+      VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -125,10 +175,6 @@ jobs:
       - if: runner.os == 'macOS'
         name: Select the Swift 6.3 toolchain
         run: sudo xcode-select --switch /Applications/Xcode_26.6.app
-      - shell: bash
-        run: |
-          echo "VRRELAY_VERSION=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_ENV"
-          echo "VRRELAY_BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
       - run: npm run build
       - if: runner.os == 'macOS'
         name: Install pinned-FFmpeg build tools
@@ -199,15 +245,21 @@ jobs:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: deploy/windows/package.ps1
-      - shell: bash
-        run: find dist -maxdepth 1 -type f ! -name '*SHA256SUMS' -print0 | xargs -0 shasum -a 256 > "dist/VRRelay-${{ matrix.artifact }}-SHA256SUMS"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vrrelay-${{ matrix.artifact }}
-          path: dist/
+          path: dist/VRRelay-${{ env.VRRELAY_BUILD_ID }}-*
+          if-no-files-found: error
+          overwrite: true
   release-metadata:
-    needs: [gate, security]
+    needs: [gate, oci]
     runs-on: ubuntu-latest
+    env:
+      VRRELAY_VERSION: ${{ needs.gate.outputs.version }}
+      VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}
+      VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
+      VRRELAY_OCI_REPOSITORY: ${{ needs.oci.outputs.repository }}
+      VRRELAY_OCI_DIGEST: ${{ needs.oci.outputs.digest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -216,38 +268,85 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.2.3 }
       - run: npm ci
-      - id: version
-        run: echo "version=$(node script/release-version.mjs '${{ github.ref_name }}')" >> "$GITHUB_OUTPUT"
       - run: mkdir -p dist/release-metadata
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with: { path: '.', format: spdx-json, output-file: dist/release-metadata/vrrelay.spdx.json }
-      - name: Package Helm chart and release notices
+      - name: Package Helm chart, source, and release notices
         env:
           FFMPEG_SOURCE_BUNDLE_URL: ${{ vars.VRRELAY_FFMPEG_SOURCE_BUNDLE_URL }}
           FFMPEG_SOURCE_BUNDLE_SHA256: ${{ vars.VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256 }}
         run: |
-          helm package deploy/kubernetes --version "${{ steps.version.outputs.version }}" --app-version "${{ steps.version.outputs.version }}" --destination dist/release-metadata
+          release_chart="$RUNNER_TEMP/vrrelay-release-chart"
+          cp -R deploy/kubernetes "$release_chart"
+          node script/pin-release-chart.mjs "$release_chart" "$VRRELAY_OCI_REPOSITORY" "$VRRELAY_OCI_DIGEST"
+          helm template vrrelay "$release_chart" > release-chart-rendered.yaml
+          grep -F "image: $VRRELAY_OCI_REPOSITORY@$VRRELAY_OCI_DIGEST" release-chart-rendered.yaml
+          node script/check-kubernetes.mjs release-chart-rendered.yaml
+          helm package "$release_chart" --version "$VRRELAY_VERSION" --app-version "$VRRELAY_VERSION" --destination dist/release-metadata
           cp LICENSE THIRD_PARTY_NOTICES.md deploy/runtime-manifest.json docs/releasing.md dist/release-metadata/
-          curl -fL https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz -o dist/release-metadata/ffmpeg-8.1.2.tar.xz
-          node script/verify-runtime.mjs dist/release-metadata/ffmpeg-8.1.2.tar.xz
+          ffmpeg_source_file="$(node -p "require('./deploy/runtime-manifest.json').components.find((component) => component.name === 'ffmpeg').artifacts.source.file")"
+          ffmpeg_source_url="$(node -p "require('./deploy/runtime-manifest.json').components.find((component) => component.name === 'ffmpeg').artifacts.source.url")"
+          [[ "$ffmpeg_source_file" =~ ^[0-9A-Za-z._-]+$ ]]
+          [[ "$ffmpeg_source_url" == https://* ]]
+          curl -fL "$ffmpeg_source_url" -o "dist/release-metadata/$ffmpeg_source_file"
+          node script/verify-runtime.mjs "dist/release-metadata/$ffmpeg_source_file"
           test -n "$FFMPEG_SOURCE_BUNDLE_URL" && test -n "$FFMPEG_SOURCE_BUNDLE_SHA256"
-          curl -fL "$FFMPEG_SOURCE_BUNDLE_URL" -o dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz
-          echo "$FFMPEG_SOURCE_BUNDLE_SHA256  dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz" | sha256sum --check --strict
-          node script/windows-source-bundle.mjs --verify dist/release-metadata/ffmpeg-btbn-corresponding-source.tar.xz
-      - name: Checksum final release metadata
-        run: |
-          (cd dist/release-metadata && sha256sum ./* > ../VRRelay-release-metadata-SHA256SUMS)
-          mv dist/VRRelay-release-metadata-SHA256SUMS dist/release-metadata/
+          btbn_source="dist/VRRelay-$VRRELAY_BUILD_ID-FFmpeg-BtbN-source.tar.xz"
+          curl -fL "$FFMPEG_SOURCE_BUNDLE_URL" -o "$btbn_source"
+          echo "$FFMPEG_SOURCE_BUNDLE_SHA256  $btbn_source" | sha256sum --check --strict
+          node script/windows-source-bundle.mjs --verify "$btbn_source"
+          (cd dist/release-metadata && sha256sum ./* > SHA256SUMS)
+          tar -cJf "dist/VRRelay-$VRRELAY_BUILD_ID-release-metadata.tar.xz" -C dist/release-metadata .
+          rm -rf dist/release-metadata
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vrrelay-release-metadata
-          path: dist/release-metadata/
+          path: dist/VRRelay-${{ env.VRRELAY_BUILD_ID }}-*
+          if-no-files-found: error
+          overwrite: true
   publish:
-    needs: [oci, native, release-metadata]
+    needs: [gate, oci, native, release-metadata]
     runs-on: ubuntu-latest
-    permissions: { contents: write }
+    env:
+      VRRELAY_VERSION: ${{ needs.gate.outputs.version }}
+      VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}
+      VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
+      VRRELAY_OCI_REPOSITORY: ${{ needs.oci.outputs.repository }}
+      VRRELAY_OCI_DIGEST: ${{ needs.oci.outputs.digest }}
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: '26.5.0' }
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with: { path: artifacts, pattern: 'vrrelay-*' }
-      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with: { files: artifacts/**/*, draft: true }
+        with:
+          path: artifacts
+          pattern: 'vrrelay-*'
+          merge-multiple: true
+      - name: Prepare immutable build assets
+        run: node script/publish-rolling-release.mjs prepare artifacts
+      - name: Attest the completed build assets
+        if: github.event.repository.private == false
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: artifacts/*
+      - name: Append build assets and advance latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node script/publish-rolling-release.mjs publish artifacts
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Advance the OCI latest tag after release publication
+        run: |
+          docker buildx imagetools create \
+            --tag "$VRRELAY_OCI_REPOSITORY:latest" \
+            "$VRRELAY_OCI_REPOSITORY@$VRRELAY_OCI_DIGEST"

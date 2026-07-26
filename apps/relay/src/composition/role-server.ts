@@ -19,7 +19,9 @@ import type { RelayConfig } from '../config.js';
 import {
   liveHlsUpstreamUrl,
   isInternalPeer,
+  isLiveMediaResponse,
   isLoopbackPeer,
+  mediaDeliveryRecorder,
   meteredReadable,
   redactRequestUrl
 } from '../server.js';
@@ -357,13 +359,14 @@ export async function createRoleServer(
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'private, no-store');
-      return reply
-        .type('video/mp2t')
-        .send(
-          meteredReadable(createReadStream(path), (bytes) =>
-            services.sessions.recordEgress(bytes, session.id)
+      return reply.type('video/mp2t').send(
+        meteredReadable(
+          createReadStream(path),
+          mediaDeliveryRecorder(services.sessions, session.id, (error) =>
+            request.log.debug({ err: error }, 'playback activity update failed')
           )
-        );
+        )
+      );
     });
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
@@ -394,13 +397,14 @@ export async function createRoleServer(
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'private, no-store');
-      return reply
-        .type('video/iso.segment')
-        .send(
-          meteredReadable(createReadStream(path), (bytes) =>
-            services.sessions.recordEgress(bytes, session.id)
+      return reply.type('video/iso.segment').send(
+        meteredReadable(
+          createReadStream(path),
+          mediaDeliveryRecorder(services.sessions, session.id, (error) =>
+            request.log.debug({ err: error }, 'playback activity update failed')
           )
-        );
+        )
+      );
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = (request.params as { token: string }).token;
@@ -476,12 +480,18 @@ export async function createRoleServer(
         return reply.status(response.status).send();
       }
       reply.header('Cache-Control', 'private, no-store');
+      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+      const record = isLiveMediaResponse(params['*'], contentType)
+        ? mediaDeliveryRecorder(services.sessions, session.id, (error) =>
+            request.log.debug({ err: error }, 'playback activity update failed')
+          )
+        : (bytes: number) => services.sessions.recordEgress(bytes, session.id);
       return reply
-        .type(response.headers.get('content-type') ?? 'application/octet-stream')
+        .type(contentType)
         .send(
           meteredReadable(
             Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
-            (bytes) => services.sessions.recordEgress(bytes, session.id)
+            record
           )
         );
     });

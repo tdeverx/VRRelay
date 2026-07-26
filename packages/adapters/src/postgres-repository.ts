@@ -34,6 +34,7 @@ import type {
   PersonalTokenUse,
   ProviderBindingCreateResult,
   Repository,
+  SessionDeletionOptions,
   SegmentJobCreateResult,
   SettingInsertResult,
   VersionedRecord
@@ -994,6 +995,15 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
+      if (session.ownerId) {
+        const owner = await client.query('SELECT 1 FROM user_identities WHERE id=$1 FOR SHARE', [
+          session.ownerId
+        ]);
+        if (owner.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return { applied: false, reason: 'not-found' };
+        }
+      }
       if (session.kind === 'vod') {
         if (!session.source?.providerId)
           throw new Error('VOD session creation requires a provider source');
@@ -1088,6 +1098,107 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
       return { applied: false, reason: 'revision-conflict', current };
     return this.compareAndSetSession({ ...current.value, viewers, updatedAt }, expectedRevision);
   }
+
+  async touchSessionPlaybackActivity(
+    sessionId: string,
+    observedAt: string,
+    touchBefore: string
+  ): Promise<boolean> {
+    const result = await this.#pool.query(
+      `UPDATE sessions
+       SET document=jsonb_set(document, '{lastPlaybackActivityAt}', to_jsonb($2::text), true),
+           revision=revision+1
+       WHERE id=$1
+         AND COALESCE((document->>'deletionPending')::boolean, false)=false
+         AND COALESCE(document->>'lastPlaybackActivityAt', document->>'createdAt') <= $3
+       RETURNING revision`,
+      [sessionId, observedAt, touchBefore]
+    );
+    return result.rows.length === 1;
+  }
+
+  async listInactiveSessions(inactiveBefore: string, limit = 100): Promise<RelaySession[]> {
+    const result = await this.#pool.query(
+      `SELECT document
+       FROM sessions
+       WHERE COALESCE((document->>'pinned')::boolean, false)=false
+         AND COALESCE((document->>'deletionPending')::boolean, false)=false
+         AND COALESCE(document->>'lastPlaybackActivityAt', document->>'createdAt') <= $1
+       ORDER BY COALESCE(document->>'lastPlaybackActivityAt', document->>'createdAt') ASC
+       LIMIT $2`,
+      [inactiveBefore, Math.max(1, Math.min(1_000, Math.trunc(limit)))]
+    );
+    return result.rows.map((row) => row.document as RelaySession);
+  }
+
+  async listSessionDeletionPending(limit = 100): Promise<RelaySession[]> {
+    const result = await this.#pool.query(
+      `SELECT document
+       FROM sessions
+       WHERE COALESCE((document->>'deletionPending')::boolean, false)=true
+       ORDER BY updated_at ASC
+       LIMIT $1`,
+      [Math.max(1, Math.min(1_000, Math.trunc(limit)))]
+    );
+    return result.rows.map((row) => row.document as RelaySession);
+  }
+
+  async beginSessionDeletion(
+    sessionId: string,
+    options: SessionDeletionOptions
+  ): Promise<AtomicWriteResult<RelaySession>> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        'SELECT document,revision FROM sessions WHERE id=$1 FOR UPDATE',
+        [sessionId]
+      );
+      const row = selected.rows[0] as { document: RelaySession; revision: number } | undefined;
+      if (!row) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'not-found' };
+      }
+      const current = { value: row.document, revision: Number(row.revision) };
+      if (current.value.deletionPending) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'invalid-state', current };
+      }
+      if (options.requireUnpinned && current.value.pinned) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'invalid-state', current };
+      }
+      const activityAt = current.value.lastPlaybackActivityAt ?? current.value.createdAt;
+      if (options.inactiveBefore && activityAt > options.inactiveBefore) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'invalid-state', current };
+      }
+      const value: RelaySession = {
+        ...current.value,
+        state: 'stopped',
+        deletionPending: true,
+        updatedAt: options.observedAt
+      };
+      const result = await client.query(
+        `UPDATE sessions
+         SET document=$1,updated_at=$2,revision=revision+1
+         WHERE id=$3 AND revision=$4
+         RETURNING revision`,
+        [value, value.updatedAt, sessionId, current.revision]
+      );
+      const revision = Number(result.rows[0]?.revision);
+      if (!Number.isFinite(revision)) throw new Error('Locked session deletion was lost');
+      await this.#revokePlaybackGrants(client, sessionId, options.observedAt);
+      await client.query('COMMIT');
+      return { applied: true, record: { value, revision } };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async deleteSessionAndRevokePlaybackGrants(
     sessionId: string,
     revokedAt = new Date().toISOString()
@@ -1135,6 +1246,13 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
         return { created: false, reason: 'installation-limit' };
       }
       if (value.ownerId) {
+        const owner = await client.query('SELECT 1 FROM user_identities WHERE id=$1 FOR SHARE', [
+          value.ownerId
+        ]);
+        if (owner.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return { created: false, reason: 'owner-not-found' };
+        }
         const owned = Number(
           (
             await client.query(
@@ -1390,6 +1508,134 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
     }
   }
 
+  async listUserIdentitiesLastSeenBefore(
+    lastSeenBefore: string,
+    limit = 100
+  ): Promise<Array<VersionedRecord<UserIdentity>>> {
+    return (
+      await this.#pool.query(
+        `SELECT document,revision
+         FROM user_identities AS candidate
+         WHERE candidate.document->>'lastSeenAt' <= $1
+           AND NOT EXISTS (
+             SELECT 1
+             FROM jsonb_array_elements_text(candidate.document->'roles') AS role(value)
+             WHERE role.value IN ('admin', 'owner')
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM sessions
+             WHERE sessions.document->>'ownerId' = candidate.id
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM live_channels
+             WHERE live_channels.document->>'ownerId' = candidate.id
+           )
+         ORDER BY candidate.document->>'lastSeenAt' ASC, candidate.id ASC
+         LIMIT $2`,
+        [lastSeenBefore, Math.max(1, Math.min(1_000, Math.trunc(limit)))]
+      )
+    ).rows.map((row) => ({
+      value: row.document as UserIdentity,
+      revision: Number(row.revision)
+    }));
+  }
+
+  async deleteUserIdentityPreservingOwner(
+    id: string,
+    expectedRevision: number,
+    lastSeenBefore?: string
+  ): Promise<AtomicDeleteResult<UserIdentity>> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('vrrelay:user-owners'))");
+      const row = (
+        await client.query('SELECT document,revision FROM user_identities WHERE id=$1 FOR UPDATE', [
+          id
+        ])
+      ).rows[0] as { document: UserIdentity; revision: number } | undefined;
+      if (!row) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'not-found' };
+      }
+      const current = { value: row.document, revision: Number(row.revision) };
+      if (current.revision !== expectedRevision) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'revision-conflict', current };
+      }
+      if (lastSeenBefore && current.value.lastSeenAt > lastSeenBefore) {
+        await client.query('ROLLBACK');
+        return { applied: false, reason: 'invalid-state', current };
+      }
+      if (current.value.roles.includes('owner')) {
+        const ownerCount = Number(
+          (
+            await client.query(
+              `SELECT COUNT(*) AS count
+               FROM user_identities
+               WHERE document->'roles' ? 'owner'`
+            )
+          ).rows[0]?.count ?? 0
+        );
+        if (ownerCount <= 1) {
+          await client.query('ROLLBACK');
+          return {
+            applied: false,
+            reason: 'dependency-conflict',
+            current,
+            dependencies: ['assigned-owner']
+          };
+        }
+      }
+      const dependencies: string[] = [];
+      if (
+        (
+          await client.query(
+            `SELECT 1 FROM sessions
+             WHERE document->>'ownerId'=$1
+             LIMIT 1`,
+            [id]
+          )
+        ).rows.length > 0
+      )
+        dependencies.push('owned-sessions');
+      if (
+        (
+          await client.query(
+            `SELECT 1 FROM live_channels
+             WHERE document->>'ownerId'=$1
+             LIMIT 1`,
+            [id]
+          )
+        ).rows.length > 0
+      )
+        dependencies.push('owned-live-channels');
+      if (dependencies.length > 0) {
+        await client.query('ROLLBACK');
+        return {
+          applied: false,
+          reason: 'dependency-conflict',
+          current,
+          dependencies
+        };
+      }
+      const deleted = await client.query(
+        'DELETE FROM user_identities WHERE id=$1 AND revision=$2 RETURNING revision',
+        [id, expectedRevision]
+      );
+      if (deleted.rows.length !== 1) throw new Error('Locked user deletion was lost');
+      await client.query('COMMIT');
+      return { applied: true, deleted: current };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async putSetting(key: string, value: string): Promise<void> {
     await this.#pool.query(
       `INSERT INTO settings(key,value,updated_at,revision) VALUES($1,$2,NOW(),1)
@@ -1403,6 +1649,23 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
   async getSetting(key: string): Promise<string | undefined> {
     return (await this.#pool.query('SELECT value FROM settings WHERE key=$1', [key])).rows[0]
       ?.value as string | undefined;
+  }
+
+  async listSettingsByPrefix(prefix: string): Promise<Array<{ key: string; value: string }>> {
+    const escaped = prefix.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+    return (
+      await this.#pool.query(
+        `SELECT key,value
+         FROM settings
+         WHERE key LIKE $1 ESCAPE '\\'
+         ORDER BY key ASC`,
+        [`${escaped}%`]
+      )
+    ).rows as Array<{ key: string; value: string }>;
+  }
+
+  async deleteSetting(key: string): Promise<void> {
+    await this.#pool.query('DELETE FROM settings WHERE key=$1', [key]);
   }
 
   async getVersionedSetting(key: string): Promise<VersionedRecord<string> | undefined> {

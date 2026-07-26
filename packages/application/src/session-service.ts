@@ -49,6 +49,7 @@ const RUNTIME_SNAPSHOT_TTL_MS = 90_000;
 const RUNTIME_ACTIVE_SNAPSHOT_MS = 10_000;
 const EDGE_GRANT_PREFIX = 'eg1';
 const EDGE_GRANT_SIGNING_KEY = 'playback.edge_grant_signing_key';
+const SESSION_SOURCE_CREDENTIAL_PENDING_PREFIX = 'session.sourceCredential.pending.';
 
 interface EdgePlaybackGrantPayload {
   v: 1;
@@ -307,6 +308,7 @@ export class SessionService {
         transcoder,
         this.#cache,
         {
+          getSession: (id) => this.repository.getSession(id),
           acquire: (signal) => this.#acquire(signal),
           prepare: (session, profile, startSegmentIndex, signal, pacing, generation) =>
             this.#prepareVodProducer(
@@ -413,20 +415,43 @@ export class SessionService {
       ...(input.preferredRegion ? { preferredRegion: input.preferredRegion } : {}),
       ...(context ? { ownerId: context.ownerId } : {}),
       outputUrls: { primary: `${this.options.publicUrl}/play/${token}/${path}` },
+      lastPlaybackActivityAt: now,
+      deletionPending: false,
       createdAt: now,
       updatedAt: now
     };
     const expiresAt = input.playbackTtlSeconds
       ? new Date(Date.now() + input.playbackTtlSeconds * 1_000).toISOString()
       : null;
-    if (context && input.kind === 'vod')
-      await this.secrets.put(
-        this.#sessionSourceSecretRef(id),
-        JSON.stringify({
-          accessToken: context.providerAccessToken!,
-          userId: context.providerUserId!
-        })
+    const pendingSourceCredential =
+      context && input.kind === 'vod'
+        ? {
+            settingKey: this.#sessionSourceCredentialPendingKey(id),
+            secretRef: this.#sessionSourceSecretRef(id),
+            credential: JSON.stringify({
+              accessToken: context.providerAccessToken!,
+              userId: context.providerUserId!
+            })
+          }
+        : undefined;
+    if (pendingSourceCredential) {
+      // Persist only the deterministic secret reference before writing the
+      // credential. A crash or failed cleanup can then be reconciled without
+      // placing provider credentials in the repository.
+      await this.repository.putSetting(
+        pendingSourceCredential.settingKey,
+        pendingSourceCredential.secretRef
       );
+      try {
+        await this.secrets.put(
+          pendingSourceCredential.secretRef,
+          pendingSourceCredential.credential
+        );
+      } catch (error) {
+        await this.#reconcilePendingSessionSourceCredential(id).catch(() => undefined);
+        throw error;
+      }
+    }
     let created;
     try {
       created = await this.repository.createSessionWithPlaybackGrant(
@@ -441,13 +466,16 @@ export class SessionService {
         liveChannelRevision
       );
     } catch (error) {
-      if (context)
-        await this.secrets.delete(this.#sessionSourceSecretRef(id)).catch(() => undefined);
+      // The commit acknowledgement can be ambiguous. Re-read durable state:
+      // retain a credential for a committed session, delete a proven orphan,
+      // and leave the pending index untouched if the read itself fails.
+      if (pendingSourceCredential)
+        await this.#reconcilePendingSessionSourceCredential(id).catch(() => undefined);
       throw error;
     }
     if (!created.applied) {
-      if (context)
-        await this.secrets.delete(this.#sessionSourceSecretRef(id)).catch(() => undefined);
+      if (pendingSourceCredential)
+        await this.#reconcilePendingSessionSourceCredential(id).catch(() => undefined);
       if (session.kind === 'live') {
         if (created.reason === 'not-found') throw new NotFoundError('Live channel was not found');
         throw new ConflictError(
@@ -462,6 +490,10 @@ export class SessionService {
         'Provider connection changed while the session was being created; try again'
       );
     }
+    if (pendingSourceCredential)
+      await this.repository
+        .deleteSetting(pendingSourceCredential.settingKey)
+        .catch(() => undefined);
     this.events.publish(event('session.created', { name: session.name, kind: session.kind }, id));
     return session;
   }
@@ -606,6 +638,9 @@ export class SessionService {
       cacheHits,
       cacheMisses,
       cacheHitRatio: cacheRequests ? cacheHits / cacheRequests : null,
+      ...(session.lastPlaybackActivityAt
+        ? { lastPlaybackActivityAt: session.lastPlaybackActivityAt }
+        : {}),
       observedAt: new Date(now).toISOString()
     };
   }
@@ -623,6 +658,8 @@ export class SessionService {
     const result = await this.#updateSession(
       id,
       (session) => {
+        if (session.deletionPending)
+          throw new ConflictError('Session deletion is already in progress');
         if (input.state === 'idle' && session.kind !== 'vod')
           throw new ConflictError('Only VOD sessions can resume to idle');
         if (input.state === 'live' && session.kind !== 'live')
@@ -642,7 +679,7 @@ export class SessionService {
       // Stop must fence the durable HLS producer immediately.  Keeping the
       // session credential permits an explicit VOD resume to create one fresh
       // generation, but a stopped session must not continue sourcing media.
-      await this.#producers?.stop(id);
+      await this.#stopSessionProducer(updated);
       this.#ephemeralSourceCredentials.delete(id);
       this.#deleteSourceGrants(id);
       if (this.#activity.has(id))
@@ -660,6 +697,12 @@ export class SessionService {
     // surviving FFmpeg process owns these directories, so stale files must not
     // be mistaken for completed work.
     await this.#cache.recoverPartials();
+    if ((this.options.roles ?? ['controller']).includes('controller'))
+      recovered += await this.#recoverPendingSessionSourceCredentials();
+    for (const session of await this.repository.listSessionDeletionPending()) {
+      await this.#finalizeSessionDeletion(session);
+      recovered += 1;
+    }
     for (const session of await this.repository.listSessions()) {
       if (['queued', 'starting', 'active'].includes(session.state)) {
         const result = await this.#updateSession(
@@ -682,31 +725,45 @@ export class SessionService {
   async delete(id: string): Promise<void> {
     const session = await this.repository.getSession(id);
     if (!session) throw new NotFoundError('Session was not found');
-    // Read durable ownership before stopping or deleting credentials.  A
-    // failed-over producer is not necessarily on the assigned worker.
-    const producer =
-      (await this.#producers?.get(id)) ??
-      (await this.infrastructure.clusterRepository?.getVodProducer(id));
-    await this.#producers?.stop(id);
-    const ownerNodeId = producer?.ownerNodeId ?? session.assignedNodeId;
-    if (ownerNodeId && ownerNodeId !== this.options.nodeId)
-      await this.infrastructure.dispatcher
-        ?.stopProducer?.(ownerNodeId, session.id)
-        .catch(() => undefined);
-    if (this.#activity.has(id))
-      await this.#reportActivity(session, 0, 'stop').catch(() => undefined);
-    this.#ephemeralSourceCredentials.delete(id);
-    this.#deleteSourceGrants(id);
-    // A producer is fenced/stopped before revoking its session-owned secret,
-    // preventing an in-flight prepare from starting a missing-secret loop.
-    if (session.ownerId) await this.secrets.delete(this.#sessionSourceSecretRef(id));
-    await this.repository.deleteSessionAndRevokePlaybackGrants(id);
-    await rm(join(this.options.cacheDir, 'vod', id), { recursive: true, force: true });
-    this.#activity.delete(id);
-    this.#sessionRuntime.delete(id);
-    this.#activeSourceRequests.delete(id);
-    this.#viewers.delete(id);
-    this.events.publish(event('session.deleted', { name: session.name }, id));
+    if (session.deletionPending) {
+      await this.#finalizeSessionDeletion(session);
+      return;
+    }
+    const begun = await this.repository.beginSessionDeletion(id, {
+      observedAt: new Date().toISOString()
+    });
+    if (!begun.applied) {
+      if (begun.reason === 'not-found') throw new NotFoundError('Session was not found');
+      throw new ConflictError('Session deletion conflicted with another update; try again');
+    }
+    await this.#finalizeSessionDeletion(begun.record.value);
+  }
+
+  async deleteIfInactive(id: string, inactiveBefore: string): Promise<boolean> {
+    const begun = await this.repository.beginSessionDeletion(id, {
+      observedAt: new Date().toISOString(),
+      inactiveBefore,
+      requireUnpinned: true
+    });
+    if (!begun.applied) {
+      if (begun.reason === 'not-found' || begun.reason === 'invalid-state') return false;
+      throw new ConflictError('Session expiry conflicted with another update');
+    }
+    await this.#finalizeSessionDeletion(begun.record.value);
+    return true;
+  }
+
+  async recordPlaybackActivity(
+    sessionId: string,
+    observedAt = new Date().toISOString()
+  ): Promise<void> {
+    const observedAtMs = Date.parse(observedAt);
+    if (!Number.isFinite(observedAtMs)) throw new Error('Playback activity time is invalid');
+    await this.repository.touchSessionPlaybackActivity(
+      sessionId,
+      observedAt,
+      new Date(observedAtMs - 60_000).toISOString()
+    );
   }
 
   async createEdgePlaybackGrant(token: string, edgeNodeId: string): Promise<string> {
@@ -1115,6 +1172,39 @@ export class SessionService {
     return this.#cache.usageBytes();
   }
 
+  async #finalizeSessionDeletion(session: RelaySession): Promise<void> {
+    await this.#stopSessionProducer(session);
+    if (this.#activity.has(session.id))
+      await this.#reportActivity(session, 0, 'stop').catch(() => undefined);
+    this.#ephemeralSourceCredentials.delete(session.id);
+    this.#deleteSourceGrants(session.id);
+    // The durable deletion fence and grant revocation happen before producer
+    // cleanup, while the source credential remains available until every
+    // producer has been asked to stop.
+    if (session.ownerId) await this.#deleteSessionSourceCredential(session.id);
+    await this.repository.deleteSessionAndRevokePlaybackGrants(session.id);
+    await rm(join(this.options.cacheDir, 'vod', session.id), { recursive: true, force: true });
+    this.#activity.delete(session.id);
+    this.#sessionRuntime.delete(session.id);
+    this.#activeSourceRequests.delete(session.id);
+    this.#viewers.delete(session.id);
+    this.events.publish(event('session.deleted', { name: session.name }, session.id));
+  }
+
+  async #stopSessionProducer(session: RelaySession): Promise<void> {
+    // Read durable ownership before stopping or deleting credentials. A
+    // failed-over producer is not necessarily on the assigned worker.
+    const producer =
+      (await this.#producers?.get(session.id)) ??
+      (await this.infrastructure.clusterRepository?.getVodProducer(session.id));
+    await this.#producers?.stop(session.id);
+    const ownerNodeId = producer?.ownerNodeId ?? session.assignedNodeId;
+    if (ownerNodeId && ownerNodeId !== this.options.nodeId)
+      await this.infrastructure.dispatcher
+        ?.stopProducer?.(ownerNodeId, session.id)
+        .catch(() => undefined);
+  }
+
   async #generateSegment(
     session: RelaySession,
     profile: ProfileRevision,
@@ -1221,6 +1311,7 @@ export class SessionService {
       startSegmentIndex,
       startSeconds,
       duration: session.durationSeconds - startSeconds,
+      initialReadBurstSeconds: (this.options.vodProducerBufferHighWatermarkMs ?? 60_000) / 1_000,
       ...(source.defaultAudio !== undefined ? { audioTrack: source.defaultAudio } : {}),
       ...(source.defaultSubtitle !== undefined ? { subtitleTrack: source.defaultSubtitle } : {})
     };
@@ -1384,6 +1475,35 @@ export class SessionService {
 
   #sessionSourceSecretRef(sessionId: string): string {
     return `session-source:${sessionId}`;
+  }
+
+  #sessionSourceCredentialPendingKey(sessionId: string): string {
+    return `${SESSION_SOURCE_CREDENTIAL_PENDING_PREFIX}${sessionId}`;
+  }
+
+  async #reconcilePendingSessionSourceCredential(sessionId: string): Promise<void> {
+    const session = await this.repository.getSession(sessionId);
+    const retainsCredential = session?.kind === 'vod' && Boolean(session.ownerId);
+    if (!retainsCredential) await this.secrets.delete(this.#sessionSourceSecretRef(sessionId));
+    await this.repository.deleteSetting(this.#sessionSourceCredentialPendingKey(sessionId));
+  }
+
+  async #recoverPendingSessionSourceCredentials(): Promise<number> {
+    const records = await this.repository.listSettingsByPrefix(
+      SESSION_SOURCE_CREDENTIAL_PENDING_PREFIX
+    );
+    for (const { key, value } of records) {
+      const sessionId = key.slice(SESSION_SOURCE_CREDENTIAL_PENDING_PREFIX.length);
+      if (!sessionId || value !== this.#sessionSourceSecretRef(sessionId))
+        throw new Error(`Invalid pending session source credential metadata: ${key}`);
+      await this.#reconcilePendingSessionSourceCredential(sessionId);
+    }
+    return records.length;
+  }
+
+  async #deleteSessionSourceCredential(sessionId: string): Promise<void> {
+    await this.secrets.delete(this.#sessionSourceSecretRef(sessionId));
+    await this.repository.deleteSetting(this.#sessionSourceCredentialPendingKey(sessionId));
   }
 
   async #providerCredential(

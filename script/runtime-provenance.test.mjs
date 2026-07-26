@@ -14,6 +14,12 @@ afterEach(async () => {
 describe('runtime provenance', () => {
   it('matches exact versions without accepting a numeric suffix', () => {
     expect(runtimeVersionMatches('ffmpeg version n8.1.2-22-gabc', '8.1.2')).toBe(true);
+    expect(
+      runtimeVersionMatches('ffmpeg version n8.1.2-22-g94138f6973', '8.1.2-22-g94138f6973')
+    ).toBe(true);
+    expect(
+      runtimeVersionMatches('ffmpeg version n8.1.2-22-gdeadbeef00', '8.1.2-22-g94138f6973')
+    ).toBe(false);
     expect(runtimeVersionMatches('v26.5.0', '26.5.0')).toBe(true);
     expect(runtimeVersionMatches('ffmpeg version 8.1.20', '8.1.2')).toBe(false);
   });

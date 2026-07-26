@@ -13,7 +13,8 @@ import type {
   ProviderBinding,
   ProviderConnection,
   RelaySession,
-  SegmentJob
+  SegmentJob,
+  UserIdentity
 } from '@vrrelay/domain';
 import {
   SQLITE_MIGRATIONS,
@@ -1114,6 +1115,41 @@ describe('SQLite repository atomic state', () => {
     await expect(repository.getPlaybackGrant(grant.tokenHash)).resolves.toMatchObject({
       revokedAt
     });
+    repository.close();
+  });
+
+  it('selects stale users by document lastSeenAt rather than the storage modification column', async () => {
+    const { path } = await temporaryDatabase();
+    const repository = new SqliteRepository(path);
+    await repository.migrate();
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1_000).toISOString();
+    const recent = new Date().toISOString();
+    const identity = (id: string, lastSeenAt: string): UserIdentity => ({
+      id,
+      providerId: 'provider-users',
+      providerUserId: `provider-${id}`,
+      displayName: id,
+      roles: ['user'],
+      allowedProfileIds: [],
+      firstSeenAt: old,
+      lastSeenAt
+    });
+    await repository.createUserIdentity(identity('stale-by-last-seen', old));
+    await repository.createUserIdentity(identity('recent-by-last-seen', recent));
+    const raw = new Database(path);
+    raw
+      .prepare('UPDATE user_identities SET updated_at = ? WHERE id = ?')
+      .run(recent, 'stale-by-last-seen');
+    raw
+      .prepare('UPDATE user_identities SET updated_at = ? WHERE id = ?')
+      .run(old, 'recent-by-last-seen');
+    raw.close();
+
+    await expect(
+      repository.listUserIdentitiesLastSeenBefore(
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000).toISOString()
+      )
+    ).resolves.toMatchObject([{ value: { id: 'stale-by-last-seen', lastSeenAt: old } }]);
     repository.close();
   });
 

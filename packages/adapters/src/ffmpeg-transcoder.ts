@@ -20,6 +20,56 @@ export interface FFmpegOptions {
   maxLogBytes?: number;
 }
 
+/** @internal */
+export function ffmpegDecodeAccelerationArgs(
+  mode: ProfileRevision['video']['decodeMode']
+): string[] {
+  // `auto` keeps FFmpeg's portable software decode path. Automatically
+  // selecting a host hardware API can change decoded surface formats beneath
+  // the same software filter graph. Operators can still request one explicit
+  // validated backend when the worker is configured for it.
+  return mode === 'auto' || mode === 'software' ? [] : ['-hwaccel', mode];
+}
+
+/** @internal */
+export function ffmpegVodReadPacingArgs(initialReadBurstSeconds: number): string[] {
+  if (!Number.isFinite(initialReadBurstSeconds) || initialReadBurstSeconds <= 0)
+    throw new Error('The VOD producer initial read burst must be a finite positive duration');
+  return ['-readrate', '2', '-readrate_initial_burst', initialReadBurstSeconds.toFixed(3)];
+}
+
+/** @internal */
+export async function monitorVodProducerOutput(
+  runningProducer: Promise<void>,
+  scan: () => Promise<void>,
+  abortProducer: () => void,
+  scanIntervalMs = 50
+): Promise<void> {
+  let outcome: { error?: unknown } | undefined;
+  const completion = runningProducer.then(
+    () => {
+      outcome = {};
+    },
+    (error) => {
+      outcome = { error };
+    }
+  );
+  try {
+    while (!outcome) {
+      await scan();
+      await new Promise((resolve) => setTimeout(resolve, scanIntervalMs));
+    }
+    await completion;
+    await scan();
+    if (outcome.error)
+      throw outcome.error instanceof Error ? outcome.error : new Error('VOD producer failed');
+  } catch (error) {
+    abortProducer();
+    await completion;
+    throw error;
+  }
+}
+
 export function redactFfmpegError(output: string): string {
   return output
     .replace(
@@ -172,11 +222,10 @@ export class FFmpegTranscoder implements Transcoder {
       ...(request.source.positionedAtSeconds === request.startSeconds
         ? []
         : ['-ss', request.startSeconds.toFixed(3)]),
-      '-readrate',
-      '2',
-      // The producer's watermark pacer owns buffering.  Avoid an initial
-      // unthrottled burst: its transition back to the steady read rate creates
-      // a visible gap in short HLS segments after seeks.
+      // Keep FFmpeg's average source-read ceiling while allowing the
+      // application watermark pacer to fill its initial buffer before taking
+      // ownership of pause/resume flow control.
+      ...ffmpegVodReadPacingArgs(request.initialReadBurstSeconds),
       ...this.#inputArgs(request.source, request.profile),
       '-t',
       request.duration.toFixed(3),
@@ -206,6 +255,10 @@ export class FFmpegTranscoder implements Transcoder {
       '-y',
       playlist
     ];
+    const producerAbort = new AbortController();
+    const producerSignal = signal
+      ? AbortSignal.any([signal, producerAbort.signal])
+      : producerAbort.signal;
     const published = new Set<number>();
     const scan = async () => {
       const files = await readdir(directory).catch(() => [] as string[]);
@@ -230,23 +283,11 @@ export class FFmpegTranscoder implements Transcoder {
         published.add(segment.index);
       }
     };
-    let outcome: { error?: unknown } | undefined;
-    const running = this.#run(args, undefined, signal, false, directory).then(
-      () => {
-        outcome = {};
-      },
-      (error) => {
-        outcome = { error };
-      }
+    await monitorVodProducerOutput(
+      this.#run(args, undefined, producerSignal, false, directory),
+      scan,
+      () => producerAbort.abort()
     );
-    while (!outcome) {
-      await scan();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    await running;
-    await scan();
-    if (outcome.error)
-      throw outcome.error instanceof Error ? outcome.error : new Error('VOD producer failed');
   }
 
   async #generateFmp4Segment(
@@ -309,10 +350,8 @@ export class FFmpegTranscoder implements Transcoder {
     const headerBlock = Object.entries(source.headers)
       .map(([key, value]) => `${key}: ${value}\r\n`)
       .join('');
-    const decode = profile.video.decodeMode;
-    const hardware = decode === 'auto' || decode === 'software' ? [] : ['-hwaccel', decode];
     return [
-      ...hardware,
+      ...ffmpegDecodeAccelerationArgs(profile.video.decodeMode),
       ...(headerBlock ? ['-headers', headerBlock] : []),
       ...(source.positionedAtSeconds !== undefined ? ['-seekable', '0'] : []),
       '-i',

@@ -37,6 +37,7 @@ import {
   CreateProfileRevisionRequestSchema,
   CreateProviderRequestSchema,
   CreateSessionRequestSchema,
+  DeleteUserQuerySchema,
   FirstRunRequestSchema,
   LoginRequestSchema,
   SignInConfigurationRequestSchema,
@@ -55,7 +56,8 @@ import {
   CacheEvictionRequestSchema,
   BackendValidationRequestSchema,
   BackendActivationRequestSchema,
-  RuntimeConfigurationUpdateRequestSchema
+  RuntimeConfigurationUpdateRequestSchema,
+  UpdateRetentionConfigurationRequestSchema
 } from '@vrrelay/contracts';
 import { isPrivateAddress, validateProviderUrl } from '@vrrelay/adapters';
 import { requiresSetupToken, validateRuntimeConfiguration, type RelayConfig } from './config.js';
@@ -85,6 +87,7 @@ import {
   SIGNED_GRANT_MAX_PARAMETER_LENGTH
 } from './request-policy.js';
 import { LiveEdgePathManager } from './live-edge-path-manager.js';
+import { RetentionService } from './retention-service.js';
 
 export { auditActor, auditedOperation } from './audited-operation.js';
 export { shouldRateLimitRequest } from './request-policy.js';
@@ -105,6 +108,7 @@ export interface ServerServices {
   metrics: MetricsSink;
   audit: AuditService;
   backends: BackendService;
+  retention?: RetentionService;
   readiness?: () => Promise<
     Array<Pick<BackendStatus, 'category' | 'kind' | 'healthy' | 'checkedAt' | 'restartRequired'>>
   >;
@@ -487,6 +491,26 @@ export function meteredReadable(source: Readable, record: (bytes: number) => voi
   return source.pipe(meter);
 }
 
+export function mediaDeliveryRecorder(
+  sessions: Pick<SessionService, 'recordEgress' | 'recordPlaybackActivity'>,
+  sessionId: string,
+  onError?: (error: unknown) => void
+): (bytes: number) => void {
+  let activityRecorded = false;
+  return (bytes) => {
+    sessions.recordEgress(bytes, sessionId);
+    if (activityRecorded) return;
+    activityRecorded = true;
+    void sessions.recordPlaybackActivity(sessionId).catch(onError ?? (() => undefined));
+  };
+}
+
+export function isLiveMediaResponse(resource: string, contentType: string): boolean {
+  const normalizedType = contentType.toLowerCase();
+  if (normalizedType.startsWith('video/') || normalizedType.startsWith('audio/')) return true;
+  return /\.(?:ts|m4s|mp4|aac|mp3)$/i.test(resource);
+}
+
 export function redactRequestUrl(url: string): string {
   return url
     .replace(/(\/play\/)[^/?]+/g, '$1[REDACTED]')
@@ -550,6 +574,9 @@ export async function createServer(
   services: ServerServices,
   surface: ControlPlaneHttpSurface = 'standalone'
 ): Promise<FastifyInstance> {
+  const retention =
+    services.retention ??
+    new RetentionService(services.repository, services.sessions, services.auth, services.audit);
   const app = Fastify({
     logController: new LogController({
       disableRequestLogging: (request) => request.url.split('?', 1)[0] === '/api/v1/health'
@@ -875,6 +902,30 @@ export async function createServer(
     return configuration;
   });
 
+  app.get('/api/v1/configuration/retention', async (request) => {
+    await authenticate(request, ['admin']);
+    return retention.configuration();
+  });
+
+  app.put('/api/v1/configuration/retention', async (request) => {
+    const principal = await mutate(request, ['admin']);
+    const configuration = parse(UpdateRetentionConfigurationRequestSchema, request.body);
+    return auditAs(
+      request,
+      principal,
+      {
+        category: 'system',
+        action: 'retention.configuration.update',
+        target: { type: 'retention-configuration' },
+        context: {
+          sessionExpiryEnabled: configuration.sessionInactivityDeletionHours !== null,
+          staleUserPurgeEnabled: configuration.staleUserPurgeDays !== null
+        }
+      },
+      () => retention.configure(configuration)
+    );
+  });
+
   app.get('/api/v1/catalog', async (request) => {
     const principal = await authenticate(request, ['catalog:read']);
     if (!principal.providerId || !principal.providerUserId)
@@ -988,6 +1039,28 @@ export async function createServer(
           ...(body.defaultProfileId ? { defaultProfileId: body.defaultProfileId } : {})
         })
     );
+  });
+
+  app.delete('/api/v1/users/:userId', async (request, reply) => {
+    const principal = await mutate(request, ['admin']);
+    if (!principal.roles.includes('owner') && principal.kind !== 'recovery_session')
+      throw new UnauthorizedError('Owner access is required');
+    const userId = (request.params as { userId: string }).userId;
+    const query = parse(DeleteUserQuerySchema, request.query);
+    await auditAs(
+      request,
+      principal,
+      {
+        category: 'authorization',
+        action: 'user.delete',
+        target: { type: 'user', id: userId }
+      },
+      () =>
+        services.auth.deleteUser(userId, query.expectedRevision, {
+          ...(principal.id ? { requesterId: principal.id } : {})
+        })
+    );
+    return reply.status(204).send();
   });
 
   app.get('/api/v1/providers', async (request) => {
@@ -1627,7 +1700,7 @@ export async function createServer(
     const principal = await mutate(request, ['sessions:create']);
     return reply.status(201).send(
       await services.live.create(parse(CreateLiveChannelRequestSchema, request.body), {
-        ...(principal.id ? { ownerId: principal.id } : {})
+        ...(principal.kind === 'jellyfin_session' && principal.id ? { ownerId: principal.id } : {})
       })
     );
   });
@@ -1855,13 +1928,14 @@ export async function createServer(
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'private, no-store');
-      return reply
-        .type('video/mp2t')
-        .send(
-          meteredReadable(createReadStream(path), (bytes) =>
-            services.sessions.recordEgress(bytes, session.id)
+      return reply.type('video/mp2t').send(
+        meteredReadable(
+          createReadStream(path),
+          mediaDeliveryRecorder(services.sessions, session.id, (error) =>
+            request.log.debug({ err: error }, 'playback activity update failed')
           )
-        );
+        )
+      );
     });
     app.get('/play/:token/segment/:index.m4s', async (request, reply) => {
       const params = request.params as { token: string; index: string };
@@ -1892,13 +1966,14 @@ export async function createServer(
       const info = await stat(path);
       reply.header('Content-Length', info.size);
       reply.header('Cache-Control', 'private, no-store');
-      return reply
-        .type('video/iso.segment')
-        .send(
-          meteredReadable(createReadStream(path), (bytes) =>
-            services.sessions.recordEgress(bytes, session.id)
+      return reply.type('video/iso.segment').send(
+        meteredReadable(
+          createReadStream(path),
+          mediaDeliveryRecorder(services.sessions, session.id, (error) =>
+            request.log.debug({ err: error }, 'playback activity update failed')
           )
-        );
+        )
+      );
     });
     app.get('/play/:token/segment/init.mp4', async (request, reply) => {
       const token = tokenFromPath(request);
@@ -2004,12 +2079,18 @@ export async function createServer(
         return reply.status(response.status).send();
       }
       reply.header('Cache-Control', 'private, no-store');
+      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+      const record = isLiveMediaResponse(params['*'], contentType)
+        ? mediaDeliveryRecorder(services.sessions, session.id, (error) =>
+            request.log.debug({ err: error }, 'playback activity update failed')
+          )
+        : (bytes: number) => services.sessions.recordEgress(bytes, session.id);
       return reply
-        .type(response.headers.get('content-type') ?? 'application/octet-stream')
+        .type(contentType)
         .send(
           meteredReadable(
             Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
-            (bytes) => services.sessions.recordEgress(bytes, session.id)
+            record
           )
         );
     });

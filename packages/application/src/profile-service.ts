@@ -44,25 +44,12 @@ export class ProfileService {
         'Media capabilities must be discovered before profiles can be seeded'
       );
     this.#capabilities = capabilities;
-    if ((await this.repository.listProfiles()).length > 0) return;
+    const existingProfiles = await this.repository.listProfiles();
     const available = new Set(
       capabilities.encoders.filter((encoder) => encoder.available).map((encoder) => encoder.name)
     );
-    const h264Encoder =
-      ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_vaapi', 'libx264'].find(
-        (encoder) => available.has(encoder)
-      ) ?? 'libx264';
-    const hardwareMode = h264Encoder.includes('videotoolbox')
-      ? 'videotoolbox'
-      : h264Encoder.includes('nvenc')
-        ? 'nvenc'
-        : h264Encoder.includes('qsv')
-          ? 'qsv'
-          : h264Encoder.includes('amf')
-            ? 'amf'
-            : h264Encoder.includes('vaapi')
-              ? 'vaapi'
-              : 'software';
+    if (!available.has('libx264'))
+      throw new ConflictError('The portable built-in profiles require the libx264 encoder');
     const now = new Date().toISOString();
     const base: Omit<
       ProfileRevision,
@@ -70,8 +57,8 @@ export class ProfileService {
     > = {
       video: {
         codec: 'h264',
-        encoder: h264Encoder,
-        hardwareMode,
+        encoder: 'libx264',
+        hardwareMode: 'software',
         decodeMode: 'auto',
         profile: 'high',
         level: '4.1',
@@ -167,7 +154,26 @@ export class ProfileService {
         createdAt: now
       }
     ];
-    for (const profile of profiles) await this.repository.putProfile(profile);
+    for (const profile of profiles) {
+      const latest = existingProfiles
+        .filter((existing) => existing.profileId === profile.profileId)
+        .sort((left, right) => right.revision - left.revision)[0];
+      if (!latest) {
+        await this.repository.putProfile(profile);
+        continue;
+      }
+      if (
+        latest.revision === 1 &&
+        latest.name === profile.name &&
+        (latest.video.encoder !== 'libx264' || latest.video.hardwareMode !== 'software')
+      )
+        await this.repository.putProfile({
+          ...latest,
+          revision: 2,
+          video: { ...latest.video, encoder: 'libx264', hardwareMode: 'software' },
+          createdAt: now
+        });
+    }
   }
 
   async list(): Promise<ProfileRevision[]> {

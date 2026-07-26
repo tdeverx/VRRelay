@@ -1,17 +1,24 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#ifndef BuildNumber
+  #define BuildNumber "1"
+#endif
+#ifndef BuildId
+  #define BuildId "{#AppVersion}-b{#BuildNumber}"
+#endif
 
 [Setup]
 AppId={{15B18FB0-DB79-4F32-93B1-22E8A1014516}
 AppName=VRRelay
 AppVersion={#AppVersion}
+AppVerName=VRRelay {#AppVersion} (build {#BuildNumber})
 DefaultDirName={autopf}\VRRelay
 DefaultGroupName=VRRelay
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\dist
-OutputBaseFilename=VRRelay-{#AppVersion}-Windows-x64
+OutputBaseFilename=VRRelay-{#BuildId}-Windows-x64
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin

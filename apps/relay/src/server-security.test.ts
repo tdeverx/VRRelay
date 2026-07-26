@@ -666,7 +666,118 @@ describe('unified Jellyfin user experience', () => {
   });
 });
 
+describe('retention and user-purge administration', () => {
+  it('persists retention policy and requires an expected revision for audited user deletion', async () => {
+    const { app, auth, repository } = await securityFixture();
+    await auth.initialize(adminPassword);
+    const admin = await login(app);
+    const headers = { cookie: admin.cookie, 'x-csrf-token': admin.csrfToken };
+
+    const defaults = await app.inject({
+      method: 'GET',
+      url: '/api/v1/configuration/retention',
+      headers: { cookie: admin.cookie }
+    });
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json()).toEqual({
+      sessionInactivityDeletionHours: null,
+      staleUserPurgeDays: null
+    });
+    const configured = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/configuration/retention',
+      headers,
+      payload: {
+        sessionInactivityDeletionHours: 24,
+        staleUserPurgeDays: 90
+      }
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toEqual({
+      sessionInactivityDeletionHours: 24,
+      staleUserPurgeDays: 90
+    });
+
+    const timestamp = new Date().toISOString();
+    const user = await repository.createUserIdentity({
+      id: 'user-http-delete',
+      providerId: 'provider-http-security',
+      providerUserId: 'provider-user-http-delete',
+      displayName: 'Delete me',
+      roles: ['user'],
+      allowedProfileIds: [],
+      firstSeenAt: timestamp,
+      lastSeenAt: timestamp
+    });
+    const missingRevision = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/users/${user.value.id}`,
+      headers
+    });
+    expect(missingRevision.statusCode).toBe(400);
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/users/${user.value.id}?expectedRevision=${user.revision}`,
+      headers
+    });
+    expect(deleted.statusCode).toBe(204);
+    await expect(repository.getUserIdentity(user.value.id)).resolves.toBeUndefined();
+    await expect(repository.listAuditEvents()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'retention.configuration.update',
+          outcome: 'success'
+        }),
+        expect.objectContaining({
+          action: 'user.delete',
+          outcome: 'success',
+          target: { type: 'user', id: user.value.id }
+        })
+      ])
+    );
+  });
+});
+
 describe('HTTP playback-grant boundary', () => {
+  it('records successful media bytes as activity but ignores manifests and failed segments', async () => {
+    const { app, repository, sessions } = await securityFixture();
+    const playback = await createVodSession(sessions, null);
+    const initial = (await repository.getSession(playback.session.id))!;
+    vi.useFakeTimers({
+      toFake: ['Date'],
+      now: Date.parse(initial.lastPlaybackActivityAt!) + 120_000
+    });
+
+    const manifest = await app.inject({
+      method: 'GET',
+      url: `/play/${playback.token}/index.m3u8`
+    });
+    expect(manifest.statusCode).toBe(200);
+    await expect(repository.getSession(playback.session.id)).resolves.toMatchObject({
+      lastPlaybackActivityAt: initial.lastPlaybackActivityAt
+    });
+    const missing = await app.inject({
+      method: 'GET',
+      url: `/play/${playback.token}/segment/99.ts`
+    });
+    expect(missing.statusCode).toBe(404);
+    await expect(repository.getSession(playback.session.id)).resolves.toMatchObject({
+      lastPlaybackActivityAt: initial.lastPlaybackActivityAt
+    });
+
+    const segment = await app.inject({
+      method: 'GET',
+      url: `/play/${playback.token}/segment/0.ts`
+    });
+    expect(segment.statusCode).toBe(200);
+    const expectedActivityAt = new Date().toISOString();
+    await vi.waitFor(async () => {
+      expect((await repository.getSession(playback.session.id))?.lastPlaybackActivityAt).toBe(
+        expectedActivityAt
+      );
+    });
+  });
+
   it('accepts valid grants and rejects tampered, revoked, and expired grants without reflection', async () => {
     const { app, sessions } = await securityFixture();
     const valid = await createVodSession(sessions, null);

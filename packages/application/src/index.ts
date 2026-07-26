@@ -388,6 +388,12 @@ export interface PersonalTokenUse {
   touchBefore: string;
 }
 
+export interface SessionDeletionOptions {
+  observedAt: string;
+  inactiveBefore?: string;
+  requireUnpinned?: boolean;
+}
+
 export type LiveChannelCapacityWriteResult =
   | {
       created: true;
@@ -395,7 +401,7 @@ export type LiveChannelCapacityWriteResult =
     }
   | {
       created: false;
-      reason: 'installation-limit' | 'owner-limit';
+      reason: 'installation-limit' | 'owner-limit' | 'owner-not-found';
     };
 
 export interface AuditQuery {
@@ -552,6 +558,17 @@ export interface Repository {
     viewers: number,
     updatedAt: string
   ): Promise<AtomicWriteResult<RelaySession>>;
+  touchSessionPlaybackActivity(
+    sessionId: string,
+    observedAt: string,
+    touchBefore: string
+  ): Promise<boolean>;
+  listInactiveSessions(inactiveBefore: string, limit?: number): Promise<RelaySession[]>;
+  listSessionDeletionPending(limit?: number): Promise<RelaySession[]>;
+  beginSessionDeletion(
+    sessionId: string,
+    options: SessionDeletionOptions
+  ): Promise<AtomicWriteResult<RelaySession>>;
   deleteSessionAndRevokePlaybackGrants(sessionId: string, revokedAt?: string): Promise<void>;
   getPlaybackGrant(tokenHash: string): Promise<PlaybackGrant | undefined>;
   createLiveChannel(channel: LiveChannel): Promise<VersionedRecord<LiveChannel>>;
@@ -576,6 +593,8 @@ export interface Repository {
   revokePersonalToken(id: string, revokedAt?: string): Promise<void>;
   putSetting(key: string, value: string): Promise<void>;
   getSetting(key: string): Promise<string | undefined>;
+  listSettingsByPrefix(prefix: string): Promise<Array<{ key: string; value: string }>>;
+  deleteSetting(key: string): Promise<void>;
   getVersionedSetting(key: string): Promise<VersionedRecord<string> | undefined>;
   putSettingIfAbsent(key: string, value: string): Promise<SettingInsertResult>;
   compareAndSetSetting(
@@ -594,6 +613,15 @@ export interface Repository {
     identity: UserIdentity,
     expectedRevision: number
   ): Promise<AtomicWriteResult<UserIdentity>>;
+  listUserIdentitiesLastSeenBefore(
+    lastSeenBefore: string,
+    limit?: number
+  ): Promise<Array<VersionedRecord<UserIdentity>>>;
+  deleteUserIdentityPreservingOwner(
+    id: string,
+    expectedRevision: number,
+    lastSeenBefore?: string
+  ): Promise<AtomicDeleteResult<UserIdentity>>;
 }
 
 export interface EncoderCapability {
@@ -628,6 +656,7 @@ export interface VodProducerRequest {
   startSegmentIndex: number;
   startSeconds: number;
   duration: number;
+  initialReadBurstSeconds: number;
   audioTrack?: number;
   subtitleTrack?: number;
 }

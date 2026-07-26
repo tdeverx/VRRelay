@@ -166,6 +166,30 @@ export const SignInConfigurationRequestSchema = z
   });
 export type SignInConfigurationRequest = z.infer<typeof SignInConfigurationRequestSchema>;
 
+export const RetentionConfigurationSchema = z
+  .object({
+    sessionInactivityDeletionHours: z.number().int().min(1).max(8_760).nullable().default(null),
+    staleUserPurgeDays: z.number().int().min(30).max(3_650).nullable().default(null)
+  })
+  .strict();
+export type RetentionConfiguration = z.infer<typeof RetentionConfigurationSchema>;
+export const UpdateRetentionConfigurationRequestSchema = z
+  .object({
+    sessionInactivityDeletionHours: z.number().int().min(1).max(8_760).nullable(),
+    staleUserPurgeDays: z.number().int().min(30).max(3_650).nullable()
+  })
+  .strict();
+export type UpdateRetentionConfigurationRequest = z.infer<
+  typeof UpdateRetentionConfigurationRequestSchema
+>;
+
+export const DeleteUserQuerySchema = z
+  .object({
+    expectedRevision: z.coerce.number().int().positive()
+  })
+  .strict();
+export type DeleteUserQuery = z.infer<typeof DeleteUserQuerySchema>;
+
 export const CreatePersonalTokenRequestSchema = z.object({
   name: z.string().min(1).max(100),
   scopes: z.array(ScopeSchema).min(1),

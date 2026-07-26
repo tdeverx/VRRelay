@@ -34,6 +34,7 @@ import { BackendService, resolveConfiguredObjectStore } from '../backend-service
 import type { RelayConfig } from '../config.js';
 import { parseListenAddress } from '../config.js';
 import { ManagedMediaMtx } from '../media-runtime.js';
+import { RetentionService } from '../retention-service.js';
 import { createServer, registerStandaloneInternalRoutes } from '../server.js';
 import { startLoopbackCompanion } from '../loopback-companion.js';
 import {
@@ -476,7 +477,15 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     await sessions.recover();
 
     const auth = new AuthService(repository, secrets, providers);
+    await auth.recover();
     const audit = new AuditService(repository);
+    let reportRetentionFailure: (
+      error: unknown,
+      target: { type: 'session' | 'user'; id: string }
+    ) => void = () => undefined;
+    const retention = new RetentionService(repository, sessions, auth, audit, (error, target) =>
+      reportRetentionFailure(error, target)
+    );
     const currentNodeCapabilities = nodeCapabilities(config, capabilities, sessions, () =>
       locallyAvailableProviderIds(repository, secrets)
     );
@@ -492,6 +501,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
         repository,
         auth,
         audit,
+        retention,
         providers,
         profiles,
         sessions,
@@ -522,6 +532,8 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       },
       plan.kind === 'controller' ? 'controller' : 'standalone'
     );
+    reportRetentionFailure = (error, target) =>
+      app.log.error({ err: error, ...target }, 'retention sweep item failed');
     startup.defer({ name: 'http-server', stop: () => app.close() });
     const loopbackApp =
       plan.kind === 'standalone'
@@ -587,6 +599,11 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
         .catch((error) => app.log.error({ err: error }, 'cache cleanup failed'));
     }, 60_000);
     cleanup.unref();
+    const retentionSweep = createNonOverlappingInterval(
+      60_000,
+      () => retention.sweep().then(() => undefined),
+      (error) => app.log.error({ err: error }, 'retention sweep failed')
+    );
     const heartbeat = plan.hostsController
       ? setInterval(() => {
           void heartbeatLocalNode().catch((error) =>
@@ -608,6 +625,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
         name: 'background-timers',
         stop: () => {
           clearInterval(cleanup);
+          clearInterval(retentionSweep);
           if (heartbeat) clearInterval(heartbeat);
           if (livePoll) clearInterval(livePoll);
         }
@@ -682,7 +700,9 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
           if (!services.sessions) throw new Error('Source-worker session service is unavailable');
           return draining ? services.sessions.drainProducers() : Promise.resolve();
         },
-        onDisconnect: () => services.sessions?.close() ?? Promise.resolve(),
+        // A controller restart is a temporary transport loss. Fence active
+        // producers without permanently closing the reusable worker runtime.
+        onDisconnect: () => services.sessions?.drainProducers() ?? Promise.resolve(),
         onProvider: (operation, payload) => {
           if (!services.providers) throw new Error('Source-worker provider service is unavailable');
           return providerAgentHandler(services.providers)(operation, payload);

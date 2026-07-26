@@ -940,12 +940,12 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
       message.payload.action === 'ensure'
     ) {
       if (!this.#ensureHandler) throw new Error('Segment ensure handler is unavailable');
-      const handler = this.#ensureHandler;
-      void handler(message.payload.token, message.payload.segmentIndex)
-        .then(() => {
-          if (!connection.closed) this.#replySuccess(connection, message);
-        })
-        .catch(() => this.#closeConnection(connection, 'Segment ensure request failed'));
+      void this.#ensureSegment(
+        connection,
+        message,
+        message.payload.token,
+        message.payload.segmentIndex
+      );
       return;
     }
 
@@ -963,6 +963,33 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
     }
 
     throw new Error('Unexpected unsolicited agent message: ' + message.kind);
+  }
+
+  async #ensureSegment(
+    connection: AgentConnection,
+    request: AgentEnvelope,
+    token: string,
+    segmentIndex: number
+  ): Promise<void> {
+    const handler = this.#ensureHandler;
+    if (!handler) return;
+    try {
+      await handler(token, segmentIndex);
+      if (!connection.closed) this.#replySuccess(connection, request);
+      return;
+    } catch (error) {
+      if (connection.closed) return;
+      this.#send(
+        connection,
+        'error',
+        protocolError(
+          'segment_ensure_failed',
+          errorMessage(error, 'Segment ensure request failed'),
+          true
+        ),
+        { replyTo: request.id }
+      );
+    }
   }
 
   async #authoritativeDrainState(nodeId: string): Promise<boolean> {
