@@ -50,6 +50,20 @@ export class ProfileService {
     );
     if (!available.has('libx264'))
       throw new ConflictError('The portable built-in profiles require the libx264 encoder');
+    const hardwareEncoders: ReadonlyArray<{
+      encoder: string;
+      hardwareMode: ProfileRevision['video']['hardwareMode'];
+    }> = [
+      { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' },
+      { encoder: 'h264_nvenc', hardwareMode: 'nvenc' },
+      { encoder: 'h264_qsv', hardwareMode: 'qsv' },
+      { encoder: 'h264_vaapi', hardwareMode: 'vaapi' },
+      { encoder: 'h264_amf', hardwareMode: 'amf' }
+    ];
+    const hardwareEncoder = hardwareEncoders.find(({ encoder }) => available.has(encoder));
+    const preferredVideo = hardwareEncoder
+      ? hardwareEncoder
+      : { encoder: 'libx264', hardwareMode: 'software' as const };
     const now = new Date().toISOString();
     const base: Omit<
       ProfileRevision,
@@ -57,8 +71,7 @@ export class ProfileService {
     > = {
       video: {
         codec: 'h264',
-        encoder: 'libx264',
-        hardwareMode: 'software',
+        ...preferredVideo,
         decodeMode: 'auto',
         profile: 'high',
         level: '4.1',
@@ -163,14 +176,16 @@ export class ProfileService {
         continue;
       }
       if (
-        latest.revision === 1 &&
+        latest.revision === 2 &&
         latest.name === profile.name &&
-        (latest.video.encoder !== 'libx264' || latest.video.hardwareMode !== 'software')
+        latest.video.encoder === 'libx264' &&
+        latest.video.hardwareMode === 'software' &&
+        preferredVideo.hardwareMode !== 'software'
       )
         await this.repository.putProfile({
           ...latest,
-          revision: 2,
-          video: { ...latest.video, encoder: 'libx264', hardwareMode: 'software' },
+          revision: 3,
+          video: { ...latest.video, ...preferredVideo },
           createdAt: now
         });
     }

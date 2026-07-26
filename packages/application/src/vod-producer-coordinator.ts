@@ -23,6 +23,7 @@ const FAILURE_RETRY_MIN_MS = 1_000;
 const FAILURE_RETRY_MAX_MS = 30_000;
 const PROGRESS_STALL_MIN_MS = 45_000;
 const PROGRESS_STALL_ERROR = 'Persistent VOD producer stopped publishing while catching up';
+const SWITCH_CONFIRM_MS = 6_000;
 const ACTIVE_STATES: readonly VodProducer['state'][] = ['starting', 'running', 'switching'];
 
 interface ActiveProducer {
@@ -43,6 +44,7 @@ interface ActiveProducer {
   publishedAny: boolean;
   pendingWaiters: Set<symbol>;
   progressWatchStartedAtMs: number | undefined;
+  switchCandidate: { index: number; viewers: number; observedAtMs: number } | undefined;
   retryableFailure?: 'progress-stall';
   failure?: Error;
   stopState?: 'idle' | 'switching' | 'cancelled';
@@ -520,6 +522,7 @@ export class VodProducerCoordinator {
         publishedAny: false,
         pendingWaiters: new Set(),
         progressWatchStartedAtMs: undefined,
+        switchCandidate: undefined,
         ...(starting.stopState ? { stopState: starting.stopState } : {})
       };
       this.#active.set(session.id, active);
@@ -797,21 +800,38 @@ export class VodProducerCoordinator {
       active.demandedSegmentIndex,
       active
     );
-    if (
-      this.#shouldSwitch(
-        active,
-        dominant.index,
-        dominant.currentViewers,
-        dominant.viewers,
-        profile.delivery.segmentDuration
-      )
-    ) {
-      active.stopState = 'switching';
-      active.controller.abort(new Error('Producer playback window changed'));
-      return;
+    const shouldSwitch = this.#shouldSwitch(
+      active,
+      dominant.index,
+      dominant.currentViewers,
+      dominant.viewers,
+      profile.delivery.segmentDuration
+    );
+    if (shouldSwitch) {
+      const candidate = active.switchCandidate;
+      const sameDemand =
+        candidate &&
+        candidate.viewers === dominant.viewers &&
+        Math.abs(candidate.index - dominant.index) <=
+          vodProducerForwardJoinSegments(
+            this.options.bufferLowWatermarkMs,
+            profile.delivery.segmentDuration
+          );
+      if (sameDemand && now - candidate.observedAtMs >= SWITCH_CONFIRM_MS) {
+        active.stopState = 'switching';
+        active.controller.abort(new Error('Producer playback window changed'));
+        return;
+      }
+      active.switchCandidate = {
+        index: dominant.index,
+        viewers: dominant.viewers,
+        observedAtMs: now
+      };
+    } else {
+      active.switchCandidate = undefined;
+      this.#applyPlaybackAnchor(active, dominant);
+      active.demandedSegmentIndex = dominant.index;
     }
-    this.#applyPlaybackAnchor(active, dominant);
-    active.demandedSegmentIndex = dominant.index;
     this.#reconcilePacing(profile, active);
     if (this.#progressStalled(profile, active, Date.now())) {
       active.retryableFailure = 'progress-stall';
@@ -1066,6 +1086,11 @@ export class VodProducerCoordinator {
       bufferLowWatermarkMs: this.options.bufferLowWatermarkMs,
       segmentDurationSeconds
     });
+    // A forward request beyond the encoded head is a waiter for the current
+    // producer, not evidence that another FFmpeg generation should start.
+    // Replacing it merely chases a player that is already ahead of the output.
+    if (demandedIndex > (active.lastPublishedSegmentIndex ?? active.startSegmentIndex))
+      return false;
     return !covered && (currentViewers === 0 || demandedViewers > currentViewers);
   }
 

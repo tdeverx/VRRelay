@@ -24,11 +24,9 @@ export interface FFmpegOptions {
 export function ffmpegDecodeAccelerationArgs(
   mode: ProfileRevision['video']['decodeMode']
 ): string[] {
-  // `auto` keeps FFmpeg's portable software decode path. Automatically
-  // selecting a host hardware API can change decoded surface formats beneath
-  // the same software filter graph. Operators can still request one explicit
-  // validated backend when the worker is configured for it.
-  return mode === 'auto' || mode === 'software' ? [] : ['-hwaccel', mode];
+  // Let FFmpeg select an available accelerator for `auto`; this keeps the
+  // policy portable while allowing each worker to use its validated hardware.
+  return mode === 'software' ? [] : ['-hwaccel', mode];
 }
 
 /** @internal */

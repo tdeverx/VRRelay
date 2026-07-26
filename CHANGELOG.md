@@ -6,6 +6,11 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed VOD catch-up stalls by treating requests ahead of the encoded head as
+  waiters rather than repeatedly replacing the active FFmpeg producer. Built-in
+  profiles now select an available H.264 hardware encoder per worker (including
+  VideoToolbox), with portable software fallback, and automatic decode lets
+  FFmpeg use the worker's available accelerator.
 - Consolidated the pending runtime, development, and GitHub Actions dependency
   updates. The SvelteKit 3 prerelease migration now uses its `$app/tsconfig`
   layout through the existing TypeScript compatibility boundary, and

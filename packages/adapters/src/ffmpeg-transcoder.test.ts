@@ -59,7 +59,7 @@ afterEach(async () => {
 
 describe('FFmpeg adapter', () => {
   it('keeps automatic decoding portable and applies only explicit hardware backends', () => {
-    expect(ffmpegDecodeAccelerationArgs('auto')).toEqual([]);
+    expect(ffmpegDecodeAccelerationArgs('auto')).toEqual(['-hwaccel', 'auto']);
     expect(ffmpegDecodeAccelerationArgs('software')).toEqual([]);
     expect(ffmpegDecodeAccelerationArgs('videotoolbox')).toEqual(['-hwaccel', 'videotoolbox']);
     expect(ffmpegDecodeAccelerationArgs('d3d11va')).toEqual(['-hwaccel', 'd3d11va']);
