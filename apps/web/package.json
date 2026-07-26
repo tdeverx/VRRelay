@@ -9,10 +9,10 @@
     "#lib/*": "./src/lib/*"
   },
   "scripts": {
-    "build": "vite build",
-    "check": "svelte-kit sync && node --import ../../script/typescript-compat-loader.mjs node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json",
-    "dev": "vite dev --host 127.0.0.1",
-    "sync": "svelte-kit sync",
+    "build": "node --import ../../script/typescript-compat-loader.mjs node_modules/vite/bin/vite.js build",
+    "check": "npm run sync && node --import ../../script/typescript-compat-loader.mjs node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json",
+    "dev": "node --import ../../script/typescript-compat-loader.mjs node_modules/vite/bin/vite.js dev --host 127.0.0.1",
+    "sync": "node --import ../../script/typescript-compat-loader.mjs ../../node_modules/@sveltejs/kit/svelte-kit.js sync",
     "test": "vitest run"
   },
   "dependencies": {
