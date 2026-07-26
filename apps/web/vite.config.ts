@@ -9,10 +9,7 @@ export default defineConfig({
     tailwindcss(),
     sveltekit({
       preprocess: vitePreprocess(),
-      adapter: adapter({ fallback: 'index.html' }),
-      alias: {
-        '@/*': './src/lib/*'
-      }
+      adapter: adapter({ fallback: 'index.html' })
     })
   ],
   server: {

@@ -84,6 +84,8 @@ try {
 } finally {
   Pop-Location
 }
+& node "$Root\script\select-native-prebuild.mjs" "$Stage\runtime" win32-x64
+Assert-NativeSuccess 'Native prebuild selection' $LASTEXITCODE
 Copy-Item $WinSW "$Stage\VRRelay.exe" -Force
 $ServiceConfig = (Get-Content "$Root\deploy\windows\VRRelay.xml" -Raw).Replace('__VRRELAY_VERSION__', $Version)
 Set-Content "$Stage\VRRelay.xml" $ServiceConfig
