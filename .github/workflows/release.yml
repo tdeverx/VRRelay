@@ -40,9 +40,11 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           version="$(node -p "require('./package.json').version")"
           build_id="$(VRRELAY_VERSION="$version" node script/publish-rolling-release.mjs identity)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
-          echo "run_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "build_id=$build_id"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
       - run: script/check-workflows.sh
       - run: npm run ci
       - run: npx playwright install --with-deps chromium
