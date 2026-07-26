@@ -62,7 +62,9 @@ semantic versioning after the first public release.
   media. Pending segment responses now keep their owning producer generation alive until they
   finish, disconnect, or time out, avoiding an idle restart while a viewer is still waiting.
   Dashboard stops now reach the durable remote producer owner after failover, and seek arbitration
-  scales its forward join window with the profile's actual segment duration.
+  scales its forward join window with the profile's actual segment duration. A controller restart
+  now drains active source-worker producers without permanently closing their reusable coordinator,
+  so the reconnected worker can serve the next segment immediately.
 - Bound the standalone Compose administration port to loopback by default so
   the localhost first-run policy cannot expose owner setup to LAN clients.
   Standalone VOD placement now refreshes local provider capabilities

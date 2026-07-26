@@ -40,7 +40,6 @@ const MAX_PENDING_REQUESTS = 512;
 const MAX_DECLARED_WORKERS = 32;
 const CORRELATED_RESPONSES_PER_WORKER_MINUTE = 60;
 const ROTATION_RETRY_MS = 5_000;
-const SEGMENT_ENSURE_RETRY_DELAYS_MS = [250, 750] as const;
 const NODE_IDENTITY_REFERENCE = 'cluster:node-identity';
 const NODE_ENROLLMENT_REFERENCE = 'cluster:node-enrollment';
 const NODE_ROTATION_REFERENCE = 'cluster:node-rotation';
@@ -974,33 +973,23 @@ export class AgentController implements RemoteSegmentDispatcher, RemoteProviderG
   ): Promise<void> {
     const handler = this.#ensureHandler;
     if (!handler) return;
-    let failure: unknown;
-    for (let attempt = 0; attempt <= SEGMENT_ENSURE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      await handler(token, segmentIndex);
+      if (!connection.closed) this.#replySuccess(connection, request);
+      return;
+    } catch (error) {
       if (connection.closed) return;
-      if (attempt > 0)
-        await new Promise((resolve) =>
-          setTimeout(resolve, SEGMENT_ENSURE_RETRY_DELAYS_MS[attempt - 1])
-        );
-      if (connection.closed) return;
-      try {
-        await handler(token, segmentIndex);
-        if (!connection.closed) this.#replySuccess(connection, request);
-        return;
-      } catch (error) {
-        failure = error;
-      }
+      this.#send(
+        connection,
+        'error',
+        protocolError(
+          'segment_ensure_failed',
+          errorMessage(error, 'Segment ensure request failed'),
+          true
+        ),
+        { replyTo: request.id }
+      );
     }
-    if (connection.closed) return;
-    this.#send(
-      connection,
-      'error',
-      protocolError(
-        'segment_ensure_failed',
-        errorMessage(failure, 'Segment ensure request failed'),
-        true
-      ),
-      { replyTo: request.id }
-    );
   }
 
   async #authoritativeDrainState(nodeId: string): Promise<boolean> {

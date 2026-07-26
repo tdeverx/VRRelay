@@ -700,7 +700,9 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
           if (!services.sessions) throw new Error('Source-worker session service is unavailable');
           return draining ? services.sessions.drainProducers() : Promise.resolve();
         },
-        onDisconnect: () => services.sessions?.close() ?? Promise.resolve(),
+        // A controller restart is a temporary transport loss. Fence active
+        // producers without permanently closing the reusable worker runtime.
+        onDisconnect: () => services.sessions?.drainProducers() ?? Promise.resolve(),
         onProvider: (operation, payload) => {
           if (!services.providers) throw new Error('Source-worker provider service is unavailable');
           return providerAgentHandler(services.providers)(operation, payload);
