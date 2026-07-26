@@ -115,7 +115,7 @@ helm lint deploy/kubernetes
 tofu fmt -check -recursive deploy/opentofu
 swift build --package-path apps/macos -c release --arch arm64
 deploy/macos/package.sh release dmg
-script/verify-macos-dmg.sh dist/VRRelay-<version>-macOS-arm64.dmg <version> <build-number>
+script/verify-macos-dmg.sh dist/VRRelay-<build-id>-macOS-arm64.dmg <version> <build-number>
 ```
 
 The real Jellyfin contract test is opt-in:

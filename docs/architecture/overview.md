@@ -105,6 +105,21 @@ The encrypted file backend serializes mutations within the process, writes a syn
 
 Administrative mutations are wrapped in a durable, append-only audit sequence. An attempt record with sensitive context keys redacted must persist before the mutation begins. A correlated success, failure, or denial record follows the operation. Terminal audit-write failure is surfaced to operational reporting but does not misrepresent an already committed one-time result as rolled back. Audit queries are authenticated and bounded; callers must continue to avoid putting secret values in free-form messages or nonsensitive context fields.
 
+Retention is a controller/standalone responsibility and is disabled by default. Successful media
+bytes refresh a throttled durable playback-activity timestamp; manifests and failed segment
+responses do not. An enabled session policy first fences an inactive unpinned session and revokes
+its grants transactionally, then stops local or remote producers and removes credentials/cache
+before final deletion. Pending finalization is retried on every sweep and during startup recovery.
+The stale-user policy queries only ordinary identities without owned sessions or live channels,
+rechecks revision and last-seen time transactionally, skips active browser sessions, and never
+purges administrators or owners.
+
+Browser provider tokens remain in the configured secret-store adapter. A durable non-secret
+credential index lets logout, expiry, startup recovery, and user deletion find those secrets even
+after the in-memory browser-session map is lost. Credential publication, cleanup, and user deletion
+are serialized; the index is removed only after secret deletion succeeds so transient failures stay
+retryable.
+
 The domain and application ports accept provider identifiers without enumerating a vendor. Adding
 Plex, Emby, or another provider still requires an adapter plus explicit contract, authentication,
 composition, and dashboard integration because the current public setup/sign-in surface is
@@ -121,11 +136,19 @@ No permanent alternate rendition is generated. The producer starts at the demand
 uses a low/high watermark buffer. By default it catches up at up to approximately 2× while
 headroom is at or below 30 seconds, backpressures the same source connection at 60 seconds, and
 does not resume catch-up until the low watermark is reached. Both watermarks are configurable and
-the hysteresis prevents rapid pacing oscillation. Headroom is measured from the completed segment
-timeline against a one-speed playback clock anchored when the producer generation starts. Segment
-requests remain demand and seek evidence; an eager player downloading every available segment does
-not collapse measured playback headroom to zero. It stops after 60 seconds without demand by
-default (configurable from 15–600 seconds).
+the hysteresis prevents rapid pacing oscillation. FFmpeg retains a structured 2× source-read safety
+ceiling, with its initial read allowance set to the same duration as the high watermark so the
+application pacer takes ownership before FFmpeg begins enforcing that ceiling. Headroom is measured
+from the completed segment timeline against a one-speed playback clock anchored when the producer
+generation starts. Segment requests remain demand and seek evidence; an eager player downloading
+every available segment does not collapse measured playback headroom to zero. It stops after 60
+seconds without demand by default (configurable from 15–600 seconds). A segment response still
+waiting on that producer temporarily suppresses only the idle stop for its generation; disconnect,
+completion, or the bounded request deadline releases the waiter, while explicit stop, deletion,
+seek switching, and lease loss remain authoritative. After a generation has published at least one
+segment, a progress watchdog is armed only while it is catching up for a pending response. Each
+publication resets the grace period, buffered operation or the last waiter leaving disarms it, and a
+true publication stall restarts a fenced generation within the original response deadline.
 Each source worker admits at most the configured global and per-provider producer limits (default
 two, bounded by its worker capacity). A distant playback window must win the active-viewer
 majority before a replacement generation is started; replacements are not artificially delayed.

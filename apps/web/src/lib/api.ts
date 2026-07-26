@@ -27,6 +27,7 @@ import type {
   CreateProviderBindingRequest,
   CreateProviderRequest,
   CreateSessionRequest,
+  RetentionConfiguration,
   SignInConfigurationRequest,
   RuntimeConfiguration,
   SessionControlRequest,
@@ -50,6 +51,7 @@ import {
   deleteProvider,
   deleteProviderBinding,
   deleteSession,
+  deleteUser,
   drainNode,
   evictCache,
   getHealth,
@@ -60,6 +62,7 @@ import {
   getSignInStatus,
   getProviderItem,
   getReadiness,
+  getRetentionConfiguration,
   getRuntimeConfiguration,
   getSession,
   getVodProducer,
@@ -98,6 +101,7 @@ import {
   validateRuntimeConfiguration,
   updateSignInConfiguration,
   updateUser,
+  updateRetentionConfiguration,
   updateRuntimeConfiguration
 } from '#lib/generated/vrrelay-api/sdk.gen';
 
@@ -229,6 +233,9 @@ export const api = {
       environment: 'development' | 'production';
       version: string;
     }>(updateRuntimeConfiguration({ ...required, body })),
+  retentionConfiguration: () => result<RetentionConfiguration>(getRetentionConfiguration(required)),
+  updateRetentionConfiguration: (body: RetentionConfiguration) =>
+    result<RetentionConfiguration>(updateRetentionConfiguration({ ...required, body })),
   restartRuntime: () => result<{ restarting: true }>(restartRuntime(required)),
   setupStatus: () =>
     result<{ configured: boolean; requiresToken: boolean }>(getSetupStatus(required)),
@@ -308,6 +315,8 @@ export const api = {
     result<{ value: import('@vrrelay/domain').UserIdentity; revision: number }>(
       updateUser({ ...required, path: { userId }, body })
     ),
+  deleteUser: (userId: string, expectedRevision: number) =>
+    result<void>(deleteUser({ ...required, path: { userId }, query: { expectedRevision } })),
   providers: () => result<{ items: PublicProviderConnection[] }>(listProviders(required)),
   createProvider: (body: CreateProviderRequest) =>
     result<PublicProviderConnection>(createProvider({ ...required, body })),

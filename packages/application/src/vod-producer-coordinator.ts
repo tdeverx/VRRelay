@@ -11,7 +11,7 @@ import type {
   Transcoder,
   VodProducerRequest
 } from './index.js';
-import { CapacityError, ConflictError } from './errors.js';
+import { CapacityError, ConflictError, NotFoundError } from './errors.js';
 import { SessionCache } from './session-cache.js';
 import { VodProducerSourcePacer, type VodProducerSourcePacing } from './vod-source-pacing.js';
 
@@ -19,6 +19,10 @@ const LEASE_MS = 120_000;
 const LEASE_RENEW_MS = 30_000;
 const DEMAND_WINDOW_MS = 30_000;
 const WAIT_FOR_SEGMENT_MS = 125_000;
+const FAILURE_RETRY_MIN_MS = 1_000;
+const FAILURE_RETRY_MAX_MS = 30_000;
+const PROGRESS_STALL_MIN_MS = 45_000;
+const PROGRESS_STALL_ERROR = 'Persistent VOD producer stopped publishing while catching up';
 const ACTIVE_STATES: readonly VodProducer['state'][] = ['starting', 'running', 'switching'];
 
 interface ActiveProducer {
@@ -36,7 +40,52 @@ interface ActiveProducer {
   lastDemandAtMs: number;
   placementLocked: boolean;
   pacing: VodProducerSourcePacer;
+  publishedAny: boolean;
+  pendingWaiters: Set<symbol>;
+  progressWatchStartedAtMs: number | undefined;
+  retryableFailure?: 'progress-stall';
+  failure?: Error;
   stopState?: 'idle' | 'switching' | 'cancelled';
+}
+
+interface StartingProducer {
+  controller: AbortController;
+  completion: Promise<ActiveProducer | undefined>;
+  placementLocked: boolean;
+  stopState?: 'idle' | 'switching' | 'cancelled';
+}
+
+interface ProducerRetry {
+  failures: number;
+  notBeforeMs: number;
+}
+
+export function vodProducerForwardJoinSegments(
+  bufferLowWatermarkMs: number,
+  segmentDurationSeconds: number
+): number {
+  return Math.max(
+    2,
+    Math.ceil(Math.min(bufferLowWatermarkMs, 10_000) / (segmentDurationSeconds * 1_000))
+  );
+}
+
+export function isVodProducerDemandCovered(input: {
+  startSegmentIndex: number;
+  lastPublishedSegmentIndex: number | undefined;
+  demandedSegmentIndex: number;
+  bufferLowWatermarkMs: number;
+  segmentDurationSeconds: number;
+}): boolean {
+  const forwardJoinSegments = vodProducerForwardJoinSegments(
+    input.bufferLowWatermarkMs,
+    input.segmentDurationSeconds
+  );
+  const highWater =
+    (input.lastPublishedSegmentIndex ?? input.startSegmentIndex) + forwardJoinSegments;
+  return (
+    input.demandedSegmentIndex >= input.startSegmentIndex && input.demandedSegmentIndex <= highWater
+  );
 }
 
 export function estimateVodProducerBufferMs(input: {
@@ -71,9 +120,14 @@ export interface VodProducerCoordinatorOptions {
   leaseMs?: number;
   leaseRenewMs?: number;
   waitForSegmentMs?: number;
+  failureRetryMinMs?: number;
+  failureRetryMaxMs?: number;
+  demandRefreshIntervalMs?: number;
+  progressStallTimeoutMs?: number;
 }
 
 export interface VodProducerCallbacks {
+  getSession(sessionId: string): Promise<RelaySession | undefined>;
   acquire?(signal: AbortSignal): Promise<void>;
   prepare(
     session: RelaySession,
@@ -94,8 +148,15 @@ export interface VodProducerCallbacks {
 
 export class VodProducerCoordinator {
   readonly #active = new Map<string, ActiveProducer>();
-  readonly #starting = new Map<string, Promise<ActiveProducer | undefined>>();
+  readonly #starting = new Map<string, StartingProducer>();
   readonly #startReservations = new Map<string, number>();
+  readonly #retries = new Map<string, ProducerRetry>();
+  readonly #stopOperations = new Map<string, Promise<void>>();
+  readonly #sessionFences = new Map<string, number>();
+  readonly #pendingEnsures = new Map<string, number>();
+  #lifecycleFence = 0;
+  #closed = false;
+  #draining = false;
 
   constructor(
     private readonly repository: ClusterRepository,
@@ -114,25 +175,100 @@ export class VodProducerCoordinator {
     segmentIndex: number,
     signal?: AbortSignal
   ): Promise<void> {
+    if (this.#closed) throw new CapacityError('Persistent VOD producer coordination is closed');
+    if (this.#draining) throw new CapacityError('Persistent VOD producer coordination is draining');
+    if (this.#stopOperations.has(session.id))
+      throw new CapacityError('Persistent VOD producer coordination is stopping');
+    const lifecycleFence = this.#lifecycleFence;
+    const sessionFence = this.#sessionFences.get(session.id) ?? 0;
+    this.#pendingEnsures.set(session.id, (this.#pendingEnsures.get(session.id) ?? 0) + 1);
+    try {
+      await this.#ensureRequest(
+        session,
+        profile,
+        segmentIndex,
+        lifecycleFence,
+        sessionFence,
+        signal
+      );
+    } finally {
+      const remaining = (this.#pendingEnsures.get(session.id) ?? 1) - 1;
+      if (remaining > 0) {
+        this.#pendingEnsures.set(session.id, remaining);
+      } else {
+        this.#pendingEnsures.delete(session.id);
+        if (!this.#stopOperations.has(session.id)) this.#sessionFences.delete(session.id);
+      }
+    }
+  }
+
+  async #ensureRequest(
+    session: RelaySession,
+    profile: ProfileRevision,
+    segmentIndex: number,
+    lifecycleFence: number,
+    sessionFence: number,
+    signal?: AbortSignal
+  ): Promise<void> {
     const contentKey = this.cache.contentKey(session, profile, segmentIndex);
     const deadline = Date.now() + (this.options.waitForSegmentMs ?? WAIT_FOR_SEGMENT_MS);
     while (Date.now() < deadline) {
       if (signal?.aborted) throw signal.reason ?? new Error('Segment request was aborted');
       if (await this.objectStore?.stat(contentKey)) return;
+      this.#assertLifecycleNotFenced(lifecycleFence);
+      const currentSession = await this.callbacks.getSession(session.id);
+      if (!currentSession) {
+        this.#retries.delete(session.id);
+        await this.#stopProducer(session.id, 'cancelled');
+        throw new NotFoundError('Session was not found');
+      }
+      if (currentSession.state === 'stopped') {
+        this.#retries.delete(session.id);
+        await this.#stopProducer(session.id, 'cancelled');
+        throw new ConflictError('Session is stopped');
+      }
+      await this.#assertRequestNotFenced(session.id, lifecycleFence, sessionFence);
       let active = this.#active.get(session.id);
+      if (!active) {
+        const retryDelayMs = this.#retryDelayMs(session.id);
+        if (retryDelayMs > 0) {
+          await this.#delay(Math.min(retryDelayMs, deadline - Date.now()), signal);
+          continue;
+        }
+      }
       const dominant = await this.#dominantDemand(session.id, profile, segmentIndex, active);
+      await this.#assertRequestNotFenced(session.id, lifecycleFence, sessionFence);
       if (
         active &&
-        this.#shouldSwitch(active, dominant.index, dominant.currentViewers, dominant.viewers)
+        this.#shouldSwitch(
+          active,
+          dominant.index,
+          dominant.currentViewers,
+          dominant.viewers,
+          profile.delivery.segmentDuration
+        )
       ) {
-        await this.#stopActive(session.id, 'switching');
+        await this.#stopProducer(session.id, 'switching');
         active = undefined;
+        await this.#assertRequestNotFenced(session.id, lifecycleFence, sessionFence);
       }
       // An HTTP client may leave while the producer warms.  Its signal must
       // only detach that waiter, never cancel the shared producer.
-      active ??= await this.#start(session, profile, dominant.index);
+      active ??= await this.#start(
+        currentSession,
+        profile,
+        dominant.index,
+        lifecycleFence,
+        sessionFence
+      );
+      if (signal?.aborted) throw signal.reason ?? new Error('Segment request was aborted');
+      await this.#assertRequestNotFenced(session.id, lifecycleFence, sessionFence);
       if (!active) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        const retryDelayMs = this.#retryDelayMs(session.id);
+        await this.#delay(
+          Math.min(retryDelayMs > 0 ? retryDelayMs : 250, deadline - Date.now()),
+          signal
+        );
         continue;
       }
       const demandedAt = Math.max(active.lastDemandAtMs, dominant.observedAtMs ?? 0);
@@ -156,7 +292,22 @@ export class VodProducerCoordinator {
   }
 
   async stop(sessionId: string): Promise<void> {
-    await this.#stopActive(sessionId, 'cancelled');
+    const previous = this.#stopOperations.get(sessionId);
+    const operation = (async () => {
+      await previous?.catch(() => undefined);
+      this.#retries.delete(sessionId);
+      this.#sessionFences.set(sessionId, (this.#sessionFences.get(sessionId) ?? 0) + 1);
+      await this.#stopProducer(sessionId, 'cancelled');
+    })();
+    this.#stopOperations.set(sessionId, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.#stopOperations.get(sessionId) === operation) {
+        this.#stopOperations.delete(sessionId);
+        if (!this.#pendingEnsures.has(sessionId)) this.#sessionFences.delete(sessionId);
+      }
+    }
   }
 
   async list(limit = 100): Promise<VodProducer[]> {
@@ -205,39 +356,68 @@ export class VodProducerCoordinator {
   }
 
   async close(): Promise<void> {
-    await Promise.all(
-      [...this.#active.keys()].map((sessionId) => this.#stopActive(sessionId, 'idle'))
-    );
+    this.#closed = true;
+    this.#lifecycleFence += 1;
+    const sessionIds = new Set([...this.#active.keys(), ...this.#starting.keys()]);
+    await Promise.all([...sessionIds].map((sessionId) => this.#stopProducer(sessionId, 'idle')));
+    this.#retries.clear();
   }
 
   async drain(): Promise<void> {
-    await Promise.all(
-      [...this.#active.entries()].map(([sessionId, active]) =>
-        this.#stopActive(sessionId, active.placementLocked ? 'cancelled' : 'switching')
-      )
-    );
+    if (this.#closed) return;
+    this.#draining = true;
+    this.#lifecycleFence += 1;
+    try {
+      const sessionIds = new Set([...this.#active.keys(), ...this.#starting.keys()]);
+      await Promise.all(
+        [...sessionIds].map((sessionId) =>
+          this.#stopProducer(
+            sessionId,
+            (this.#active.get(sessionId)?.placementLocked ??
+              this.#starting.get(sessionId)?.placementLocked)
+              ? 'cancelled'
+              : 'switching'
+          )
+        )
+      );
+    } finally {
+      this.#draining = false;
+    }
   }
 
   async #start(
     session: RelaySession,
     profile: ProfileRevision,
     startSegmentIndex: number,
-    _signal?: AbortSignal
+    lifecycleFence: number,
+    sessionFence: number
   ): Promise<ActiveProducer | undefined> {
+    await this.#assertRequestNotFenced(session.id, lifecycleFence, sessionFence);
     const existing = this.#starting.get(session.id);
-    if (existing) return existing;
-    const start = this.#startExclusive(session, profile, startSegmentIndex).finally(() => {
-      this.#starting.delete(session.id);
+    if (existing) return existing.completion;
+    if (this.#retryDelayMs(session.id) > 0) return undefined;
+    const starting: StartingProducer = {
+      controller: new AbortController(),
+      completion: Promise.resolve(undefined),
+      placementLocked: session.placementLocked
+    };
+    starting.completion = this.#startExclusive(
+      session,
+      profile,
+      startSegmentIndex,
+      starting
+    ).finally(() => {
+      if (this.#starting.get(session.id) === starting) this.#starting.delete(session.id);
     });
-    this.#starting.set(session.id, start);
-    return start;
+    this.#starting.set(session.id, starting);
+    return starting.completion;
   }
 
   async #startExclusive(
     session: RelaySession,
     profile: ProfileRevision,
     startSegmentIndex: number,
-    _signal?: AbortSignal
+    starting: StartingProducer
   ): Promise<ActiveProducer | undefined> {
     const providerId = session.source?.providerId;
     if (!providerId) throw new CapacityError('The VOD session has no provider source');
@@ -252,13 +432,34 @@ export class VodProducerCoordinator {
       throw new CapacityError('The source worker has reached its VOD producer capacity');
     }
     let reserved = true;
+    let leaseOwned = false;
+    let handedOff = false;
+    let persistedGeneration: number | undefined;
     const owner = `${this.options.nodeId}:${randomUUID()}`;
     const leaseKey = `vod-producer:${session.id}`;
     const leaseMs = this.options.leaseMs ?? LEASE_MS;
-    const controller = new AbortController();
+    const controller = starting.controller;
     try {
-      if (!(await this.coordination.acquire(leaseKey, owner, leaseMs))) return undefined;
+      leaseOwned = await this.coordination.acquire(leaseKey, owner, leaseMs);
+      if (!leaseOwned || controller.signal.aborted) return undefined;
+      const currentSession = await this.callbacks.getSession(session.id);
+      if (controller.signal.aborted) return undefined;
+      if (!currentSession) throw new NotFoundError('Session was not found');
+      if (currentSession.state === 'stopped') throw new ConflictError('Session is stopped');
+      const currentProviderId = currentSession.source?.providerId;
+      if (!currentProviderId)
+        throw new CapacityError('The durable VOD session has no provider source');
+      if (currentProviderId !== providerId)
+        throw new ConflictError('The VOD session source changed during producer start');
+      if (
+        currentSession.placementLocked &&
+        currentSession.assignedNodeId &&
+        currentSession.assignedNodeId !== this.options.nodeId
+      )
+        throw new CapacityError('The session is locked to another source worker');
+      starting.placementLocked = currentSession.placementLocked;
       const current = await this.repository.getVersionedVodProducer(session.id);
+      if (controller.signal.aborted) return undefined;
       const generation = (current?.value.generation ?? 0) + 1;
       const playbackAnchorAtMs = Date.now();
       const now = new Date(playbackAnchorAtMs).toISOString();
@@ -300,6 +501,8 @@ export class VodProducerCoordinator {
         : await this.repository.createVodProducer(producer);
       if ('applied' in stored && !stored.applied)
         throw new ConflictError('Producer ownership changed during start');
+      persistedGeneration = generation;
+      if (controller.signal.aborted) return undefined;
       const active: ActiveProducer = {
         generation,
         controller,
@@ -312,18 +515,37 @@ export class VodProducerCoordinator {
         lastAppliedPlaybackAnchorAtMs: playbackAnchorAtMs,
         demandedSegmentIndex: startSegmentIndex,
         lastDemandAtMs: Date.now(),
-        placementLocked: session.placementLocked,
-        pacing: new VodProducerSourcePacer()
+        placementLocked: currentSession.placementLocked,
+        pacing: new VodProducerSourcePacer(),
+        publishedAny: false,
+        pendingWaiters: new Set(),
+        progressWatchStartedAtMs: undefined,
+        ...(starting.stopState ? { stopState: starting.stopState } : {})
       };
       this.#active.set(session.id, active);
+      handedOff = true;
       this.#releaseReservation(providerId);
       reserved = false;
-      active.completion = this.#run(session, profile, producer, active, leaseKey);
+      active.completion = this.#run(currentSession, profile, producer, active, leaseKey);
       return active;
     } catch (error) {
-      await this.coordination.release(leaseKey, owner).catch(() => undefined);
+      if (controller.signal.aborted) return undefined;
       throw error;
     } finally {
+      if (!handedOff && persistedGeneration !== undefined) {
+        const state = starting.stopState ?? 'cancelled';
+        await this.#transition(session.id, persistedGeneration, (current) => ({
+          ...this.#finishAttempt(current, 'cancelled'),
+          state,
+          ownerNodeId: undefined,
+          leaseExpiresAt: undefined,
+          idleDeadlineAt: undefined,
+          errorMessage: undefined,
+          updatedAt: new Date().toISOString()
+        })).catch(() => undefined);
+      }
+      if (leaseOwned && !handedOff)
+        await this.coordination.release(leaseKey, owner).catch(() => undefined);
       if (reserved) this.#releaseReservation(providerId);
     }
   }
@@ -384,6 +606,19 @@ export class VodProducerCoordinator {
         active.pacing,
         active.generation
       );
+      const ffmpegDurationSeconds = Number(request.duration.toFixed(3));
+      const remainingSegmentCount = Math.ceil(
+        ffmpegDurationSeconds / profile.delivery.segmentDuration
+      );
+      if (
+        !Number.isFinite(request.duration) ||
+        !Number.isFinite(ffmpegDurationSeconds) ||
+        ffmpegDurationSeconds <= 0 ||
+        remainingSegmentCount < 1
+      )
+        throw new CapacityError('The persistent VOD producer received an invalid duration');
+      const terminalSegmentIndex = request.startSegmentIndex + remainingSegmentCount - 1;
+      let terminalSegmentPublished = false;
       await this.#transition(initial.sessionId, active.generation, (current) => ({
         ...current,
         state: 'running',
@@ -404,15 +639,18 @@ export class VodProducerCoordinator {
       }, this.options.leaseRenewMs ?? LEASE_RENEW_MS);
       renewal.unref();
       let refreshing = false;
-      idleCheck = setInterval(() => {
-        if (refreshing) return;
-        refreshing = true;
-        void this.#refreshDemand(session, profile, active)
-          .catch((error) => active.controller.abort(error))
-          .finally(() => {
-            refreshing = false;
-          });
-      }, 2_000);
+      idleCheck = setInterval(
+        () => {
+          if (refreshing) return;
+          refreshing = true;
+          void this.#refreshDemand(session, profile, active)
+            .catch((error) => active.controller.abort(error))
+            .finally(() => {
+              refreshing = false;
+            });
+        },
+        Math.max(1, this.options.demandRefreshIntervalMs ?? 2_000)
+      );
       idleCheck.unref();
       this.metrics?.increment('vod_producers_started_total');
       if (!this.transcoder.produceVod)
@@ -431,8 +669,12 @@ export class VodProducerCoordinator {
               segment.path,
               contentKey
             );
+            active.publishedAny = true;
+            terminalSegmentPublished ||= segment.index >= terminalSegmentIndex;
+            this.#retries.delete(session.id);
             active.lastPublishedSegmentIndex = segment.index;
             this.#reconcilePacing(profile, active);
+            this.#resetProgressWatch(active, Date.now());
             await this.#transition(session.id, active.generation, (current) => ({
               ...current,
               state: 'running',
@@ -463,6 +705,13 @@ export class VodProducerCoordinator {
         },
         active.controller.signal
       );
+      if (active.controller.signal.aborted)
+        throw active.controller.signal.reason ?? new Error('Producer was aborted');
+      if (!terminalSegmentPublished)
+        throw new Error(
+          `Persistent VOD producer completed before publishing terminal segment ${terminalSegmentIndex}`
+        );
+      this.#retries.delete(session.id);
       await this.#transition(session.id, active.generation, (current) => ({
         ...this.#finishAttempt(current, 'complete'),
         state: 'complete',
@@ -475,6 +724,13 @@ export class VodProducerCoordinator {
     } catch (error) {
       const stopped = active.controller.signal.aborted ? active.stopState : undefined;
       const state = stopped ?? 'failed';
+      if (state === 'failed') {
+        active.failure =
+          error instanceof Error ? error : new Error('Persistent VOD producer failed');
+        this.#recordFailure(session.id, active.publishedAny);
+      } else {
+        this.#retries.delete(session.id);
+      }
       await this.#transition(session.id, active.generation, (current) => ({
         ...this.#finishAttempt(
           current,
@@ -512,6 +768,16 @@ export class VodProducerCoordinator {
     profile: ProfileRevision,
     active: ActiveProducer
   ): Promise<void> {
+    if (active.controller.signal.aborted) return;
+    const currentSession = await this.callbacks.getSession(session.id);
+    if (!currentSession || currentSession.state === 'stopped') {
+      this.#retries.delete(session.id);
+      active.stopState = 'cancelled';
+      active.controller.abort(
+        new Error(currentSession ? 'Session was stopped' : 'Session was deleted')
+      );
+      return;
+    }
     const now = Date.now();
     const demands = await this.coordination.listSegmentDemands({
       sessionId: session.id,
@@ -520,7 +786,7 @@ export class VodProducerCoordinator {
     });
     const latest = Math.max(active.lastDemandAtMs, ...demands.map((demand) => demand.observedAtMs));
     active.lastDemandAtMs = latest;
-    if (now - latest >= this.options.idleTimeoutMs) {
+    if (active.pendingWaiters.size === 0 && now - latest >= this.options.idleTimeoutMs) {
       active.stopState = 'idle';
       active.controller.abort(new Error('Producer became idle'));
       return;
@@ -531,7 +797,15 @@ export class VodProducerCoordinator {
       active.demandedSegmentIndex,
       active
     );
-    if (this.#shouldSwitch(active, dominant.index, dominant.currentViewers, dominant.viewers)) {
+    if (
+      this.#shouldSwitch(
+        active,
+        dominant.index,
+        dominant.currentViewers,
+        dominant.viewers,
+        profile.delivery.segmentDuration
+      )
+    ) {
       active.stopState = 'switching';
       active.controller.abort(new Error('Producer playback window changed'));
       return;
@@ -539,6 +813,12 @@ export class VodProducerCoordinator {
     this.#applyPlaybackAnchor(active, dominant);
     active.demandedSegmentIndex = dominant.index;
     this.#reconcilePacing(profile, active);
+    if (this.#progressStalled(profile, active, Date.now())) {
+      active.retryableFailure = 'progress-stall';
+      this.metrics?.increment('vod_producer_progress_stalls_total');
+      active.controller.abort(new Error(PROGRESS_STALL_ERROR));
+      return;
+    }
     await this.#transition(session.id, active.generation, (current) => ({
       ...current,
       demandedSegmentIndex: dominant.index,
@@ -551,12 +831,28 @@ export class VodProducerCoordinator {
     }));
   }
 
-  async #stopActive(sessionId: string, state: 'idle' | 'switching' | 'cancelled'): Promise<void> {
+  async #stopProducer(sessionId: string, state: 'idle' | 'switching' | 'cancelled'): Promise<void> {
+    const activeBeforeStartSettled = this.#active.get(sessionId);
+    if (activeBeforeStartSettled) {
+      activeBeforeStartSettled.stopState = state;
+      activeBeforeStartSettled.controller.abort(new Error(`Producer stopped: ${state}`));
+    }
+    const starting = this.#starting.get(sessionId);
+    if (starting) {
+      starting.stopState = state;
+      starting.controller.abort(new Error(`Producer stopped while starting: ${state}`));
+      await starting.completion.catch(() => undefined);
+    }
     const active = this.#active.get(sessionId);
-    if (!active) return;
-    active.stopState = state;
-    active.controller.abort(new Error(`Producer stopped: ${state}`));
-    await active.completion;
+    if (active && active !== activeBeforeStartSettled) {
+      active.stopState = state;
+      active.controller.abort(new Error(`Producer stopped: ${state}`));
+    }
+    await Promise.all(
+      [activeBeforeStartSettled, active]
+        .filter((candidate): candidate is ActiveProducer => Boolean(candidate))
+        .map((candidate) => candidate.completion)
+    );
   }
 
   async #waitForObject(
@@ -568,13 +864,102 @@ export class VodProducerCoordinator {
   ): Promise<boolean> {
     if (!this.objectStore)
       throw new CapacityError('Persistent VOD producers require an object store');
-    while (Date.now() < deadline) {
-      if (signal?.aborted) throw signal.reason ?? new Error('Segment request was aborted');
-      if (await this.objectStore.stat(contentKey)) return true;
-      if (this.#active.get(sessionId) !== active) return false;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    const waiter = Symbol();
+    const firstWaiter = active.pendingWaiters.size === 0;
+    active.pendingWaiters.add(waiter);
+    if (firstWaiter) this.#resetProgressWatch(active, Date.now());
+    try {
+      while (Date.now() < deadline) {
+        if (signal?.aborted) throw signal.reason ?? new Error('Segment request was aborted');
+        if (await this.objectStore.stat(contentKey)) return true;
+        if (this.#active.get(sessionId) !== active) {
+          if (active.failure) {
+            if (active.retryableFailure === 'progress-stall') return false;
+            const currentSession = await this.callbacks.getSession(sessionId);
+            if (!currentSession) {
+              this.#retries.delete(sessionId);
+              throw new NotFoundError('Session was not found');
+            }
+            if (currentSession.state === 'stopped') {
+              this.#retries.delete(sessionId);
+              throw new ConflictError('Session is stopped');
+            }
+            throw new CapacityError(
+              'Persistent VOD producer failed before publishing the requested segment'
+            );
+          }
+          return false;
+        }
+        await this.#delay(Math.min(100, deadline - Date.now()), signal);
+      }
+      return false;
+    } finally {
+      active.pendingWaiters.delete(waiter);
+      if (active.pendingWaiters.size === 0) active.progressWatchStartedAtMs = undefined;
     }
-    return false;
+  }
+
+  #retryDelayMs(sessionId: string): number {
+    return Math.max(0, (this.#retries.get(sessionId)?.notBeforeMs ?? 0) - Date.now());
+  }
+
+  async #assertRequestNotFenced(
+    sessionId: string,
+    lifecycleFence: number,
+    sessionFence: number
+  ): Promise<void> {
+    this.#assertLifecycleNotFenced(lifecycleFence);
+    const fenced =
+      sessionFence !== (this.#sessionFences.get(sessionId) ?? 0) ||
+      this.#stopOperations.has(sessionId);
+    if (!fenced) return;
+    const currentSession = await this.callbacks.getSession(sessionId);
+    if (!currentSession) {
+      this.#retries.delete(sessionId);
+      throw new NotFoundError('Session was not found');
+    }
+    if (currentSession.state === 'stopped') {
+      this.#retries.delete(sessionId);
+      throw new ConflictError('Session is stopped');
+    }
+    throw new CapacityError('Persistent VOD producer coordination was stopped');
+  }
+
+  #assertLifecycleNotFenced(lifecycleFence: number): void {
+    if (this.#closed || this.#draining || lifecycleFence !== this.#lifecycleFence)
+      throw new CapacityError('Persistent VOD producer coordination was stopped');
+  }
+
+  #recordFailure(sessionId: string, publishedAny: boolean): void {
+    const previous = this.#retries.get(sessionId);
+    const failures = publishedAny ? 1 : (previous?.failures ?? 0) + 1;
+    const minimum = Math.max(1, this.options.failureRetryMinMs ?? FAILURE_RETRY_MIN_MS);
+    const maximum = Math.max(minimum, this.options.failureRetryMaxMs ?? FAILURE_RETRY_MAX_MS);
+    this.#retries.set(sessionId, {
+      failures,
+      notBeforeMs: Date.now() + Math.min(maximum, minimum * 2 ** Math.min(failures - 1, 10))
+    });
+  }
+
+  async #delay(delayMs: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw signal.reason ?? new Error('Segment request was aborted');
+    if (delayMs <= 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const complete = () => {
+        signal?.removeEventListener('abort', abort);
+        resolve();
+      };
+      const abort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        reject(signal?.reason ?? new Error('Segment request was aborted'));
+      };
+      const timer = setTimeout(complete, delayMs);
+      if (signal) {
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) abort();
+      }
+    });
   }
 
   async #dominantDemand(
@@ -669,17 +1054,18 @@ export class VodProducerCoordinator {
     active: ActiveProducer,
     demandedIndex: number,
     currentViewers: number,
-    demandedViewers: number
+    demandedViewers: number,
+    segmentDurationSeconds: number
   ): boolean {
     // A player can request ahead of the current file while the producer fills
     // its low watermark.  Those requests join the same generation.
-    const forwardJoinSegments = Math.max(
-      2,
-      Math.ceil(Math.min(this.options.bufferLowWatermarkMs, 10_000) / 2_000)
-    );
-    const highWater =
-      (active.lastPublishedSegmentIndex ?? active.startSegmentIndex) + forwardJoinSegments;
-    const covered = demandedIndex >= active.startSegmentIndex && demandedIndex <= highWater;
+    const covered = isVodProducerDemandCovered({
+      startSegmentIndex: active.startSegmentIndex,
+      lastPublishedSegmentIndex: active.lastPublishedSegmentIndex,
+      demandedSegmentIndex: demandedIndex,
+      bufferLowWatermarkMs: this.options.bufferLowWatermarkMs,
+      segmentDurationSeconds
+    });
     return !covered && (currentViewers === 0 || demandedViewers > currentViewers);
   }
 
@@ -691,10 +1077,45 @@ export class VodProducerCoordinator {
       playbackAnchorAtMs: active.playbackAnchorAtMs,
       observedAtMs: Date.now()
     });
-    if (active.pacing.state === 'catching_up' && bufferMs >= this.options.bufferHighWatermarkMs)
+    if (active.pacing.state === 'catching_up' && bufferMs >= this.options.bufferHighWatermarkMs) {
       active.pacing.pause();
-    else if (active.pacing.state === 'buffered' && bufferMs <= this.options.bufferLowWatermarkMs)
+      active.progressWatchStartedAtMs = undefined;
+    } else if (
+      active.pacing.state === 'buffered' &&
+      bufferMs <= this.options.bufferLowWatermarkMs
+    ) {
       active.pacing.resume();
+      this.#resetProgressWatch(active, Date.now());
+    }
+  }
+
+  #resetProgressWatch(active: ActiveProducer, observedAtMs: number): void {
+    active.progressWatchStartedAtMs =
+      active.publishedAny && active.pendingWaiters.size > 0 && active.pacing.state === 'catching_up'
+        ? observedAtMs
+        : undefined;
+  }
+
+  #progressStalled(
+    profile: ProfileRevision,
+    active: ActiveProducer,
+    observedAtMs: number
+  ): boolean {
+    if (
+      !active.publishedAny ||
+      active.pendingWaiters.size === 0 ||
+      active.pacing.state !== 'catching_up' ||
+      active.progressWatchStartedAtMs === undefined
+    )
+      return false;
+    const configuredTimeoutMs = this.options.progressStallTimeoutMs;
+    const timeoutMs =
+      configuredTimeoutMs !== undefined &&
+      Number.isFinite(configuredTimeoutMs) &&
+      configuredTimeoutMs > 0
+        ? configuredTimeoutMs
+        : Math.max(PROGRESS_STALL_MIN_MS, profile.delivery.segmentDuration * 2 * 1_000);
+    return observedAtMs - active.progressWatchStartedAtMs >= timeoutMs;
   }
 
   async #transition(

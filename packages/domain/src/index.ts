@@ -245,6 +245,8 @@ export const RelaySessionSchema = z
     placementLocked: z.boolean().default(false),
     preferredRegion: z.string().optional(),
     ownerId: z.string().min(1).optional(),
+    lastPlaybackActivityAt: z.iso.datetime().optional(),
+    deletionPending: z.boolean().optional(),
     outputUrls: z.record(z.string(), z.url()),
     errorMessage: z.string().optional(),
     createdAt: z.iso.datetime(),
@@ -520,6 +522,7 @@ export const SessionRuntimeStatsSchema = z.object({
   cacheHits: z.number().int().nonnegative(),
   cacheMisses: z.number().int().nonnegative(),
   cacheHitRatio: z.number().min(0).max(1).nullable(),
+  lastPlaybackActivityAt: z.iso.datetime().optional(),
   observedAt: z.iso.datetime()
 });
 export type SessionRuntimeStats = z.infer<typeof SessionRuntimeStatsSchema>;

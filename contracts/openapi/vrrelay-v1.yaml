@@ -79,6 +79,19 @@ paths:
                 required: [restarting]
                 properties: { restarting: { type: boolean, const: true } }
         '409': { $ref: '#/components/responses/Error' }
+  /configuration/retention:
+    get:
+      operationId: getRetentionConfiguration
+      tags: [System]
+      responses:
+        '200': { $ref: '#/components/responses/RetentionConfiguration' }
+    put:
+      operationId: updateRetentionConfiguration
+      tags: [System]
+      requestBody: { $ref: '#/components/requestBodies/RetentionConfiguration' }
+      responses:
+        '200': { $ref: '#/components/responses/RetentionConfiguration' }
+        '400': { $ref: '#/components/responses/Error' }
   /setup:
     get:
       operationId: getSetupStatus
@@ -199,6 +212,19 @@ paths:
       requestBody: { $ref: '#/components/requestBodies/UpdateUser' }
       responses:
         '200': { $ref: '#/components/responses/UserRecord' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteUser
+      tags: [Users]
+      parameters:
+        - { $ref: '#/components/parameters/UserId' }
+        - name: expectedRevision
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: User identity and active browser sessions deleted }
+        '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
 
   /providers:
@@ -730,6 +756,10 @@ components:
       required: true
       content:
         application/json: { schema: { $ref: '#/components/schemas/RuntimeConfiguration' } }
+    RetentionConfiguration:
+      required: true
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/RetentionConfiguration' } }
     EvictCache:
       {
         required: true,
@@ -983,6 +1013,10 @@ components:
       description: Redacted runtime configuration and activation state
       content:
         application/json: { schema: { $ref: '#/components/schemas/RuntimeConfigurationState' } }
+    RetentionConfiguration:
+      description: Automatic idle-session deletion and stale-user purge policy
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/RetentionConfiguration' } }
     CacheList:
       {
         description: Cache inventory without filesystem paths,
@@ -1170,6 +1204,21 @@ components:
         roles: { type: array, minItems: 1, items: { $ref: '#/components/schemas/UserRole' } }
         defaultProfileId: { type: string }
         allowedProfileIds: { type: array, items: { type: string } }
+    RetentionConfiguration:
+      type: object
+      additionalProperties: false
+      required: [sessionInactivityDeletionHours, staleUserPurgeDays]
+      properties:
+        sessionInactivityDeletionHours:
+          description: Hours without successful media delivery before an unpinned session is deleted.
+          anyOf:
+            - { type: integer, minimum: 1, maximum: 8760 }
+            - { type: 'null' }
+        staleUserPurgeDays:
+          description: Days since sign-in before an inactive non-administrator identity is purged.
+          anyOf:
+            - { type: integer, minimum: 30, maximum: 3650 }
+            - { type: 'null' }
     AuthenticationMode: { type: string, enum: [user_token, api_key, delegated] }
     PlatformMode: { type: string, enum: [universal, pc, quest, dual] }
     PlacementPolicy: { type: string, enum: [local, hosted, auto] }
@@ -1488,6 +1537,8 @@ components:
         placementLocked: { type: boolean }
         preferredRegion: { type: string }
         ownerId: { type: string }
+        lastPlaybackActivityAt: { type: string, format: date-time }
+        deletionPending: { type: boolean }
         outputUrls: { type: object, additionalProperties: { type: string, format: uri } }
         errorMessage: { type: string }
         createdAt: { type: string, format: date-time }
@@ -1542,6 +1593,7 @@ components:
         cacheHits: { type: integer, minimum: 0 }
         cacheMisses: { type: integer, minimum: 0 }
         cacheHitRatio: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        lastPlaybackActivityAt: { type: string, format: date-time }
         observedAt: { type: string, format: date-time }
     VodProducer:
       type: object

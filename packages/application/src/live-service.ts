@@ -128,6 +128,8 @@ export class LiveService {
       maxPerOwner: this.options.maxChannelsPerOwner ?? 4
     });
     if (!created.created) {
+      if (created.reason === 'owner-not-found')
+        throw new ConflictError('The user no longer exists');
       if (created.reason === 'owner-limit')
         throw new CapacityError('The user has reached the live-channel limit');
       throw new CapacityError('The installation has reached its live-channel limit');

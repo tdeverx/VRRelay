@@ -34,6 +34,7 @@ The controller must exist before it can issue single-use node tokens. Start with
 ```bash
 helm upgrade --install vrrelay ./deploy/kubernetes \
   --namespace vrrelay \
+  --set image.tag=latest \
   --set sourceWorker.enabled=false \
   --set ingestOrigin.enabled=false \
   --set edge.enabled=false
@@ -44,6 +45,7 @@ Complete first-run setup, create one scoped join token for each role, and create
 ```bash
 helm upgrade vrrelay ./deploy/kubernetes \
   --namespace vrrelay \
+  --set image.tag=latest \
   --set sourceWorker.enabled=true \
   --set ingestOrigin.enabled=true \
   --set edge.enabled=true
@@ -57,7 +59,12 @@ The chart cannot hash externally managed Secret contents by itself. When changin
 
 NetworkPolicies are enabled by default. `networkPolicy.externalEgress` allows the relay roles to reach PostgreSQL, Valkey, object storage, and external APIs by CIDR while excluding link-local metadata ranges by default. Tighten those CIDRs to your VPC, private network, or egress gateway before release. `networkPolicy.webrtcUdpEgress` separately scopes the MediaMTX origin's high UDP range used for WebRTC ICE.
 
-Release-style Helm installs should set both `image.digest` and `mediaMtx.image.digest`. When a digest is supplied, the chart renders `repository@sha256:...` for the relay and MediaMTX workloads instead of relying on mutable tags.
+The source chart defaults to the rolling relay `latest` tag for a functional
+mutable install. The build-numbered chart attached to each GitHub release
+instead pins `image.repository` and `image.digest` to that build's immutable
+OCI image. Release-style installs should also set `mediaMtx.image.digest` to an
+audited MediaMTX digest. When a digest is supplied, the chart renders
+`repository@sha256:...` instead of relying on a mutable tag.
 
 ## Public endpoints
 

@@ -5,6 +5,7 @@
   import {
     Activity,
     Antenna,
+    Clock3,
     Database,
     Film,
     HardDrive,
@@ -76,6 +77,12 @@
             href: `${routePrefix}/settings/people`,
             icon: UsersRound,
             visible: isOwner
+          },
+          {
+            label: 'Retention',
+            href: `${routePrefix}/settings/retention`,
+            icon: Clock3,
+            visible: isAdmin
           },
           {
             label: 'Connections',

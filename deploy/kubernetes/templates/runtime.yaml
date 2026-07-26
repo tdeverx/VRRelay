@@ -1,5 +1,5 @@
 {{- $root := . -}}
-{{- $imageTag := default .Chart.AppVersion .Values.image.tag -}}
+{{- $imageTag := default "latest" .Values.image.tag -}}
 {{- $relayImage := printf "%s:%s" .Values.image.repository $imageTag -}}
 {{- if .Values.image.digest -}}
 {{- $relayImage = printf "%s@%s" .Values.image.repository .Values.image.digest -}}

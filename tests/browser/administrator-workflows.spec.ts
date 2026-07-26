@@ -149,6 +149,7 @@ test('matches loading skeletons to each destination without layout overflow', as
     ['/dashboard/live', 'table'],
     ['/dashboard/sessions', 'cards'],
     ['/dashboard/settings/people', 'people'],
+    ['/dashboard/settings/retention', 'form'],
     ['/dashboard/settings/connections', 'form'],
     ['/dashboard/settings/profiles', 'table'],
     ['/dashboard/system/nodes', 'metrics'],
@@ -188,6 +189,7 @@ test('renders every administrator route accessibly at review breakpoints', async
     '/dashboard/system/work',
     '/dashboard/system/diagnostics',
     '/dashboard/settings/people',
+    '/dashboard/settings/retention',
     '/dashboard/settings/connections',
     '/dashboard/settings/profiles',
     '/dashboard/settings/profiles/new',
@@ -227,6 +229,8 @@ test('uses route-specific browser titles', async ({ page }) => {
   await expect(page).toHaveTitle('Diagnostics · VRRelay');
   await page.goto('/dashboard/settings/api');
   await expect(page).toHaveTitle('API Access · VRRelay');
+  await page.goto('/dashboard/settings/retention');
+  await expect(page).toHaveTitle('Retention · VRRelay');
 });
 
 test('preserves safe return destinations and rejects external redirects', async ({ page }) => {

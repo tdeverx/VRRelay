@@ -208,7 +208,8 @@ describe('data-plane role servers', () => {
       viewerIdentity: async () => 'viewer-fixture',
       touchViewer: async () => ({ id: 'live-session' }),
       resolveLive: async () => ({ path: 'live-fixture' }),
-      recordEgress: () => undefined
+      recordEgress: () => undefined,
+      recordPlaybackActivity: async () => undefined
     } as unknown as SessionService;
     const app = await createRoleServer(
       loadConfig({ VRRELAY_LIVE_ORIGIN_URL: 'rtsp://origin.example:8554' }),
@@ -261,7 +262,8 @@ describe('data-plane role servers', () => {
       viewerIdentity: async () => 'viewer-fixture',
       touchViewer: async () => ({ id: 'live-session' }),
       resolveLive: async () => ({ path: 'live-fixture' }),
-      recordEgress: () => undefined
+      recordEgress: () => undefined,
+      recordPlaybackActivity: async () => undefined
     } as unknown as SessionService;
     const app = await createRoleServer(
       loadConfig({ VRRELAY_LIVE_ORIGIN_URL: 'rtsp://origin.example:8554' }),

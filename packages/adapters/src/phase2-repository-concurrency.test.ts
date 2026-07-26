@@ -28,8 +28,13 @@ type ConcurrencyRepository = Pick<
   | 'beginProviderDeletion'
   | 'finalizeProviderDeletion'
   | 'createSessionWithPlaybackGrant'
+  | 'getPlaybackGrant'
   | 'getVersionedSession'
   | 'compareAndSetSession'
+  | 'touchSessionPlaybackActivity'
+  | 'listInactiveSessions'
+  | 'beginSessionDeletion'
+  | 'deleteSessionAndRevokePlaybackGrants'
   | 'createLiveChannel'
   | 'createLiveChannelWithinCapacity'
   | 'getVersionedLiveChannel'
@@ -40,8 +45,10 @@ type ConcurrencyRepository = Pick<
   | 'usePersonalToken'
   | 'revokePersonalToken'
   | 'createUserIdentity'
+  | 'getUserIdentity'
   | 'listUserIdentities'
   | 'compareAndSetUserIdentityPreservingOwner'
+  | 'deleteUserIdentityPreservingOwner'
 > &
   Pick<
     ClusterRepository,
@@ -355,6 +362,111 @@ function repositoryConcurrencySuite(
       );
     });
 
+    it('serializes user deletion against creation of an owned live channel', async () => {
+      const { first, second } = repositories();
+      const target = await first.createUserIdentity(userIdentity('owner-delete-target'));
+      await first.createUserIdentity(userIdentity('owner-delete-survivor'));
+      const channel = {
+        ...liveChannel('live-owned-during-delete'),
+        ownerId: target.value.id
+      };
+
+      const [deleted, created] = await Promise.all([
+        first.deleteUserIdentityPreservingOwner(target.value.id, target.revision),
+        second.createLiveChannelWithinCapacity(channel, {
+          maxTotal: 10,
+          maxPerOwner: 10
+        })
+      ]);
+
+      if (deleted.applied) {
+        expect(created).toEqual({ created: false, reason: 'owner-not-found' });
+        await expect(first.getUserIdentity(target.value.id)).resolves.toBeUndefined();
+      } else {
+        expect(deleted).toMatchObject({
+          reason: 'dependency-conflict',
+          dependencies: ['owned-live-channels']
+        });
+        expect(created).toMatchObject({ created: true });
+        await expect(first.getUserIdentity(target.value.id)).resolves.toEqual(target);
+      }
+    });
+
+    it('does not delete the last assigned owner', async () => {
+      const { first } = repositories();
+      const owner = await first.createUserIdentity(userIdentity('last-owner-delete'));
+
+      await expect(
+        first.deleteUserIdentityPreservingOwner(owner.value.id, owner.revision)
+      ).resolves.toMatchObject({
+        applied: false,
+        reason: 'dependency-conflict',
+        dependencies: ['assigned-owner']
+      });
+      await expect(first.getUserIdentity(owner.value.id)).resolves.toEqual(owner);
+    });
+
+    it('reports sessions and live channels owned by a user as deletion dependencies', async () => {
+      const { first } = repositories();
+      const identity = await first.createUserIdentity({
+        ...userIdentity('resource-owner-delete'),
+        roles: ['user']
+      });
+      await first.createProvider(provider('provider-a'));
+      const ownedSession = {
+        ...session('owned-session-delete'),
+        ownerId: identity.value.id
+      };
+      await first.createSessionWithPlaybackGrant(ownedSession, {
+        tokenHash: 'owned-session-delete-grant',
+        sessionId: ownedSession.id,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: ownedSession.createdAt
+      });
+      await first.createLiveChannelWithinCapacity(
+        {
+          ...liveChannel('owned-live-delete'),
+          ownerId: identity.value.id
+        },
+        { maxTotal: 10, maxPerOwner: 10 }
+      );
+
+      await expect(
+        first.deleteUserIdentityPreservingOwner(identity.value.id, identity.revision)
+      ).resolves.toMatchObject({
+        applied: false,
+        reason: 'dependency-conflict',
+        dependencies: ['owned-sessions', 'owned-live-channels']
+      });
+      await expect(first.getUserIdentity(identity.value.id)).resolves.toEqual(identity);
+    });
+
+    it('fences stale-user purge against a concurrent sign-in refresh', async () => {
+      const { first, second } = repositories();
+      const identity = await first.createUserIdentity({
+        ...userIdentity('stale-user-refresh-race'),
+        roles: ['user']
+      });
+      const [refreshed, deleted] = await Promise.all([
+        first.compareAndSetUserIdentityPreservingOwner(
+          { ...identity.value, lastSeenAt: at(2_000) },
+          identity.revision
+        ),
+        second.deleteUserIdentityPreservingOwner(identity.value.id, identity.revision, at(1_000))
+      ]);
+
+      expect([refreshed.applied, deleted.applied].filter(Boolean)).toHaveLength(1);
+      if (refreshed.applied) {
+        expect(deleted).toMatchObject({ applied: false, reason: 'revision-conflict' });
+        await expect(first.getUserIdentity(identity.value.id)).resolves.toEqual(refreshed.record);
+      } else {
+        expect(deleted).toMatchObject({ applied: true });
+        expect(refreshed).toMatchObject({ applied: false, reason: 'not-found' });
+        await expect(first.getUserIdentity(identity.value.id)).resolves.toBeUndefined();
+      }
+    });
+
     it('allows only one session CAS write from two stale snapshots', async () => {
       const { first, second } = repositories();
       const initial = session('session-cas');
@@ -395,6 +507,101 @@ function repositoryConcurrencySuite(
       expect(winnerRecord).toBeDefined();
       expect(loser).toMatchObject({ applied: false, reason: 'revision-conflict' });
       await expect(second.getVersionedSession(initial.id)).resolves.toEqual(winnerRecord);
+    });
+
+    it('fences conditional session deletion against fresh playback activity', async () => {
+      const { first, second } = repositories();
+      const initial: RelaySession = {
+        ...session('session-retention-race'),
+        lastPlaybackActivityAt: at(0),
+        deletionPending: false
+      };
+      await first.createProvider(provider(initial.source!.providerId));
+      await first.createSessionWithPlaybackGrant(initial, {
+        tokenHash: 'session-retention-race-grant',
+        sessionId: initial.id,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: initial.createdAt
+      });
+      const stale = (await first.getVersionedSession(initial.id))!;
+
+      const [touched, deletion] = await Promise.all([
+        first.touchSessionPlaybackActivity(initial.id, at(2_000), at(1_000)),
+        second.beginSessionDeletion(initial.id, {
+          observedAt: at(3_000),
+          inactiveBefore: at(1_000),
+          requireUnpinned: true
+        })
+      ]);
+
+      if (deletion.applied) {
+        expect(touched).toBe(false);
+        await expect(first.getVersionedSession(initial.id)).resolves.toMatchObject({
+          value: {
+            state: 'stopped',
+            deletionPending: true,
+            lastPlaybackActivityAt: at(0)
+          }
+        });
+        await expect(
+          first.compareAndSetSession(
+            { ...stale.value, pinned: true, updatedAt: at(4_000) },
+            stale.revision
+          )
+        ).resolves.toMatchObject({ applied: false, reason: 'revision-conflict' });
+        await expect(first.getPlaybackGrant('session-retention-race-grant')).resolves.toMatchObject(
+          {
+            revokedAt: at(3_000)
+          }
+        );
+      } else {
+        expect(touched).toBe(true);
+        expect(deletion).toMatchObject({ reason: 'invalid-state' });
+        await expect(first.getVersionedSession(initial.id)).resolves.toMatchObject({
+          value: {
+            state: 'active',
+            deletionPending: false,
+            lastPlaybackActivityAt: at(2_000)
+          }
+        });
+        await expect(first.getPlaybackGrant('session-retention-race-grant')).resolves.toMatchObject(
+          {
+            revokedAt: null
+          }
+        );
+      }
+    });
+
+    it('excludes pinned sessions from inactivity expiry', async () => {
+      const { first } = repositories();
+      const initial: RelaySession = {
+        ...session('session-retention-pinned'),
+        pinned: true,
+        lastPlaybackActivityAt: at(0)
+      };
+      await first.createProvider(provider(initial.source!.providerId));
+      await first.createSessionWithPlaybackGrant(initial, {
+        tokenHash: 'session-retention-pinned-grant',
+        sessionId: initial.id,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: initial.createdAt
+      });
+
+      await expect(first.listInactiveSessions(at(1_000))).resolves.toEqual([]);
+      await expect(
+        first.beginSessionDeletion(initial.id, {
+          observedAt: at(2_000),
+          inactiveBefore: at(1_000),
+          requireUnpinned: true
+        })
+      ).resolves.toMatchObject({ applied: false, reason: 'invalid-state' });
+      await expect(first.getPlaybackGrant('session-retention-pinned-grant')).resolves.toMatchObject(
+        {
+          revokedAt: null
+        }
+      );
     });
 
     it('rejects VOD session identity changes at the repository boundary', async () => {
@@ -547,6 +754,7 @@ function repositoryConcurrencySuite(
     it('serializes installation and owner live-channel capacity across connections', async () => {
       const { first, second } = repositories();
       const ownerId = 'live-owner-capacity';
+      await first.createUserIdentity(userIdentity(ownerId));
       const channels = [
         { ...liveChannel('live-capacity-a'), ownerId },
         { ...liveChannel('live-capacity-b'), ownerId }

@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client/index.js';
-import type { ActivateBackendData, ActivateBackendResponses, BrowseCatalogData, BrowseCatalogResponses, BrowseUserCatalogData, BrowseUserCatalogResponses, CancelSegmentJobData, CancelSegmentJobResponses, ConnectNodeAgentData, ControlSessionData, ControlSessionResponses, CreateLiveChannelData, CreateLiveChannelResponses, CreateNodeJoinTokenData, CreateNodeJoinTokenResponses, CreatePersonalTokenData, CreatePersonalTokenResponses, CreateProfileRevisionData, CreateProfileRevisionResponses, CreateProviderBindingData, CreateProviderBindingResponses, CreateProviderData, CreateProviderErrors, CreateProviderResponses, CreateSessionData, CreateSessionErrors, CreateSessionResponses, DeleteLiveChannelData, DeleteLiveChannelResponses, DeleteProviderBindingData, DeleteProviderBindingErrors, DeleteProviderBindingResponses, DeleteProviderData, DeleteProviderErrors, DeleteProviderResponses, DeleteSessionData, DeleteSessionResponses, DrainNodeData, DrainNodeResponses, EnrollNodeData, EnrollNodeErrors, EnrollNodeResponses, EvictCacheData, EvictCacheResponses, GetCatalogItemData, GetCatalogItemImageData, GetCatalogItemImageErrors, GetCatalogItemImageResponses, GetCatalogItemResponses, GetCurrentUserData, GetCurrentUserResponses, GetHealthData, GetHealthResponses, GetMediaCapabilitiesData, GetMediaCapabilitiesResponses, GetProviderItemData, GetProviderItemErrors, GetProviderItemResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, GetRuntimeConfigurationData, GetRuntimeConfigurationResponses, GetSessionData, GetSessionErrors, GetSessionResponses, GetSetupStatusData, GetSetupStatusResponses, GetSignInConfigurationData, GetSignInConfigurationResponses, GetSignInStatusData, GetSignInStatusResponses, GetVodProducerData, GetVodProducerErrors, GetVodProducerResponses, InitializeAdminData, InitializeAdminErrors, InitializeAdminResponses, ListBackendHealthData, ListBackendHealthResponses, ListCacheInventoryData, ListCacheInventoryResponses, ListCatalogProfilesData, ListCatalogProfilesResponses, ListClusterNodesData, ListClusterNodesResponses, ListCompatibilityResultsData, ListCompatibilityResultsResponses, ListJobLogsData, ListJobLogsResponses, ListLiveChannelsData, ListLiveChannelsResponses, ListNodeLogsData, ListNodeLogsResponses, ListPersonalTokensData, ListPersonalTokensResponses, ListProfilesData, ListProfilesResponses, ListProviderBindingsData, ListProviderBindingsResponses, ListProvidersData, ListProvidersResponses, ListRecentEventsData, ListRecentEventsResponses, ListSegmentJobsData, ListSegmentJobsResponses, ListSessionsData, ListSessionsResponses, ListUsersData, ListUsersResponses, ListVodProducersData, ListVodProducersResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, PreviewPlacementData, PreviewPlacementResponses, RecordCompatibilityResultData, RecordCompatibilityResultResponses, RemoveNodeData, RemoveNodeResponses, ReplaceLivePublisherData, ReplaceLivePublisherResponses, RestartRuntimeData, RestartRuntimeErrors, RestartRuntimeResponses, RetrySegmentJobData, RetrySegmentJobResponses, RevokeNodeData, RevokeNodeResponses, RevokePersonalTokenData, RevokePersonalTokenResponses, RotateNodeCertificateData, RotateNodeCertificateResponses, StreamEventsData, UpdateRuntimeConfigurationData, UpdateRuntimeConfigurationErrors, UpdateRuntimeConfigurationResponses, UpdateSignInConfigurationData, UpdateSignInConfigurationErrors, UpdateSignInConfigurationResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses, ValidateBackendData, ValidateBackendResponses, ValidateProviderData, ValidateProviderErrors, ValidateProviderResponses, ValidateRuntimeConfigurationData, ValidateRuntimeConfigurationErrors, ValidateRuntimeConfigurationResponses } from './types.gen.js';
+import type { ActivateBackendData, ActivateBackendResponses, BrowseCatalogData, BrowseCatalogResponses, BrowseUserCatalogData, BrowseUserCatalogResponses, CancelSegmentJobData, CancelSegmentJobResponses, ConnectNodeAgentData, ControlSessionData, ControlSessionResponses, CreateLiveChannelData, CreateLiveChannelResponses, CreateNodeJoinTokenData, CreateNodeJoinTokenResponses, CreatePersonalTokenData, CreatePersonalTokenResponses, CreateProfileRevisionData, CreateProfileRevisionResponses, CreateProviderBindingData, CreateProviderBindingResponses, CreateProviderData, CreateProviderErrors, CreateProviderResponses, CreateSessionData, CreateSessionErrors, CreateSessionResponses, DeleteLiveChannelData, DeleteLiveChannelResponses, DeleteProviderBindingData, DeleteProviderBindingErrors, DeleteProviderBindingResponses, DeleteProviderData, DeleteProviderErrors, DeleteProviderResponses, DeleteSessionData, DeleteSessionResponses, DeleteUserData, DeleteUserErrors, DeleteUserResponses, DrainNodeData, DrainNodeResponses, EnrollNodeData, EnrollNodeErrors, EnrollNodeResponses, EvictCacheData, EvictCacheResponses, GetCatalogItemData, GetCatalogItemImageData, GetCatalogItemImageErrors, GetCatalogItemImageResponses, GetCatalogItemResponses, GetCurrentUserData, GetCurrentUserResponses, GetHealthData, GetHealthResponses, GetMediaCapabilitiesData, GetMediaCapabilitiesResponses, GetProviderItemData, GetProviderItemErrors, GetProviderItemResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, GetRetentionConfigurationData, GetRetentionConfigurationResponses, GetRuntimeConfigurationData, GetRuntimeConfigurationResponses, GetSessionData, GetSessionErrors, GetSessionResponses, GetSetupStatusData, GetSetupStatusResponses, GetSignInConfigurationData, GetSignInConfigurationResponses, GetSignInStatusData, GetSignInStatusResponses, GetVodProducerData, GetVodProducerErrors, GetVodProducerResponses, InitializeAdminData, InitializeAdminErrors, InitializeAdminResponses, ListBackendHealthData, ListBackendHealthResponses, ListCacheInventoryData, ListCacheInventoryResponses, ListCatalogProfilesData, ListCatalogProfilesResponses, ListClusterNodesData, ListClusterNodesResponses, ListCompatibilityResultsData, ListCompatibilityResultsResponses, ListJobLogsData, ListJobLogsResponses, ListLiveChannelsData, ListLiveChannelsResponses, ListNodeLogsData, ListNodeLogsResponses, ListPersonalTokensData, ListPersonalTokensResponses, ListProfilesData, ListProfilesResponses, ListProviderBindingsData, ListProviderBindingsResponses, ListProvidersData, ListProvidersResponses, ListRecentEventsData, ListRecentEventsResponses, ListSegmentJobsData, ListSegmentJobsResponses, ListSessionsData, ListSessionsResponses, ListUsersData, ListUsersResponses, ListVodProducersData, ListVodProducersResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, PreviewPlacementData, PreviewPlacementResponses, RecordCompatibilityResultData, RecordCompatibilityResultResponses, RemoveNodeData, RemoveNodeResponses, ReplaceLivePublisherData, ReplaceLivePublisherResponses, RestartRuntimeData, RestartRuntimeErrors, RestartRuntimeResponses, RetrySegmentJobData, RetrySegmentJobResponses, RevokeNodeData, RevokeNodeResponses, RevokePersonalTokenData, RevokePersonalTokenResponses, RotateNodeCertificateData, RotateNodeCertificateResponses, StreamEventsData, UpdateRetentionConfigurationData, UpdateRetentionConfigurationErrors, UpdateRetentionConfigurationResponses, UpdateRuntimeConfigurationData, UpdateRuntimeConfigurationErrors, UpdateRuntimeConfigurationResponses, UpdateSignInConfigurationData, UpdateSignInConfigurationErrors, UpdateSignInConfigurationResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses, ValidateBackendData, ValidateBackendResponses, ValidateProviderData, ValidateProviderErrors, ValidateProviderResponses, ValidateRuntimeConfigurationData, ValidateRuntimeConfigurationErrors, ValidateRuntimeConfigurationResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -68,6 +68,30 @@ export const restartRuntime = <ThrowOnError extends boolean = false>(options?: O
         }, { scheme: 'bearer', type: 'http' }],
     url: '/configuration/runtime/restart',
     ...options
+});
+
+export const getRetentionConfiguration = <ThrowOnError extends boolean = false>(options?: Options<GetRetentionConfigurationData, ThrowOnError>): RequestResult<GetRetentionConfigurationResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetRetentionConfigurationResponses, unknown, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/configuration/retention',
+    ...options
+});
+
+export const updateRetentionConfiguration = <ThrowOnError extends boolean = false>(options: Options<UpdateRetentionConfigurationData, ThrowOnError>): RequestResult<UpdateRetentionConfigurationResponses, UpdateRetentionConfigurationErrors, ThrowOnError> => (options.client ?? client).put<UpdateRetentionConfigurationResponses, UpdateRetentionConfigurationErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/configuration/retention',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 export const getSetupStatus = <ThrowOnError extends boolean = false>(options?: Options<GetSetupStatusData, ThrowOnError>): RequestResult<GetSetupStatusResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetSetupStatusResponses, unknown, ThrowOnError>({ url: '/setup', ...options });
@@ -183,6 +207,16 @@ export const listUsers = <ThrowOnError extends boolean = false>(options?: Option
             type: 'apiKey'
         }, { scheme: 'bearer', type: 'http' }],
     url: '/users',
+    ...options
+});
+
+export const deleteUser = <ThrowOnError extends boolean = false>(options: Options<DeleteUserData, ThrowOnError>): RequestResult<DeleteUserResponses, DeleteUserErrors, ThrowOnError> => (options.client ?? client).delete<DeleteUserResponses, DeleteUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'vrrelay_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/users/{userId}',
     ...options
 });
 

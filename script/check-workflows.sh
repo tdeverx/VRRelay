@@ -19,4 +19,8 @@ ARCHIVE="actionlint_${VERSION}_${PLATFORM}.tar.gz"
 curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/${ARCHIVE}" -o "$WORK/$ARCHIVE"
 echo "$SHA256  $WORK/$ARCHIVE" | shasum -a 256 --check --strict
 tar -xzf "$WORK/$ARCHIVE" -C "$WORK" actionlint
-"$WORK/actionlint" .github/workflows/*.yml
+# GitHub's queue key is newer than actionlint 1.7.12. Ignore only that parser
+# diagnostic while retaining every other workflow syntax and semantic check.
+"$WORK/actionlint" \
+  -ignore 'unexpected key "queue" for "concurrency" section' \
+  .github/workflows/*.yml

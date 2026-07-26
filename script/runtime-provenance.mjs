@@ -46,14 +46,18 @@ export async function createRuntimeProvenance({ manifestPath, outputPath, entrie
         timeout: 15_000
       });
       versionOutput = `${execution.stdout}\n${execution.stderr}`.trim().split(/\r?\n/, 1)[0];
-      if (!runtimeVersionMatches(versionOutput, component.version))
+      const expectedRuntimeVersion = component.runtimeVersion ?? component.version;
+      if (!runtimeVersionMatches(versionOutput, expectedRuntimeVersion))
         throw new Error(
-          `${name} reports ${JSON.stringify(versionOutput)}; expected ${component.version}`
+          `${name} reports ${JSON.stringify(versionOutput)}; expected ${expectedRuntimeVersion}`
         );
     }
+    const sourceRevision = component.artifacts?.source?.ffmpegCommit;
     result.push({
       name,
       version: component.version,
+      ...(component.runtimeVersion ? { runtimeVersion: component.runtimeVersion } : {}),
+      ...(sourceRevision ? { sourceRevision } : {}),
       file: basename(path),
       sha256: await sha256(path),
       source: component.source,

@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
   DefaultProviderRegistry,
@@ -12,6 +12,7 @@ import {
   type LiveNormalizer,
   type ObjectStore,
   type RemoteProviderGateway,
+  type RemoteSegmentDispatcher,
   type SecretStore,
   type SegmentRequest,
   type Transcoder
@@ -22,7 +23,14 @@ import {
   PrometheusMetricsSink,
   SqliteRepository
 } from '@vrrelay/adapters';
-import type { BackendStatus, CachedObject, ClusterNode, ProfileRevision } from '@vrrelay/domain';
+import type {
+  BackendStatus,
+  CachedObject,
+  ClusterNode,
+  ProfileRevision,
+  RelaySession,
+  VodProducer
+} from '@vrrelay/domain';
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
 const dirs: string[] = [];
@@ -379,7 +387,144 @@ function profileInput(overrides: ProfileInputOverrides = {}): CreateProfileRevis
   };
 }
 
+async function ownedVodSessionFixture(
+  repository: SqliteRepository,
+  secrets: SecretStore,
+  directory: string
+) {
+  await repository.migrate();
+  const now = new Date().toISOString();
+  const providerId = 'provider-session-source-pending';
+  const ownerId = 'owner-session-source-pending';
+  const providerUserId = 'user-session-source-pending';
+  await repository.createProvider({
+    id: providerId,
+    type: 'jellyfin',
+    name: 'Pending source credential provider',
+    baseUrl: 'https://media.invalid',
+    authMode: 'user_token',
+    secretRef: 'provider:session-source-pending',
+    capabilities: ['search', 'direct_source'],
+    healthy: true,
+    createdAt: now,
+    updatedAt: now
+  });
+  await repository.createUserIdentity({
+    id: ownerId,
+    providerId,
+    providerUserId,
+    displayName: 'Pending credential owner',
+    roles: ['user'],
+    allowedProfileIds: ['universal-h264-hls-vod'],
+    defaultProfileId: 'universal-h264-hls-vod',
+    firstSeenAt: now,
+    lastSeenAt: now
+  });
+  await new ProfileService(repository).seed(mediaCapabilities);
+  const registry = new DefaultProviderRegistry();
+  registry.register(provider);
+  const service = new SessionService(
+    repository,
+    secrets,
+    registry,
+    {
+      discover: async () => mediaCapabilities,
+      generateSegment: async () => {}
+    },
+    new InMemoryEventBus(),
+    {
+      publicUrl: 'https://relay.invalid',
+      internalUrl: 'http://127.0.0.1:8099',
+      cacheDir: join(directory, 'cache'),
+      cacheTtlMs: 60_000,
+      maxWorkers: 1
+    }
+  );
+  return {
+    service,
+    create: () =>
+      service.create(
+        {
+          kind: 'vod',
+          source: { providerId, itemId: 'movie' },
+          profileId: 'universal-h264-hls-vod',
+          profileRevision: 1,
+          platformMode: 'universal',
+          pinned: false,
+          reportActivity: false,
+          placementPolicy: 'local',
+          placementLocked: false,
+          playbackTtlSeconds: null
+        },
+        {
+          ownerId,
+          providerAccessToken: 'user-source-access-token',
+          providerUserId
+        }
+      )
+  };
+}
+
 describe('profile lifecycle', () => {
+  it('seeds the same software encoder even when host hardware acceleration is available', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-seed-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new ProfileService(repo, {
+      ...mediaCapabilities,
+      encoders: [
+        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
+        ...mediaCapabilities.encoders
+      ]
+    });
+
+    await service.seed();
+
+    expect(await service.list()).toHaveLength(5);
+    expect(
+      (await service.list()).every(
+        (seeded) => seeded.video.encoder === 'libx264' && seeded.video.hardwareMode === 'software'
+      )
+    ).toBe(true);
+  });
+
+  it('adds a portable revision for an untouched host-specific built-in profile', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-migration-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const createdAt = new Date().toISOString();
+    await repo.putProfile({
+      ...profileInput({
+        name: 'Universal H.264 / AAC HLS',
+        video: { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' }
+      }),
+      profileId: 'universal-h264-hls-vod',
+      revision: 1,
+      description: 'Finite MPEG-TS HLS VOD baseline for PC and Quest testing.',
+      createdAt
+    });
+    const service = new ProfileService(repo, {
+      ...mediaCapabilities,
+      encoders: [
+        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
+        ...mediaCapabilities.encoders
+      ]
+    });
+
+    await service.seed();
+
+    await expect(repo.getProfile('universal-h264-hls-vod')).resolves.toMatchObject({
+      revision: 2,
+      video: { encoder: 'libx264', hardwareMode: 'software' }
+    });
+    await expect(repo.getProfile('universal-h264-hls-vod', 1)).resolves.toMatchObject({
+      revision: 1,
+      video: { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' }
+    });
+  });
+
   it('accepts implemented HLS profile shapes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-implemented-'));
     dirs.push(dir);
@@ -459,6 +604,261 @@ describe('profile lifecycle', () => {
 });
 
 describe('VOD relay service', () => {
+  it('dispatches Stop to the durable remote producer owner after failover', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-remote-stop-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'remote-stop-provider',
+      type: 'jellyfin',
+      name: 'Remote stop fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'remote-stop-secret',
+      capabilities: ['direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const session: RelaySession = {
+      id: 'remote-stop-session',
+      name: 'Remote stop fixture',
+      kind: 'vod',
+      source: {
+        providerId: 'remote-stop-provider',
+        itemId: 'movie',
+        versionId: 'version-1'
+      },
+      profileId: 'remote-stop-profile',
+      profileRevision: 1,
+      platformMode: 'universal',
+      state: 'idle',
+      durationSeconds: 120,
+      pinned: false,
+      reportActivity: false,
+      viewers: 0,
+      placementPolicy: 'auto',
+      assignedNodeId: 'source-worker-a',
+      placementLocked: false,
+      outputUrls: {
+        primary: 'https://relay.example/play/remote-stop-fixture/index.m3u8'
+      },
+      createdAt: now,
+      updatedAt: now
+    };
+    expect(
+      (
+        await repo.createSessionWithPlaybackGrant(session, {
+          tokenHash: 'remote-stop-grant',
+          sessionId: session.id,
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: now
+        })
+      ).applied
+    ).toBe(true);
+    const producer: VodProducer = {
+      id: session.id,
+      sessionId: session.id,
+      ownerNodeId: 'source-worker-b',
+      generation: 2,
+      state: 'running',
+      demandedSegmentIndex: 0,
+      startSegmentIndex: 0,
+      playbackAnchorSegmentIndex: 0,
+      playbackAnchorAt: now,
+      lastDemandAt: now,
+      workerHistory: [
+        {
+          generation: 2,
+          nodeId: 'source-worker-b',
+          state: 'running',
+          startSegmentIndex: 0,
+          startedAt: now
+        }
+      ],
+      createdAt: now,
+      updatedAt: now
+    };
+    expect((await repo.createVodProducer(producer)).created).toBe(true);
+    const stopProducer = vi.fn<NonNullable<RemoteSegmentDispatcher['stopProducer']>>(
+      async () => undefined
+    );
+    const dispatcher: RemoteSegmentDispatcher = {
+      connected: () => true,
+      dispatch: async () => undefined,
+      stopProducer,
+      cancel: async () => undefined
+    };
+    const service = new SessionService(
+      repo,
+      new MemorySecretStore(),
+      new DefaultProviderRegistry(),
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async () => undefined
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 1_000,
+        maxWorkers: 1,
+        nodeId: 'controller-a',
+        roles: ['controller']
+      },
+      { clusterRepository: repo, dispatcher }
+    );
+
+    await expect(service.control(session.id, { state: 'stopped' })).resolves.toMatchObject({
+      state: 'stopped'
+    });
+    expect(stopProducer).toHaveBeenCalledOnce();
+    expect(stopProducer).toHaveBeenCalledWith('source-worker-b', session.id);
+  });
+
+  it('recovers an orphan source credential after immediate cleanup fails once', async () => {
+    class RejectedSessionRepository extends SqliteRepository {
+      override async createSessionWithPlaybackGrant(
+        _session: Parameters<SqliteRepository['createSessionWithPlaybackGrant']>[0],
+        _grant: Parameters<SqliteRepository['createSessionWithPlaybackGrant']>[1],
+        _expectedLiveChannelRevision?: number
+      ) {
+        return { applied: false as const, reason: 'not-found' as const };
+      }
+    }
+    class FailOnceSecretStore extends TrackingSecretStore {
+      #failed = false;
+
+      override async delete(ref: string): Promise<void> {
+        if (!this.#failed && ref.startsWith('session-source:')) {
+          this.#failed = true;
+          throw new Error('simulated source credential cleanup outage');
+        }
+        await super.delete(ref);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-source-orphan-'));
+    dirs.push(dir);
+    const repo = trackRepository(new RejectedSessionRepository(join(dir, 'db.sqlite')));
+    const secrets = new FailOnceSecretStore();
+    const fixture = await ownedVodSessionFixture(repo, secrets, dir);
+
+    await expect(fixture.create()).rejects.toThrow('Provider connection was not found');
+    const [pending] = await repo.listSettingsByPrefix('session.sourceCredential.pending.');
+    expect(pending).toBeDefined();
+    expect(pending!.value).toMatch(/^session-source:/);
+    expect(pending!.value).not.toContain('user-source-access-token');
+    await expect(secrets.get(pending!.value)).resolves.toContain('user-source-access-token');
+    await expect(repo.listSessions()).resolves.toEqual([]);
+
+    await expect(fixture.service.recover()).resolves.toBe(1);
+    await expect(repo.listSettingsByPrefix('session.sourceCredential.pending.')).resolves.toEqual(
+      []
+    );
+    await expect(secrets.get(pending!.value)).rejects.toThrow('Secret not found');
+  });
+
+  it('clears a failed pending-index cleanup without deleting an active session credential', async () => {
+    class FailOncePendingDeleteRepository extends SqliteRepository {
+      #failed = false;
+
+      override async deleteSetting(key: string): Promise<void> {
+        if (!this.#failed && key.startsWith('session.sourceCredential.pending.')) {
+          this.#failed = true;
+          throw new Error('simulated pending-index cleanup outage');
+        }
+        await super.deleteSetting(key);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-source-active-'));
+    dirs.push(dir);
+    const repo = trackRepository(new FailOncePendingDeleteRepository(join(dir, 'db.sqlite')));
+    const secrets = new TrackingSecretStore();
+    const fixture = await ownedVodSessionFixture(repo, secrets, dir);
+
+    const session = await fixture.create();
+    const secretRef = `session-source:${session.id}`;
+    await expect(repo.listSettingsByPrefix('session.sourceCredential.pending.')).resolves.toEqual([
+      { key: `session.sourceCredential.pending.${session.id}`, value: secretRef }
+    ]);
+    await expect(secrets.get(secretRef)).resolves.toContain('user-source-access-token');
+
+    await expect(fixture.service.recover()).resolves.toBe(1);
+    await expect(repo.getSession(session.id)).resolves.toMatchObject({ id: session.id });
+    await expect(secrets.get(secretRef)).resolves.toContain('user-source-access-token');
+    expect(secrets.deleted).not.toContain(secretRef);
+    await expect(repo.listSettingsByPrefix('session.sourceCredential.pending.')).resolves.toEqual(
+      []
+    );
+  });
+
+  it('retains a committed source credential when commit acknowledgement and reconciliation fail', async () => {
+    class AmbiguousSessionCommitRepository extends SqliteRepository {
+      #failNextSessionRead = false;
+
+      override async createSessionWithPlaybackGrant(
+        session: Parameters<SqliteRepository['createSessionWithPlaybackGrant']>[0],
+        grant: Parameters<SqliteRepository['createSessionWithPlaybackGrant']>[1],
+        expectedLiveChannelRevision?: number
+      ) {
+        const result = await super.createSessionWithPlaybackGrant(
+          session,
+          grant,
+          expectedLiveChannelRevision
+        );
+        if (result.applied) {
+          this.#failNextSessionRead = true;
+          throw new Error('simulated lost session commit acknowledgement');
+        }
+        return result;
+      }
+
+      override async getSession(id: string): Promise<RelaySession | undefined> {
+        if (this.#failNextSessionRead) {
+          this.#failNextSessionRead = false;
+          throw new Error('simulated reconciliation read outage');
+        }
+        return super.getSession(id);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-source-ambiguous-'));
+    dirs.push(dir);
+    const repo = trackRepository(new AmbiguousSessionCommitRepository(join(dir, 'db.sqlite')));
+    const secrets = new TrackingSecretStore();
+    const fixture = await ownedVodSessionFixture(repo, secrets, dir);
+
+    await expect(fixture.create()).rejects.toThrow('simulated lost session commit acknowledgement');
+    const [session] = await repo.listSessions();
+    expect(session).toBeDefined();
+    const secretRef = `session-source:${session!.id}`;
+    await expect(secrets.get(secretRef)).resolves.toContain('user-source-access-token');
+    expect(secrets.deleted).not.toContain(secretRef);
+    await expect(repo.listSettingsByPrefix('session.sourceCredential.pending.')).resolves.toEqual([
+      { key: `session.sourceCredential.pending.${session!.id}`, value: secretRef }
+    ]);
+
+    await expect(fixture.service.recover()).resolves.toBe(1);
+    await expect(repo.getSession(session!.id)).resolves.toMatchObject({ id: session!.id });
+    await expect(secrets.get(secretRef)).resolves.toContain('user-source-access-token');
+    expect(secrets.deleted).not.toContain(secretRef);
+    await expect(repo.listSettingsByPrefix('session.sourceCredential.pending.')).resolves.toEqual(
+      []
+    );
+  });
+
   it.each([
     ['not-found', 'Provider connection was not found'],
     ['invalid-state', 'Provider connection is being deleted']
@@ -1755,6 +2155,18 @@ describe('Live relay service', () => {
     dirs.push(dir);
     const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
+    const now = new Date().toISOString();
+    for (const ownerId of ['owner-a', 'owner-b', 'owner-c'])
+      await repo.createUserIdentity({
+        id: ownerId,
+        providerId: 'provider-live-capacity',
+        providerUserId: `provider-${ownerId}`,
+        displayName: ownerId,
+        roles: ['user'],
+        allowedProfileIds: [],
+        firstSeenAt: now,
+        lastSeenAt: now
+      });
     const service = new LiveService(repo, {
       publicUrl: 'https://relay.example',
       rtmpUrl: 'rtmp://ingest.example/live',
@@ -2807,6 +3219,198 @@ describe('provider failover bindings', () => {
 });
 
 describe('crash recovery', () => {
+  it('retries session deletion until its durable source credential is removed', async () => {
+    class FailOnceSecretStore extends TrackingSecretStore {
+      #fail = true;
+
+      override async delete(ref: string): Promise<void> {
+        if (this.#fail) {
+          this.#fail = false;
+          throw new Error('simulated secret backend outage');
+        }
+        await super.delete(ref);
+      }
+    }
+
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-secret-delete-retry-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'provider-session-secret-retry',
+      type: 'jellyfin',
+      name: 'Session secret retry provider',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'provider:session-secret-retry',
+      capabilities: ['search'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    await repo.createUserIdentity({
+      id: 'identity-session-secret-retry',
+      providerId: 'provider-session-secret-retry',
+      providerUserId: 'user-session-secret-retry',
+      displayName: 'Session secret retry user',
+      roles: ['user'],
+      allowedProfileIds: [],
+      firstSeenAt: now,
+      lastSeenAt: now
+    });
+    const session: RelaySession = {
+      id: 'session-secret-delete-retry',
+      name: 'Session secret delete retry',
+      kind: 'vod',
+      source: { providerId: 'provider-session-secret-retry', itemId: 'movie' },
+      durationSeconds: 60,
+      profileId: 'profile-session-secret-retry',
+      profileRevision: 1,
+      platformMode: 'pc',
+      state: 'active',
+      pinned: false,
+      reportActivity: false,
+      viewers: 0,
+      placementPolicy: 'local',
+      placementLocked: false,
+      ownerId: 'identity-session-secret-retry',
+      lastPlaybackActivityAt: now,
+      deletionPending: false,
+      outputUrls: { primary: 'https://relay.invalid/play/token/index.m3u8' },
+      createdAt: now,
+      updatedAt: now
+    };
+    await expect(
+      repo.createSessionWithPlaybackGrant(session, {
+        tokenHash: 'grant-session-secret-retry',
+        sessionId: session.id,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: now
+      })
+    ).resolves.toMatchObject({ applied: true });
+    const secrets = new FailOnceSecretStore();
+    const secretRef = `session-source:${session.id}`;
+    await secrets.put(secretRef, 'durable source credential');
+    const service = new SessionService(
+      repo,
+      secrets,
+      providerBindingRegistry(),
+      {
+        discover: async () => mediaCapabilities,
+        generateSegment: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.invalid',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 60_000,
+        maxWorkers: 1
+      },
+      { clusterRepository: repo }
+    );
+
+    await expect(service.delete(session.id)).rejects.toThrow('simulated secret backend outage');
+    await expect(repo.getSession(session.id)).resolves.toMatchObject({
+      state: 'stopped',
+      deletionPending: true
+    });
+    await expect(repo.getPlaybackGrant('grant-session-secret-retry')).resolves.toMatchObject({
+      revokedAt: expect.any(String)
+    });
+    await expect(secrets.get(secretRef)).resolves.toBe('durable source credential');
+
+    await expect(service.delete(session.id)).resolves.toBeUndefined();
+    await expect(repo.getSession(session.id)).resolves.toBeUndefined();
+    await expect(secrets.get(secretRef)).rejects.toThrow('Secret not found');
+  });
+
+  it('finishes a session deletion that was fenced before the process stopped', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-delete-recovery-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'provider-delete-recovery',
+      type: 'jellyfin',
+      name: 'Deletion recovery provider',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'provider:delete-recovery',
+      capabilities: ['search'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const session: RelaySession = {
+      id: 'session-delete-recovery',
+      name: 'Deletion recovery',
+      kind: 'vod',
+      source: { providerId: 'provider-delete-recovery', itemId: 'movie' },
+      durationSeconds: 60,
+      profileId: 'profile-delete-recovery',
+      profileRevision: 1,
+      platformMode: 'pc',
+      state: 'active',
+      pinned: false,
+      reportActivity: false,
+      viewers: 0,
+      placementPolicy: 'local',
+      placementLocked: false,
+      lastPlaybackActivityAt: now,
+      deletionPending: false,
+      outputUrls: { primary: 'https://relay.invalid/play/token/index.m3u8' },
+      createdAt: now,
+      updatedAt: now
+    };
+    await repo.createSessionWithPlaybackGrant(session, {
+      tokenHash: 'grant-delete-recovery',
+      sessionId: session.id,
+      expiresAt: null,
+      revokedAt: null,
+      createdAt: now
+    });
+    await expect(repo.beginSessionDeletion(session.id, { observedAt: now })).resolves.toMatchObject(
+      {
+        applied: true,
+        record: { value: { state: 'stopped', deletionPending: true } }
+      }
+    );
+    const cached = join(dir, 'cache', 'vod', session.id, 'profile', '0.ts');
+    await mkdir(dirname(cached), { recursive: true });
+    await writeFile(cached, 'cached segment');
+    const registry = new DefaultProviderRegistry();
+    registry.register(provider);
+    const service = new SessionService(
+      repo,
+      new MemorySecretStore(),
+      registry,
+      {
+        discover: async () => mediaCapabilities,
+        generateSegment: async () => {}
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.invalid',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 60_000,
+        maxWorkers: 1
+      },
+      { clusterRepository: repo }
+    );
+
+    await expect(service.recover()).resolves.toBe(1);
+    await expect(repo.getSession(session.id)).resolves.toBeUndefined();
+    await expect(repo.getPlaybackGrant('grant-delete-recovery')).resolves.toMatchObject({
+      revokedAt: now
+    });
+    await expect(access(cached)).rejects.toThrow();
+  });
+
   it('reclaims expired leases and removes partial worker output', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-recovery-'));
     dirs.push(dir);

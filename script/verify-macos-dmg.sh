@@ -53,17 +53,91 @@ fi
 
 codesign --verify --deep --strict "$APP"
 require_equal "$(lipo -archs "$APP/Contents/MacOS/VRRelayMac")" arm64 'Application architecture'
+APP_SIGNING_AUTHORITY=''
+APP_SIGNING_TEAM=''
 if [[ "${VRRELAY_REQUIRE_DEVELOPER_ID:-0}" == 1 ]]; then
-  codesign -dv --verbose=4 "$APP" 2>&1 | grep -Fq 'Authority=Developer ID Application:' || {
+  app_signing_details="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+  APP_SIGNING_AUTHORITY="$(
+    print -r -- "$app_signing_details" |
+      awk '/^Authority=/ && !found { sub(/^Authority=/, ""); print; found=1 }'
+  )"
+  APP_SIGNING_TEAM="$(
+    print -r -- "$app_signing_details" |
+      awk '/^TeamIdentifier=/ { sub(/^TeamIdentifier=/, ""); print }'
+  )"
+  [[ "$APP_SIGNING_AUTHORITY" == 'Developer ID Application:'* ]] || {
     echo 'Application is not signed with a Developer ID Application identity' >&2
+    exit 1
+  }
+  [[ -n "$APP_SIGNING_TEAM" && "$APP_SIGNING_TEAM" != 'not set' ]] || {
+    echo 'Application signature does not declare a Developer ID team' >&2
+    exit 1
+  }
+  [[ "$APP_SIGNING_AUTHORITY" == *"($APP_SIGNING_TEAM)" ]] || {
+    echo 'Application signing authority does not match its TeamIdentifier' >&2
     exit 1
   }
 fi
 
-typeset -a MACH_O_FILES
-MACH_O_FILES=("$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx" "$RUNTIME"/lib/*.dylib(N))
-for binary in "${MACH_O_FILES[@]}"; do
-  codesign --verify --strict "$binary"
+typeset -a SIGNED_MACH_O_FILES RUNTIME_RELOCATABLE_FILES
+while IFS= read -r -d '' candidate; do
+  file_description="$(/usr/bin/file -b "$candidate")"
+  if [[ "$file_description" == *Mach-O* ]]; then
+    SIGNED_MACH_O_FILES+=("$candidate")
+  elif [[ "$candidate" == *.node ]]; then
+    echo "Native Node add-on is not a Mach-O binary: $candidate" >&2
+    exit 1
+  fi
+done < <(find "$APP/Contents" -depth -type f -print0)
+(( ${#SIGNED_MACH_O_FILES[@]} > 0 )) || {
+  echo 'Application bundle contains no nested Mach-O binaries' >&2
+  exit 1
+}
+
+for binary in "${SIGNED_MACH_O_FILES[@]}"; do
+  relative_binary="${binary#$APP/}"
+  codesign --verify --strict --verbose=2 "$binary"
+  binary_architectures="$(lipo -archs "$binary")"
+  [[ " $binary_architectures " == *' arm64 '* ]] || {
+    echo "Nested code does not contain arm64: $relative_binary" >&2
+    exit 1
+  }
+  if [[ "${VRRELAY_REQUIRE_DEVELOPER_ID:-0}" == 1 ]]; then
+    binary_signing_details="$(codesign -dv --verbose=4 "$binary" 2>&1)"
+    binary_signing_authority="$(
+      print -r -- "$binary_signing_details" |
+        awk '/^Authority=/ && !found { sub(/^Authority=/, ""); print; found=1 }'
+    )"
+    binary_signing_team="$(
+      print -r -- "$binary_signing_details" |
+        awk '/^TeamIdentifier=/ { sub(/^TeamIdentifier=/, ""); print }'
+    )"
+    require_equal "$binary_signing_authority" "$APP_SIGNING_AUTHORITY" "Signing authority for $relative_binary"
+    require_equal "$binary_signing_team" "$APP_SIGNING_TEAM" "Signing team for $relative_binary"
+    print -r -- "$binary_signing_details" | grep -Fq '(runtime)' || {
+      echo "Hardened runtime is not enabled for $relative_binary" >&2
+      exit 1
+    }
+    print -r -- "$binary_signing_details" | grep -Eq '^Timestamp=.+$' || {
+      echo "Secure timestamp is missing for $relative_binary" >&2
+      exit 1
+    }
+  fi
+done
+
+if [[ "${VRRELAY_REQUIRE_DEVELOPER_ID:-0}" == 1 ]]; then
+  NODE_ENTITLEMENTS="$WORK_DIR/node-entitlements.plist"
+  codesign -d --entitlements :- "$RUNTIME/bin/node" > "$NODE_ENTITLEMENTS" 2>/dev/null
+  require_equal "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-jit' "$NODE_ENTITLEMENTS")" true 'Node allow-jit entitlement'
+  require_equal "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-unsigned-executable-memory' "$NODE_ENTITLEMENTS")" true 'Node allow-unsigned-executable-memory entitlement'
+  if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$NODE_ENTITLEMENTS" 2>/dev/null | grep -Fxq true; then
+    echo 'Packaged Node must retain hardened-runtime library validation' >&2
+    exit 1
+  fi
+fi
+
+RUNTIME_RELOCATABLE_FILES=("$RUNTIME/bin/node" "$RUNTIME/bin/ffmpeg" "$RUNTIME/bin/mediamtx" "$RUNTIME"/lib/*.dylib(N))
+for binary in "${RUNTIME_RELOCATABLE_FILES[@]}"; do
   require_equal "$(lipo -archs "$binary")" arm64 "Architecture for $(basename "$binary")"
   loads="$(otool -L "$binary" | tail -n +2 | awk '{print $1}')"
   if print -r -- "$loads" | grep -Eq '^(/opt/homebrew|/usr/local|@rpath)'; then
@@ -78,6 +152,27 @@ for binary in "${MACH_O_FILES[@]}"; do
 done
 
 require_equal "$("$RUNTIME/bin/node" --version)" v26.5.0 'Node version'
+(
+  cd "$RUNTIME"
+  "$RUNTIME/bin/node" <<'NODE'
+const Database = require('better-sqlite3');
+const { hash, verify } = require('@node-rs/argon2');
+
+(async () => {
+  const database = new Database(':memory:');
+  const row = database.prepare('SELECT 1 AS value').get();
+  database.close();
+  if (row?.value !== 1) throw new Error('better-sqlite3 native query failed');
+
+  const password = 'vrrelay-native-signing-smoke';
+  const encoded = await hash(password, { memoryCost: 4096, timeCost: 1, parallelism: 1 });
+  if (!(await verify(encoded, password))) throw new Error('@node-rs/argon2 native verification failed');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+NODE
+)
 "$RUNTIME/bin/mediamtx" --version > "$WORK_DIR/mediamtx-version.txt"
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -version > "$WORK_DIR/ffmpeg-version.txt"
 "$RUNTIME/bin/ffmpeg" -nostdin -hide_banner -encoders > "$WORK_DIR/ffmpeg-encoders.txt" 2>/dev/null

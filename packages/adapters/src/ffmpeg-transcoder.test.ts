@@ -5,16 +5,80 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ProfileRevision } from '@vrrelay/domain';
-import { FFmpegTranscoder, redactFfmpegError } from './ffmpeg-transcoder.js';
+import {
+  FFmpegTranscoder,
+  ffmpegDecodeAccelerationArgs,
+  ffmpegVodReadPacingArgs,
+  monitorVodProducerOutput,
+  redactFfmpegError
+} from './ffmpeg-transcoder.js';
 
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
+const profile: ProfileRevision = {
+  profileId: 'test-h264',
+  revision: 1,
+  name: 'Test H.264',
+  description: 'Runtime test profile',
+  platform: 'pc',
+  state: 'experimental',
+  video: {
+    codec: 'h264',
+    encoder: 'libx264',
+    hardwareMode: 'software',
+    decodeMode: 'auto',
+    profile: 'high',
+    level: '4.1',
+    pixelFormat: 'yuv420p',
+    width: 320,
+    height: 180,
+    frameRate: 24,
+    bitrateKbps: 600,
+    maxrateKbps: 700,
+    bufferKbps: 1_400,
+    preset: 'ultrafast',
+    gop: 48,
+    bFrames: 0
+  },
+  audio: { codec: 'aac', channels: 2, layout: 'stereo', sampleRate: 48_000, bitrateKbps: 96 },
+  delivery: {
+    method: 'hls',
+    container: 'mpegts',
+    segmentType: 'mpegts',
+    segmentDuration: 1,
+    playlistType: 'vod',
+    latencyMode: 'standard'
+  },
+  processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 1 },
+  createdAt: new Date().toISOString()
+};
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true })));
 });
 
 describe('FFmpeg adapter', () => {
+  it('keeps automatic decoding portable and applies only explicit hardware backends', () => {
+    expect(ffmpegDecodeAccelerationArgs('auto')).toEqual([]);
+    expect(ffmpegDecodeAccelerationArgs('software')).toEqual([]);
+    expect(ffmpegDecodeAccelerationArgs('videotoolbox')).toEqual(['-hwaccel', 'videotoolbox']);
+    expect(ffmpegDecodeAccelerationArgs('d3d11va')).toEqual(['-hwaccel', 'd3d11va']);
+    expect(ffmpegDecodeAccelerationArgs('qsv')).toEqual(['-hwaccel', 'qsv']);
+    expect(ffmpegDecodeAccelerationArgs('vaapi')).toEqual(['-hwaccel', 'vaapi']);
+    expect(ffmpegDecodeAccelerationArgs('cuda')).toEqual(['-hwaccel', 'cuda']);
+  });
+
+  it('aligns FFmpeg initial read pacing with the producer buffer high watermark', () => {
+    expect(ffmpegVodReadPacingArgs(60)).toEqual([
+      '-readrate',
+      '2',
+      '-readrate_initial_burst',
+      '60.000'
+    ]);
+    expect(() => ffmpegVodReadPacingArgs(0)).toThrow(/finite positive duration/);
+    expect(() => ffmpegVodReadPacingArgs(Number.NaN)).toThrow(/finite positive duration/);
+  });
+
   it('redacts internal grants, credentials, and source URLs from FFmpeg failures', () => {
     const sensitive = [
       'Authorization: MediaBrowser Client="VRRelay", Token="provider-secret"',
@@ -45,6 +109,34 @@ describe('FFmpeg adapter', () => {
     expect(capabilities.muxers).toContain('mpegts');
   }, 20_000);
 
+  it('stops and awaits the active producer before rethrowing a segment callback failure', async () => {
+    const callbackFailure = new Error('Segment callback rejected');
+    let abortRequested = false;
+    let producerSettled = false;
+    let rejectProducer!: (error: Error) => void;
+    const runningProducer = new Promise<void>((_resolve, reject) => {
+      rejectProducer = reject;
+    }).finally(() => {
+      producerSettled = true;
+    });
+
+    await expect(
+      monitorVodProducerOutput(
+        runningProducer,
+        async () => {
+          throw callbackFailure;
+        },
+        () => {
+          abortRequested = true;
+          setTimeout(() => rejectProducer(new Error('Producer stopped')), 10);
+        },
+        0
+      )
+    ).rejects.toBe(callbackFailure);
+    expect(abortRequested).toBe(true);
+    expect(producerSettled).toBe(true);
+  });
+
   it('encodes a real MPEG-TS segment with the structured filter graph', async () => {
     const ffmpegPath = process.env.VRRELAY_FFMPEG ?? 'ffmpeg';
     const directory = await mkdtemp(join(tmpdir(), 'vrrelay-ffmpeg-'));
@@ -72,44 +164,6 @@ describe('FFmpeg adapter', () => {
       '-shortest',
       source
     ]);
-    const profile: ProfileRevision = {
-      profileId: 'test-h264',
-      revision: 1,
-      name: 'Test H.264',
-      description: 'Runtime test profile',
-      platform: 'pc',
-      state: 'experimental',
-      video: {
-        codec: 'h264',
-        encoder: 'libx264',
-        hardwareMode: 'software',
-        decodeMode: 'auto',
-        profile: 'high',
-        level: '4.1',
-        pixelFormat: 'yuv420p',
-        width: 320,
-        height: 180,
-        frameRate: 24,
-        bitrateKbps: 600,
-        maxrateKbps: 700,
-        bufferKbps: 1_400,
-        preset: 'ultrafast',
-        gop: 48,
-        bFrames: 0
-      },
-      audio: { codec: 'aac', channels: 2, layout: 'stereo', sampleRate: 48_000, bitrateKbps: 96 },
-      delivery: {
-        method: 'hls',
-        container: 'mpegts',
-        segmentType: 'mpegts',
-        segmentDuration: 1,
-        playlistType: 'vod',
-        latencyMode: 'standard'
-      },
-      processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 1 },
-      createdAt: new Date().toISOString()
-    };
-
     const transcoder = new FFmpegTranscoder({ ffmpegPath });
     await transcoder.generateSegment(
       {
@@ -132,7 +186,8 @@ describe('FFmpeg adapter', () => {
         profile,
         startSegmentIndex: 7,
         startSeconds: 8,
-        duration: 1
+        duration: 1,
+        initialReadBurstSeconds: 60
       },
       join(directory, 'producer'),
       async (segment) => {
@@ -179,7 +234,8 @@ describe('FFmpeg adapter', () => {
         },
         startSegmentIndex: 9,
         startSeconds: 8,
-        duration: 1
+        duration: 1,
+        initialReadBurstSeconds: 60
       },
       fmp4Directory,
       async (segment) => {

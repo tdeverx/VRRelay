@@ -30,10 +30,11 @@
     {
       "name": "ffmpeg",
       "version": "8.1.2",
+      "runtimeVersion": "8.1.2-22-g94138f6973",
       "license": "GPL-3.0-or-later",
-      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+      "source": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/94138f6973dd1ac6208ace92148ac0d172455d65",
       "sourceNotes": {
-        "darwin-arm64": "The native package builds a minimal headless arm64 binary from the checksum-pinned source recipe below. Third-party libraries are linked statically; Apple system frameworks remain dynamic.",
+        "darwin-arm64": "The native package builds a minimal headless arm64 binary from FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65, matching the pinned Linux and Windows runtimes. Third-party libraries are linked statically; Apple system frameworks remain dynamic.",
         "linux-x64": "The pinned BtbN GPL build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65. OCI and Windows binaries share one complete corresponding-source bundle.",
         "linux-arm64": "The pinned BtbN GPL build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65. OCI and Windows binaries share one complete corresponding-source bundle.",
         "windows-x64": "The BtbN build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65 and its GPL dependency build scripts. Binary releases are blocked unless the complete corresponding-source bundle is attached."
@@ -42,6 +43,7 @@
       "sourceBuilds": {
         "darwin-arm64": {
           "buildScript": "deploy/macos/build-ffmpeg.sh",
+          "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
           "target": "arm64-apple-darwin",
           "minimumMacOS": "15.0",
           "linkage": "static-third-party",
@@ -54,10 +56,11 @@
             {
               "name": "ffmpeg",
               "version": "8.1.2",
+              "revision": "94138f6973dd1ac6208ace92148ac0d172455d65",
               "license": "GPL-3.0-or-later",
-              "file": "ffmpeg-8.1.2.tar.xz",
-              "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
-              "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+              "file": "ffmpeg-94138f6973dd1ac6208ace92148ac0d172455d65.tar.gz",
+              "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/94138f6973dd1ac6208ace92148ac0d172455d65",
+              "sha256": "41cc834ca4c8b63733b5ea9d215aed7b6cf8e29c4f96c8c61aff187d47e02937"
             },
             {
               "name": "x264",
@@ -120,8 +123,10 @@
       },
       "artifacts": {
         "source": {
-          "file": "ffmpeg-8.1.2.tar.xz",
-          "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+          "file": "ffmpeg-94138f6973dd1ac6208ace92148ac0d172455d65.tar.gz",
+          "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/94138f6973dd1ac6208ace92148ac0d172455d65",
+          "sha256": "41cc834ca4c8b63733b5ea9d215aed7b6cf8e29c4f96c8c61aff187d47e02937",
+          "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65"
         },
         "linux-x64": {
           "file": "ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz",
