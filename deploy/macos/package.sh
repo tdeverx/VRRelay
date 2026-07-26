@@ -95,6 +95,7 @@ else
 fi
 "$ROOT/deploy/macos/bundle-dylibs.sh" "$RUNTIME/bin/ffmpeg" "$RUNTIME/lib"
 (cd "$RUNTIME" && export PATH="$DOWNLOADS/node-v26.5.0-darwin-arm64/bin:$PATH" && npm install --global npm@12.0.1 && npm ci --omit=dev --legacy-peer-deps)
+node "$ROOT/script/select-native-prebuild.mjs" "$RUNTIME" darwin-arm64
 rm -rf "$DOWNLOADS/node-v26.5.0-darwin-arm64" "$DOWNLOADS/mediamtx" "$NODE_ARCHIVE" "$MEDIAMTX_ARCHIVE" "$FFMPEG_SOURCE"
 cp "$ROOT/deploy/macos/org.vrrelay.service.plist" "$APP/Contents/Resources/"
 cp "$ROOT/deploy/macos/install-service.sh" "$APP/Contents/Resources/"

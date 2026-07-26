@@ -23,6 +23,10 @@ const windowsSource = readFileSync(
   'utf8'
 );
 const dockerfile = readFileSync(resolve(root, 'deploy/docker/Dockerfile'), 'utf8');
+const nativePrebuildSelector = readFileSync(
+  resolve(root, 'script/select-native-prebuild.mjs'),
+  'utf8'
+);
 const runtimeProvenance = readFileSync(resolve(root, 'script/runtime-provenance.mjs'), 'utf8');
 const ciWorkflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8');
@@ -279,6 +283,31 @@ for (const [source, required, message] of [
 ]) {
   requireText(source, required, message);
 }
+
+for (const [source, target, message] of [
+  [
+    macPackage,
+    'select-native-prebuild.mjs" "$RUNTIME" darwin-arm64',
+    'macOS packaging must keep only its native SQLite prebuild'
+  ],
+  [
+    windowsPackage,
+    'select-native-prebuild.mjs" "$Stage\\runtime" win32-x64',
+    'Windows packaging must keep only its native SQLite prebuild'
+  ],
+  [
+    dockerfile,
+    'select-native-prebuild.mjs /app "linux-$native_arch"',
+    'OCI packaging must keep only its target native SQLite prebuild'
+  ]
+]) {
+  requireText(source, target, message);
+}
+requireText(
+  nativePrebuildSelector,
+  "resolve(runtimeRoot, 'node_modules', 'better-sqlite3', 'prebuilds')",
+  'native prebuild selection must be scoped to the reviewed SQLite package'
+);
 
 for (const [source, text, message] of [
   [

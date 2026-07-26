@@ -10,8 +10,10 @@ semantic versioning after the first public release.
   updates. The SvelteKit 3 prerelease migration now uses its `$app/tsconfig`
   layout through the existing TypeScript compatibility boundary, and
   `better-sqlite3` 13 uses its reviewed bundled platform binaries without an
-  unnecessary source build. Native Linux npm installs now require glibc 2.34 or
-  newer; the Debian trixie container path remains compatible.
+  unnecessary source build. macOS, Windows, and OCI packaging now retain only
+  the target platform's SQLite prebuild before signing or copying the runtime.
+  Native Linux npm installs require glibc 2.34 or newer; the Debian trixie
+  container path remains compatible.
 - Replaced per-version GitHub release tags with one GitHub Actions-managed lightweight `latest`
   tag and release. Product build 100 seeds the explicit build-number sequence; every workflow
   attempt appends collision-safe, build-numbered native packages, source archives, metadata,

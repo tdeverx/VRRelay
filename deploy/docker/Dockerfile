@@ -1,5 +1,6 @@
 ARG VRRELAY_VERSION=0.1.0
 FROM node:26.5.0-trixie-slim AS build
+ARG TARGETARCH
 WORKDIR /app
 COPY package*.json .npmrc tsconfig.base.json ./
 COPY apps/relay/package.json apps/relay/package.json
@@ -11,7 +12,9 @@ COPY packages/adapters/package.json packages/adapters/package.json
 RUN npm install --global npm@12.0.1
 RUN npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN npm run build && npm prune --omit=dev && \
+    case "$TARGETARCH" in amd64) native_arch=x64 ;; arm64) native_arch=arm64 ;; *) exit 2 ;; esac && \
+    node script/select-native-prebuild.mjs /app "linux-$native_arch"
 
 FROM debian:trixie-slim AS ffmpeg
 ARG TARGETARCH
