@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { IncomingMessage } from 'node:http';
 import { PassThrough, Readable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE, type ProviderConnection } from '@vrrelay/domain';
 import { CatalogQuerySchema } from '@vrrelay/contracts';
 import { JellyfinProvider, type JellyfinConnectorRequest } from './jellyfin-provider.js';
 import { resolveProviderRequestTarget, validateProviderUrl } from './network-policy.js';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function response(
   statusCode: number,
@@ -20,6 +24,7 @@ function response(
 
 describe('Jellyfin request transport', () => {
   it('limits the request timeout to opening a media stream', async () => {
+    vi.useFakeTimers();
     let connectorSignal: AbortSignal | undefined;
     const sourceStream = Object.assign(new PassThrough(), {
       statusCode: 200,
@@ -49,7 +54,7 @@ describe('Jellyfin request transport', () => {
       undefined,
       caller.signal
     );
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(30);
 
     expect(opened.stream).toBe(sourceStream);
     expect(connectorSignal?.aborted).toBe(false);

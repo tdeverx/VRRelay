@@ -2,9 +2,17 @@
 
 ## Enrollment and networking
 
-Create a single-use join token in **Cluster → Enroll node**, select the exact roles, and transfer it to the target node once. The node exchanges it at the enrollment URL, stores the returned identity in its platform secret backend, then uses only outbound mTLS WebSockets. Remove `VRRELAY_NODE_JOIN_TOKEN` after enrollment. Certificates rotate automatically during the last 48 hours of their seven-day lifetime.
+Open **Nodes**, choose **Enroll node**, create a single-use join token for the exact roles, and
+transfer it to the target node once. The node exchanges it at the enrollment URL, stores the
+returned identity in its platform secret backend, then uses only outbound mTLS WebSockets. Remove
+`VRRELAY_NODE_JOIN_TOKEN` after enrollment. Certificates rotate automatically during the last 48
+hours of their seven-day lifetime.
 
-The protocol is identical over public WSS and private overlays. Public mode needs TCP 8100 forwarded to the controller agent listener and the public DNS name in `VRRELAY_AGENT_TLS_NAMES`. Overlay mode uses the overlay address in `VRRELAY_CONTROLLER_AGENT_URL`. Workers, origins, and edges need no inbound management port.
+The protocol is identical over public WSS and private overlays. Public mode needs the controller
+agent listener's TCP port forwarded (8100 in the runtime and multi-host Compose; the clustered
+single-host Compose maps host port 8101 to it) and the public DNS name in
+`VRRELAY_AGENT_TLS_NAMES`. Overlay mode uses the overlay address in
+`VRRELAY_CONTROLLER_AGENT_URL`. Workers, origins, and edges need no inbound management port.
 
 ## Health and readiness
 
@@ -23,7 +31,7 @@ a startup failure cannot briefly expose a nominally live role server.
 The native menu/tray controller polls liveness without adding each successful probe to the request
 log. macOS service output rolls at 10 MiB and retains eight historical files beside
 `~/Library/Logs/VRRelay/service.log`; Windows uses the equivalent WinSW rolling-log policy.
-Set **Settings → Runtime → Diagnostic logging** to **Detailed playback tracing** while reproducing
+Set **Runtime → Diagnostic logging** to **Detailed playback tracing** while reproducing
 an issue. Normal mode records client starts, resumes, seeks, routing decisions, source-range opens,
 and accepted or rejected API mutations. Detailed mode additionally records sequential/retried
 segment traffic and range completions. Correlate entries with `reqId`, `sessionId`, and the short
@@ -42,15 +50,39 @@ controller remains open and reports the failure instead of leaving a hidden runt
 The standalone node is the local source worker and does not start or connect back to a cluster
 agent listener. It registers and begins heartbeating during ordinary application startup without
 certificate enrollment or platform secret-store setup. Draining it prevents new local placement.
-Use **System → Nodes → Resume local worker** to return a draining standalone node to service. The
+Use **Nodes → Resume local worker** to return a draining standalone node to service. The
 New relay wizard validates Local placement against the node's online state, encoder support, and
 locally available provider credentials before it enables the review step.
 
+## Session and user retention
+
+Configure automatic cleanup under **Retention**. Both policies are disabled by default
+and the controller or standalone runtime performs a non-overlapping sweep every minute.
+
+Session inactivity accepts 1–8,760 hours and measures from the last successful media delivery, not
+from manifest requests or failed segments. Only unpinned sessions are eligible. Pinning a session
+keeps its playback link and durable recovery state; it does not keep cache objects forever or leave
+a producer running.
+
+Stale-user cleanup accepts 30–3,650 days since the last successful sign-in. It applies only to
+ordinary users, skips active browser sessions, never purges administrators or owners, and fails
+closed while the identity owns a relay session or live channel. Administrators can perform the same
+guarded deletion explicitly under **People & access**; successful deletion also revokes the
+user's active dashboard sessions and removes their saved access settings.
+
 ## Traffic director
 
-The default director performs capacity-aware, stable session hashing locally. **Cluster → Configure routing** can also validate and activate static routing without restarting the controller. Static routing can pin traffic to one configured edge node or to an online edge in a configured region; a pinned node fails closed if it is offline, no longer has the edge role, or does not match the request's preferred region.
+The default director performs capacity-aware, stable session hashing locally. **Storage & routing**
+can also validate and activate static routing without restarting the controller. Static routing can
+pin traffic to one configured edge node or to an online edge in a configured region; a pinned node
+fails closed if it is offline, no longer has the edge role, or does not match the request's
+preferred region.
 
-For external policy engines, **Cluster → Configure routing** can validate and activate a generic webhook without restarting the controller. Public endpoints must use HTTPS; private-network HTTP is accepted with the same SSRF and credential-in-URL checks as provider connections. An optional `secretRef` names a bearer token already provisioned in the controller's root secret backend—the secret value is never stored in distributed configuration or returned by the API.
+For external policy engines, **Storage & routing** can validate and activate a generic webhook
+without restarting the controller. Public endpoints must use HTTPS; private-network HTTP is
+accepted with the same SSRF and credential-in-URL checks as provider connections. An optional
+`secretRef` names a bearer token already provisioned in the controller's root secret backend—the
+secret value is never stored in distributed configuration or returned by the API.
 
 VRRelay sends `{"type":"health"}` for validation. Selection requests contain `type: "select-edge"`, the session and preferred region, and only eligible edges with public routing/capacity fields. Return `{"nodeId":"…"}` for one supplied candidate. Unknown, offline, or otherwise ineligible IDs are rejected.
 

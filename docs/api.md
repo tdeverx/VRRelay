@@ -41,6 +41,17 @@ only when the service manager explicitly supplies `VRRELAY_RUNTIME_CONFIG`; expl
 environment variables retain precedence. `/configuration/runtime/restart` is available only when
 the supervisor opts into exit-based restart with `VRRELAY_RESTART_MODE=exit`.
 
+`GET` and `PUT /api/v1/configuration/retention` expose the administrator-managed cleanup policy.
+`sessionInactivityDeletionHours` is nullable or 1–8,760 hours and applies only to unpinned sessions
+after their last successful media delivery. `staleUserPurgeDays` is nullable or 30–3,650 days and
+applies only to inactive non-administrator identities that have no protected resources or active
+browser session. Both values default to `null`, which disables that policy.
+
+`GET /api/v1/users` returns revisioned user records. `PATCH /api/v1/users/{userId}` updates roles and
+profile access with an expected revision; `DELETE /api/v1/users/{userId}` uses the same optimistic
+revision guard, revokes active browser sessions, and rejects deletion when the identity is
+protected or still owns sessions or live channels.
+
 Node capability responses report cache usage in bytes, the configured cache limit when present, and `egressMbps` as the trailing 30-second average of media payload bytes actually consumed by clients. Viewer counts remain explicitly estimated; cumulative media byte counters are exact.
 
 `GET /api/v1/sessions` returns both the authorized session list and a matching array of short-lived
@@ -49,6 +60,10 @@ producer/window and catch-up/buffered state, transcode realtime factor, upstream
 and request counts, source ingress, viewer egress, and delivery-cache
 counts. They contain no client identity, source URL, provider credential, or unbounded Prometheus
 label and expire naturally when a node stops reporting.
+
+`PATCH /api/v1/sessions/{sessionId}` accepts `pinned` alongside the existing lifecycle control.
+Pinned sessions are excluded from automatic inactivity deletion, but pinning does not make cached
+media permanent or force a producer to remain active.
 
 Profiles may set `audio.defaultLanguage` to an ISO 639-2 or BCP-47 language. A VOD session resolves
 that preference when no `audioTrackId` is supplied; an explicit track remains authoritative.

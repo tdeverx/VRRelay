@@ -1,16 +1,16 @@
 # Private-production v1 implementation status
 
 VRRelay is prerelease software. Its major private-production v1 implementation
-and repository reconciliation have an implementation checkpoint. The
-audit-remediation checkout has passed its unit, contract, static, production
-build, browser, distributed acceptance, standalone Compose, cluster Compose,
-local-cluster, clean production OCI, Helm, OpenTofu, Swift, and source-secret
-checks. The exact patched dependency lock passes clean npm 12 host and container
-installs plus online audit with zero vulnerabilities. The checkout is not yet a
-feature-complete public release candidate and must not be presented as a
-released or supported VRCDN replacement. The gaps below distinguish
-current-worktree verification, remaining product workflows, and external
-release qualification.
+and repository reconciliation have an implementation checkpoint. The merged
+Build 100 source has passed its unit, contract, static, production build,
+desktop/mobile browser, distributed acceptance, standalone Compose, cluster
+Compose, local-cluster, production OCI, Helm, OpenTofu, Swift, native
+development-package, and source-secret checks. The exact dependency lock passes
+clean npm 12 host and container installs plus online audit with zero
+vulnerabilities. The source is not yet a feature-complete public release
+candidate and must not be presented as a released or supported VRCDN
+replacement. The gaps below distinguish merged-source verification, remaining
+product workflows, and external release qualification.
 
 The authoritative progress record is the
 [v1 completion ledger](v1-completion-ledger.md). A capability becomes a release
@@ -25,7 +25,8 @@ not release evidence by themselves.
   dashboard.
 - First-run administrator authentication, HTTP-only sessions, CSRF protection,
   scoped personal access tokens, opaque playback grants, structured profile
-  validation, basic redaction, and provider URL policy.
+  validation, guarded user deletion, configurable stale-user/session retention,
+  basic redaction, and provider URL policy.
 - Jellyfin authentication, playable-only search/hierarchy plus Continue Watching, Up Next, and
   Recently Added discovery, catalog/source mapping, ranged source access, and
   administrator-controlled playback activity reporting on the implemented happy paths.
@@ -344,16 +345,19 @@ Phase 9 has an automated-verification checkpoint, not a completed exit gate.
   benchmark bundle passed 26 of 26 tests; the then-current browser matrix
   passed four of four project cases; and the complete pinned Node `22.23.1`
   repository gate passed 395 tests with 23 intentional skips, all checks and
-  builds green, and zero npm vulnerabilities. Those results do not verify the
-  current audit-remediation worktree. See
+  builds green, and zero npm vulnerabilities. Those results are retained as a
+  dated checkpoint. See
   [Phase 9 implementation evidence](evidence/phase-09-implementation.md).
-- On 2026-07-25 the current worktree passed 474 tests across 47 files, with 25
+- On 2026-07-25 the audited checkpoint passed 474 tests across 47 files, with 25
   intentional skips and one skipped file. Formatting, generated contracts,
   semantic contract checks, all typechecks and Svelte diagnostics, repository
   and deployment guards, lint, production builds, and the expanded browser
   matrix also passed. The distributed acceptance harness passed regional edge
   routing, one fenced persistent VOD producer, cache reuse, failover, controller
   recovery, cleanup, and live fan-out.
+- The merged Build 100 checkpoint subsequently passed the repository, Ubuntu,
+  Windows, macOS host and DMG, desktop/mobile browser, distributed acceptance,
+  production-container, Helm, OpenTofu, and security/audit GitHub checks.
 
 ## Known gaps in the audited checkout
 

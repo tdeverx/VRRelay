@@ -9,6 +9,13 @@ npm test -- --run
 
 `npm run check` runs TypeScript and Svelte diagnostics across every workspace. Unit tests use temporary directories and generated media; they must not depend on a developer's library or credentials.
 
+Timing-sensitive tests should wait for observable state or use an explicit gate/fake clock instead
+of sleeping for a presumed scheduler interval. Local Vitest tests retain a 15-second test/hook
+budget; CI allows 30 seconds for loaded cross-platform runners. Playwright uses a 30-second local
+test budget and 45 seconds in CI, with 5-second and 10-second assertion budgets respectively.
+Per-test extensions are reserved for workflows that are intentionally longer, not for masking an
+unbounded wait.
+
 ## Full repository gate
 
 ```sh

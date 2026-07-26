@@ -16,11 +16,10 @@ processing, and MediaMTX handles RTMP, SRT, and WHIP live ingest.
 
 ## Project status
 
-The major private-production v1 implementation and repository reconciliation
-pass has an implementation checkpoint. The current audit-remediation worktree
-must still complete its final pinned-runtime CI, deployment, media, and
-desktop/mobile browser verification before those results can be claimed for the
-current source.
+The merged Build 100 private-production checkpoint passed the pinned-runtime
+repository gate on Ubuntu, Windows, and macOS, both browser projects, the
+distributed acceptance harness, the production container build, Helm,
+OpenTofu, and security/audit checks.
 
 That engineering checkpoint is not a release claim. Remaining product work
 includes broader live/binding/failover, dependency-management,
@@ -39,6 +38,8 @@ records.
   source mapping, and playback activity.
 - Finite, seekable HLS VOD with one durable, fenced producer per session and
   structured FFmpeg profiles.
+- Configurable expiry for inactive unpinned playback links, session pinning,
+  explicit user deletion, and guarded stale-user cleanup.
 - MediaMTX-backed OBS live ingest and live HLS fan-out.
 - Standalone and role-separated controller, source-worker, ingest-origin, and
   region-aware edge runtimes with outbound mTLS agents.
@@ -46,6 +47,8 @@ records.
   S3-compatible, Azure Blob, and Google Cloud Storage adapters.
 - Docker Compose, Helm, provider-neutral OpenTofu, backup/restore, a native
   macOS DMG, and a Windows installer pipeline with release guardrails.
+- A GitHub-built rolling release pipeline with one moving `latest` tag and
+  append-only, build-numbered historical assets.
 
 H.264 8-bit `yuv420p`, AAC-LC stereo, MPEG-TS HLS, and HTTPS remain the intended
 production defaults. Experimental formats are not compatibility claims.
