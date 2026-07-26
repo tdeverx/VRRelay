@@ -139,6 +139,7 @@ test('matches loading skeletons to each destination without layout overflow', as
   page,
   isMobile
 }, testInfo) => {
+  testInfo.setTimeout(60_000);
   await page.route('**/api/v1/**', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 800));
     await route.continue();
