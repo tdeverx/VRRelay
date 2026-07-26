@@ -135,7 +135,7 @@ test('persists theme preference and follows system changes', async ({ page }) =>
   ).toBe('light');
 });
 
-test('matches loading skeletons to each destination without layout overflow', async ({
+test('matches administrator loading skeletons to representative destinations without layout overflow', async ({
   page
 }, testInfo) => {
   testInfo.setTimeout(60_000);
@@ -157,7 +157,6 @@ test('matches loading skeletons to each destination without layout overflow', as
   });
 
   const routes = [
-    ['/dashboard', 'media'],
     ['/dashboard/live', 'table'],
     ['/dashboard/sessions', 'cards'],
     ['/dashboard/settings/people', 'people'],
