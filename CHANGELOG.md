@@ -6,6 +6,9 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed HLS prefetches and interleaved viewer requests being mistaken for user
+  seeks. A distant segment request now requires a following request in the
+  same playback window before it can move the VOD producer's pacing anchor.
 - Fixed VOD catch-up stalls by treating requests ahead of the encoded head as
   waiters rather than repeatedly replacing the active FFmpeg producer. Built-in
   profiles now select an available H.264 hardware encoder per worker (including

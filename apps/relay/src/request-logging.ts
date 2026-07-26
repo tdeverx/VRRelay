@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 const CLIENT_RETENTION_MS = 2 * 60_000;
 const CLIENT_RESUME_MS = 30_000;
 const MAX_TRACKED_CLIENTS = 10_000;
+const SEEK_CONFIRM_SEGMENTS = 5;
 
 export type PlaybackClientChange =
   | 'manifest'
@@ -26,6 +27,10 @@ export interface PlaybackClientObservation {
 interface TrackedClient {
   segmentIndex?: number;
   observedAtMs: number;
+  seekCandidate?: {
+    direction: 'forward' | 'backward';
+    segmentIndex: number;
+  };
 }
 
 export class PlaybackRequestTracker {
@@ -45,18 +50,55 @@ export class PlaybackRequestTracker {
     const idleMs = previous ? Math.max(0, observedAtMs - previous.observedAtMs) : undefined;
     let change: PlaybackClientChange = 'manifest';
     let segmentDelta: number | undefined;
+    let direction: 'forward' | 'backward' | undefined;
+    let candidateConfirmed = false;
 
     if (segmentIndex !== undefined) {
       if (previous?.segmentIndex === undefined) change = 'started';
       else {
         segmentDelta = segmentIndex - previous.segmentIndex;
-        if (idleMs !== undefined && idleMs > CLIENT_RESUME_MS) change = 'resumed';
-        else if (segmentDelta === 0) change = 'retry';
+        if (idleMs !== undefined && idleMs > CLIENT_RESUME_MS) {
+          change = 'resumed';
+        } else if (segmentDelta === 0) change = 'retry';
         else if (segmentDelta > 0 && segmentDelta <= 2) change = 'advanced';
         else if (segmentDelta < 0 && segmentDelta >= -2) change = 'reordered';
-        else change = segmentDelta > 0 ? 'seeked-forward' : 'seeked-backward';
+        else change = 'reordered';
+
+        direction = segmentDelta > 0 ? 'forward' : 'backward';
+        const candidate = previous?.seekCandidate;
+        const candidateDelta = candidate ? segmentIndex - candidate.segmentIndex : undefined;
+        candidateConfirmed =
+          candidate?.direction === direction &&
+          candidateDelta !== undefined &&
+          ((direction === 'forward' &&
+            candidateDelta > 0 &&
+            candidateDelta <= SEEK_CONFIRM_SEGMENTS) ||
+            (direction === 'backward' &&
+              candidateDelta < 0 &&
+              candidateDelta >= -SEEK_CONFIRM_SEGMENTS));
+        if (candidateConfirmed) change = `seeked-${direction}`;
       }
     }
+
+    const candidate = previous?.seekCandidate;
+    const candidateContinues =
+      candidate !== undefined &&
+      candidate.direction === direction &&
+      segmentIndex !== undefined &&
+      ((direction === 'forward' &&
+        segmentIndex > candidate.segmentIndex &&
+        segmentIndex - candidate.segmentIndex <= SEEK_CONFIRM_SEGMENTS) ||
+        (direction === 'backward' &&
+          segmentIndex < candidate.segmentIndex &&
+          candidate.segmentIndex - segmentIndex <= SEEK_CONFIRM_SEGMENTS));
+    const seekCandidate: TrackedClient['seekCandidate'] = candidateContinues
+      ? undefined
+      : segmentIndex === undefined ||
+          direction === undefined ||
+          (idleMs !== undefined && idleMs > CLIENT_RESUME_MS) ||
+          candidateConfirmed
+        ? undefined
+        : { direction, segmentIndex };
 
     this.#clients.delete(key);
     this.#clients.set(key, {
@@ -65,6 +107,7 @@ export class PlaybackRequestTracker {
         : previous?.segmentIndex !== undefined
           ? { segmentIndex: previous.segmentIndex }
           : {}),
+      ...(seekCandidate ? { seekCandidate } : {}),
       observedAtMs
     });
     return {
