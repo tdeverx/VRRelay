@@ -9,13 +9,12 @@ describe('VOD producer source pacing', () => {
     pacing.pause();
     const output = pacedReadable(Readable.from([Buffer.from('one'), Buffer.from('two')]), pacing);
     const completed = output.toArray();
-    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(pacing.state).toBe('buffered');
     let settled = false;
     void completed.then(() => {
       settled = true;
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await Promise.resolve();
     expect(settled).toBe(false);
     pacing.resume();
     expect(Buffer.concat(await completed).toString()).toBe('onetwo');

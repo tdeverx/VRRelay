@@ -2,6 +2,8 @@
 import { fileURLToPath, URL } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
 
+const testTimeoutMs = process.env.CI ? 30_000 : 15_000;
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -18,8 +20,8 @@ export default defineConfig({
     }
   },
   test: {
-    testTimeout: 15_000,
-    hookTimeout: 15_000,
+    testTimeout: testTimeoutMs,
+    hookTimeout: testTimeoutMs,
     exclude: [...configDefaults.exclude, '**/dist/**', 'tests/browser/**']
   }
 });

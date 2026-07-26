@@ -442,8 +442,10 @@ describe('durable VOD producer coordination', () => {
     });
 
     await coordinator.ensure(selectedSession, profile, 0);
-    for (let attempt = 0; attempt < 50 && coordinator.isActive(selectedSession.id); attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(coordinator.isActive(selectedSession.id)).toBe(false), {
+      timeout: 2_000,
+      interval: 10
+    });
 
     expect(starts).toEqual([0]);
     expect(await coordinator.get(selectedSession.id)).toMatchObject({
@@ -577,7 +579,11 @@ describe('durable VOD producer coordination', () => {
   });
 
   it('stops an otherwise continuous producer after the demand timeout', async () => {
-    const { coordinator, coordination, repository } = await fixture(50);
+    const { coordinator, coordination, repository } = await fixture(
+      50,
+      new MemoryCoordinationStore(),
+      { demandRefreshIntervalMs: 10 }
+    );
     const selectedSession = session('session-idle');
     await persistSession(repository, selectedSession);
     await coordination.recordSegmentDemand({
@@ -588,10 +594,14 @@ describe('durable VOD producer coordination', () => {
       windowMs: 30_000
     });
     await coordinator.ensure(selectedSession, profile, 0);
-    await new Promise((resolve) => setTimeout(resolve, 2_100));
-    const producer = await coordinator.get(selectedSession.id);
-    expect(producer).toMatchObject({ state: 'idle' });
-    expect(producer?.ownerNodeId).toBeUndefined();
+    await vi.waitFor(
+      async () => {
+        const producer = await coordinator.get(selectedSession.id);
+        expect(producer).toMatchObject({ state: 'idle' });
+        expect(producer?.ownerNodeId).toBeUndefined();
+      },
+      { timeout: 2_000, interval: 10 }
+    );
     await coordinator.close();
     repository.close();
   }, 5_000);
@@ -1318,7 +1328,11 @@ describe('durable VOD producer coordination', () => {
     const { coordinator, coordination, repository, sourcePacing } = await fixture(
       60_000,
       new MemoryCoordinationStore(),
-      { bufferLowWatermarkMs: 2_500, bufferHighWatermarkMs: 3_000 }
+      {
+        bufferLowWatermarkMs: 2_500,
+        bufferHighWatermarkMs: 3_000,
+        demandRefreshIntervalMs: 10
+      }
     );
     const selectedSession = session('session-buffer-watermarks');
     await persistSession(repository, selectedSession);
@@ -1341,12 +1355,16 @@ describe('durable VOD producer coordination', () => {
       windowMs: 30_000,
       playbackDiscontinuity: true
     });
-    await new Promise((resolve) => setTimeout(resolve, 2_100));
-    expect(sourcePacing()?.state).toBe('catching_up');
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({
-      bufferState: 'catching_up',
-      playbackAnchorSegmentIndex: 1
-    });
+    await vi.waitFor(
+      async () => {
+        expect(sourcePacing()?.state).toBe('catching_up');
+        expect(await coordinator.get(selectedSession.id)).toMatchObject({
+          bufferState: 'catching_up',
+          playbackAnchorSegmentIndex: 1
+        });
+      },
+      { timeout: 2_000, interval: 10 }
+    );
     await coordinator.close();
     repository.close();
   }, 5_000);
@@ -1428,7 +1446,11 @@ describe('durable VOD producer coordination', () => {
   });
 
   it('fences a running producer when its durable session disappears', async () => {
-    const { coordinator, coordination, repository } = await fixture();
+    const { coordinator, coordination, repository } = await fixture(
+      60_000,
+      new MemoryCoordinationStore(),
+      { demandRefreshIntervalMs: 10 }
+    );
     const selectedSession = session('session-deleted-while-running');
     await persistSession(repository, selectedSession);
     await coordination.recordSegmentDemand({
@@ -1441,13 +1463,16 @@ describe('durable VOD producer coordination', () => {
     await coordinator.ensure(selectedSession, profile, 0);
 
     await repository.deleteSessionAndRevokePlaybackGrants(selectedSession.id);
-    await new Promise((resolve) => setTimeout(resolve, 2_100));
-
-    expect(coordinator.isActive(selectedSession.id)).toBe(false);
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({
-      generation: 1,
-      state: 'cancelled'
-    });
+    await vi.waitFor(
+      async () => {
+        expect(coordinator.isActive(selectedSession.id)).toBe(false);
+        expect(await coordinator.get(selectedSession.id)).toMatchObject({
+          generation: 1,
+          state: 'cancelled'
+        });
+      },
+      { timeout: 2_000, interval: 10 }
+    );
     await coordinator.close();
     repository.close();
   }, 5_000);
@@ -1462,12 +1487,17 @@ describe('durable VOD producer coordination', () => {
     await persistSession(repository, selectedSession);
     await coordinator.ensure(selectedSession, profile, 0);
     coordination.loseLease = true;
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({
-      generation: 1,
-      state: 'failed'
-    });
-    expect((await coordinator.get(selectedSession.id))?.ownerNodeId).toBeUndefined();
+    await vi.waitFor(
+      async () => {
+        const producer = await coordinator.get(selectedSession.id);
+        expect(producer).toMatchObject({
+          generation: 1,
+          state: 'failed'
+        });
+        expect(producer?.ownerNodeId).toBeUndefined();
+      },
+      { timeout: 2_000, interval: 10 }
+    );
     await coordinator.close();
     repository.close();
   });

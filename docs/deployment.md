@@ -30,8 +30,8 @@ data; pass `--purge-data` only when the retained data should also be deleted.
 
 Native installs also set `VRRELAY_RUNTIME_CONFIG` to a service-owned file in retained application
 state
-and enable supervised exit/restart. The authenticated **Settings → Network** and **Runtime and
-maintenance** panels validate and persist only the documented non-secret listener, URL, proxy,
+and enable supervised exit/restart. The authenticated **Network** and **Runtime** panels validate
+and persist only the documented non-secret listener, URL, proxy,
 capacity, cache, and node-label fields. Environment variables still take precedence, so Docker,
 Kubernetes, and other orchestrated deployments are displayed as read-only instead of having their
 declarative configuration silently overridden. A saved native configuration becomes active only
@@ -151,8 +151,8 @@ Quest-facing playback must use a trusted HTTPS certificate. The relay's internal
 
 ### Dashboard-guided reverse-proxy setup
 
-Native installations can configure their advertised URLs and trusted proxy CIDRs in
-**Settings → Network**. Select **Nginx Proxy Manager**, enter the public hostname, and use
+Native installations can configure their advertised URLs and trusted proxy CIDRs in **Network**.
+Select **Nginx Proxy Manager**, enter the public hostname, and use
 **Use for all URLs** to set the public, administration, and playback HTTPS origins together.
 The page includes the required NPM front-door checklist and a command for finding its Docker
 network subnet. Enter only the subnet or address NPM uses when it connects to VRRelay; never

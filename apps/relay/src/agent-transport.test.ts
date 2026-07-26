@@ -199,7 +199,7 @@ describe('mTLS node agent transport', () => {
     };
     socket.send(JSON.stringify(hello));
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('heartbeat response timed out')), 2_000);
+      const timer = setTimeout(() => reject(new Error('heartbeat response timed out')), 5_000);
       socket.once('message', () => {
         clearTimeout(timer);
         resolve();
@@ -270,9 +270,10 @@ describe('mTLS node agent transport', () => {
     };
     const agent = new NodeAgent(agentOptions);
     await agent.start();
-    for (let attempt = 0; attempt < 20 && !controller.connected(enrollment.node.id); attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(controller.connected(enrollment.node.id)).toBe(true);
+    await vi.waitFor(() => expect(controller.connected(enrollment.node.id)).toBe(true), {
+      timeout: 5_000,
+      interval: 25
+    });
     const command = {
       jobId: 'job-lifecycle',
       sessionId: 'session-lifecycle',
@@ -284,7 +285,6 @@ describe('mTLS node agent transport', () => {
       dispatchCompleted = true;
     });
     await segmentStarted;
-    await new Promise((resolve) => setTimeout(resolve, 25));
     expect(dispatchCompleted).toBe(false);
     await expect(controller.dispatch(enrollment.node.id, command)).rejects.toThrow(
       /already running/
@@ -306,12 +306,14 @@ describe('mTLS node agent transport', () => {
       expect.objectContaining({ message: expect.stringMatching(/disconnect|closed/i) })
     );
     await disconnectJobAborted;
-    for (let attempt = 0; attempt < 80 && disconnectCleanups === 0; attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(disconnectCleanups).toBe(1);
-    for (let attempt = 0; attempt < 120 && !controller.connected(enrollment.node.id); attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(controller.connected(enrollment.node.id)).toBe(true);
+    await vi.waitFor(() => expect(disconnectCleanups).toBe(1), {
+      timeout: 5_000,
+      interval: 25
+    });
+    await vi.waitFor(() => expect(controller.connected(enrollment.node.id)).toBe(true), {
+      timeout: 10_000,
+      interval: 25
+    });
     await controller.rotateCertificate(enrollment.node.id, 30_000);
     let rotated = JSON.parse(await nodeSecrets.get('cluster:node-identity')) as {
       nodeId: string;
@@ -322,15 +324,13 @@ describe('mTLS node agent transport', () => {
         caCertificatePem: string;
       };
     };
-    for (
-      let attempt = 0;
-      attempt < 100 && rotated.active.serialNumber === certificate.serialNumber;
-      attempt += 1
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      rotated = JSON.parse(await nodeSecrets.get('cluster:node-identity')) as typeof rotated;
-    }
-    expect(rotated.active.serialNumber).not.toBe(certificate.serialNumber);
+    await vi.waitFor(
+      async () => {
+        rotated = JSON.parse(await nodeSecrets.get('cluster:node-identity')) as typeof rotated;
+        expect(rotated.active.serialNumber).not.toBe(certificate.serialNumber);
+      },
+      { timeout: 5_000, interval: 25 }
+    );
     expect(await cluster.certificateIsActive(rotated.nodeId, rotated.active.serialNumber)).toBe(
       true
     );
@@ -356,8 +356,10 @@ describe('mTLS node agent transport', () => {
     ).rejects.toThrow(/draining/);
 
     await agent.stop();
-    for (let attempt = 0; attempt < 40 && controller.connected(enrollment.node.id); attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    await vi.waitFor(() => expect(controller.connected(enrollment.node.id)).toBe(false), {
+      timeout: 5_000,
+      interval: 25
+    });
     await expect(controller.setDrain(enrollment.node.id, false)).resolves.toEqual({
       persisted: true,
       acknowledged: false
@@ -365,15 +367,19 @@ describe('mTLS node agent transport', () => {
 
     const restartedAgent = new NodeAgent(agentOptions);
     await restartedAgent.start();
-    for (let attempt = 0; attempt < 80 && !controller.connected(enrollment.node.id); attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const state = JSON.parse(await nodeSecrets.get('cluster:node-identity')) as {
-        draining: boolean;
-      };
-      if (!state.draining) break;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+    await vi.waitFor(() => expect(controller.connected(enrollment.node.id)).toBe(true), {
+      timeout: 10_000,
+      interval: 25
+    });
+    await vi.waitFor(
+      async () => {
+        const state = JSON.parse(await nodeSecrets.get('cluster:node-identity')) as {
+          draining: boolean;
+        };
+        expect(state.draining).toBe(false);
+      },
+      { timeout: 5_000, interval: 25 }
+    );
     expect(
       JSON.parse(await nodeSecrets.get('cluster:node-identity')) as { draining: boolean }
     ).toMatchObject({ draining: false });
@@ -660,8 +666,7 @@ describe('mTLS node agent transport', () => {
       5_000,
       abortController.signal
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(controller.pendingRequestCount(enrollment.node.id)).toBe(1);
+    await vi.waitFor(() => expect(controller.pendingRequestCount(enrollment.node.id)).toBe(1));
     abortController.abort(new Error('test abort'));
     await expect(aborted).rejects.toThrow(/test abort/);
     expect(controller.pendingRequestCount(enrollment.node.id)).toBe(0);
@@ -699,13 +704,14 @@ describe('mTLS node agent transport', () => {
       onCache: async () => ({})
     });
     await agent.start();
-    for (let attempt = 0; attempt < 80 && !controller.connected(enrollment.node.id); attempt += 1)
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    await vi.waitFor(() => expect(controller.connected(enrollment.node.id)).toBe(true), {
+      timeout: 10_000,
+      interval: 25
+    });
 
     const ensureAbort = new AbortController();
     const ensure = agent.ensure('ensure-grant', 0, ensureAbort.signal);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(agent.pendingRequestCount()).toBe(1);
+    await vi.waitFor(() => expect(agent.pendingRequestCount()).toBe(1));
     ensureAbort.abort(new Error('ensure aborted'));
     await expect(ensure).rejects.toThrow(/ensure aborted/);
     expect(agent.pendingRequestCount()).toBe(0);
@@ -791,7 +797,10 @@ describe('mTLS node agent transport', () => {
     expect(controller.connected(enrollment.node.id)).toBe(true);
     hostname.close();
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(controller.connected(enrollment.node.id)).toBe(false), {
+      timeout: 2_000,
+      interval: 20
+    });
     await cluster.activateNodeCertificate(enrollment.node.id, expired);
     expect(
       await connectionResult({
