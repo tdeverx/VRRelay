@@ -31,6 +31,28 @@ git diff --exit-code -- apps/web/src/lib/generated/vrrelay-api
 
 Generated client files are committed so consumers and reviewers see contract changes directly.
 
+## GitHub parity lanes
+
+The named verification lanes are the commands GitHub Actions invokes for pull
+requests and merge-queue commits. Run the matching lane locally when its
+prerequisites are available:
+
+```sh
+npm run verify:core
+npm run verify:browser
+npm run verify:container
+npm run verify:distributed
+npm run verify:deployment
+npm run verify:platform:macos
+npm run verify:platform:windows
+```
+
+The PR and merge queue are the exhaustive deterministic gate. A protected
+`main` merge does not rerun those functional tests; it builds, signs, scans,
+validates, and publishes the rolling release artifacts. Real Jellyfin and live
+service tests remain explicit environment-backed evidence rather than required
+GitHub checks.
+
 Agent-protocol changes also require the strict contract tests and reproducible
 schema freshness gate:
 

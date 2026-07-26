@@ -605,7 +605,7 @@ for (const [source, text, message] of [
   ],
   [
     ciWorkflow,
-    'deploy/windows/build-tray.ps1',
+    'npm run verify:platform:windows',
     'Windows CI must compile the native tray controller'
   ],
   [
@@ -660,8 +660,8 @@ for (const [source, text, message] of [
   ],
   [
     releaseWorkflow,
-    "default: '100'",
-    'release workflow must seed the explicit product build number at 100'
+    'script/publish-rolling-release.mjs next-build-number',
+    'release workflow must derive the next completed product build number'
   ],
   [
     releaseWorkflow,
@@ -718,8 +718,8 @@ if (
   failures.push('release workflow advances OCI latest before the complete release is published');
 if (/^\s+tags:/m.test(releaseWorkflow))
   failures.push('release workflow must not retain staging or per-build OCI tags');
-if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
-  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 3)
+  failures.push('release workflow must replace all three transient handoff artifacts on job retry');
 if (
   rollingReleasePublisher.indexOf('await client.updateTag(context.sha)') >
   rollingReleasePublisher.indexOf('await client.updateRelease(')

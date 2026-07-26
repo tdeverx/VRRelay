@@ -1,12 +1,12 @@
 # Public release checklist
 
-This checklist defines the difference between a buildable repository, a release candidate, and a supported VRRelay release. A maintainer must attach or link the evidence for every release-blocking item before dispatching an authoritative GitHub Actions build.
+This checklist defines the difference between a buildable repository, a release candidate, and a supported VRRelay release. A maintainer must attach or link the evidence for every release-blocking item before merging the commit that GitHub Actions will publish.
 
 ## Repository publication
 
 - Create the initial signed commit without local `.env`, `.data`, generated certificates, provider credentials, media, logs, or build output.
 - Enable GitHub secret scanning, push protection, Dependabot alerts, private vulnerability reporting, and code scanning.
-- Protect `main`: require pull requests, one approving review, resolved conversations, linear history, signed commits where practical, and the CI, distributed acceptance, and security checks.
+- Protect `main`: block direct pushes, require merge queue, one approving review, resolved conversations, linear history, signed commits where practical, and the CI, distributed acceptance, and security checks. Require the same checks for merge-queue commits so the published SHA is the tested SHA.
 - Restrict tag creation and GitHub release publication to maintainers. Permit the Actions identity to force-update only the rolling lightweight `latest` tag, and do not create per-build release tags. Use an environment approval rule for production release jobs if the repository has multiple maintainers.
 - Set the project description, GPL-3.0-or-later license metadata, topics, support URL, security policy, and default issue templates.
 
@@ -34,7 +34,7 @@ This checklist defines the difference between a buildable repository, a release 
 ## Release mechanics
 
 - Update `CHANGELOG.md`, compatibility evidence, implementation status, runtime manifest, and upgrade notes.
-- Dispatch the workflow from `main` only after the candidate commit has passed every gate. Supply the next explicit product build number (`100` for the first rolling deliverable). The workflow reruns CI, distributed acceptance, and high/critical security scanning before building artifacts.
+- Merge only after the candidate has passed every required PR and merge-queue gate. The protected `main` push automatically builds and publishes the release; it derives build `100` for the first completed deliverable, reuses a number for a retry of the same SHA, and otherwise assigns the next completed build number. The release workflow retains artifact/security validation without rerunning functional acceptance suites.
 - Verify the build-numbered artifact checksums, manifests, SBOM/provenance, install each final artifact, and perform one post-package VRChat smoke test. Confirm the publisher appended the assets without deleting or replacing any historical filename, then advanced only the GitHub and OCI `latest` tags.
 - Verify `/api/v1/health`, the dashboard, and Helm app metadata report the semantic package version. Verify OCI labels, macOS DMG/app metadata, Windows installer metadata, and the build manifest carry the explicit product build identity where those formats support it. Verify the manifest records the full source commit and immutable OCI digest, and the packaged Helm chart renders that same relay digest.
 - Confirm the rolling release remains below the publisher's 900-asset safety threshold and that GHCR cleanup retains every digest referenced by a historical manifest.

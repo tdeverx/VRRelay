@@ -1,7 +1,8 @@
 name: Distributed acceptance
 on:
-  push: { branches: [main] }
   pull_request:
+  merge_group:
+  workflow_dispatch:
 permissions: { contents: read }
 
 jobs:
@@ -18,16 +19,7 @@ jobs:
           runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
           printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
       - run: npm ci
-      - name: Run real-process distributed VOD smoke test
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run test:local-cluster 2>&1 | tee local-cluster.log
-      - name: Run two-worker/two-edge acceptance harness
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run test:integration 2>&1 | tee acceptance.log
+      - run: npm run verify:distributed
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

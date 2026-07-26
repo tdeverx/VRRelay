@@ -1,10 +1,12 @@
 # Releasing VRRelay
 
-GitHub Actions is the authoritative VRRelay builder. Maintainers dispatch the
-`Release` workflow from `main` with an explicit positive product build number.
-The first rolling deliverable is build `100`; increment that input for each new
-deliverable. The semantic application version still comes from `package.json`
-and must not be changed only to distinguish rebuilds.
+GitHub Actions is the authoritative VRRelay builder. Every protected merge to
+`main` starts the `Release` workflow automatically. The publisher derives the
+next positive product build number from completed rolling-release manifests:
+the first deliverable is build `100`, retries of the same commit reuse its
+number, and the next completed commit receives the next number. The semantic
+application version still comes from `package.json` and must not be changed
+only to distinguish rebuilds.
 
 One lightweight Git tag and one GitHub release are managed by the workflow:
 `latest`. There are no per-build release tags. The `latest` ref and release
@@ -58,20 +60,21 @@ GitHub Actions artifacts are only the handoff between build jobs and the
 publisher. They expire according to repository retention settings and are not
 the historical archive.
 
-## Before dispatching
+## Before merging
 
-1. Run `npm ci` and `npm run ci` on a clean checkout.
-2. Complete the standalone and distributed acceptance tests documented in
-   [testing.md](testing.md).
-3. Record the required real VRChat PC evidence. Quest claims require separate
+1. Ensure the required pull-request and merge-queue workflows have passed. They
+   run the deterministic repository, browser, container, distributed, platform,
+   deployment, and security lanes before a merge is allowed.
+2. Record the required real VRChat PC evidence. Quest claims require separate
    trusted-HTTPS device evidence.
-4. Review dependency and container scans, update
+3. Review dependency and container scans, update
    `deploy/runtime-manifest.json`, and confirm every runtime checksum from its
    authoritative upstream source.
-5. Confirm the product build input is greater than the last completed
-   deliverable. Reusing a number is reserved for a rerun of that deliverable.
-6. Confirm the Apple and Windows signing secrets and the FFmpeg
+4. Confirm the Apple and Windows signing secrets and the FFmpeg
    corresponding-source variables are present.
+
+`workflow_dispatch` remains available only to recover or retry a failed
+publication from `main`; it never accepts a manually selected build number.
 
 The macOS release job expects `APPLE_DEVELOPER_ID`,
 `APPLE_SIGNING_CERTIFICATE`, `APPLE_SIGNING_CERTIFICATE_PASSWORD`,

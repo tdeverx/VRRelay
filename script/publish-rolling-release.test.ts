@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createBuildIdentity,
+  deriveBuildNumber,
   planAssetUploads,
   prepareRelease,
   publishRelease,
@@ -197,6 +198,38 @@ describe('rolling release publisher', () => {
     expect(() =>
       validateBuildSequence({ ...releaseContext, buildNumber: '102' }, completed)
     ).toThrow(/skips required next build 101/);
+  });
+
+  it('derives the next contiguous build number, reuses retries, and ignores incomplete history', () => {
+    const completed = [
+      {
+        name: `VRRelay-0.1.0-b000101-r123-a1-g${sha.slice(0, 12)}-manifest.json`,
+        state: 'uploaded'
+      },
+      {
+        name: `VRRelay-0.1.0-b000100-r122-a1-g${'f'.repeat(12)}-manifest.json`,
+        state: 'uploaded'
+      },
+      {
+        name: `VRRelay-0.1.0-b000102-r124-a1-g${'e'.repeat(12)}-manifest.json`,
+        state: 'starter'
+      },
+      { name: 'VRRelay-0.1.0-bnot-a-number-r124-a1-gbad-manifest.json', state: 'uploaded' },
+      { name: 'unrelated-release-note.txt', state: 'uploaded' }
+    ];
+
+    expect(deriveBuildNumber(sha, completed)).toBe('101');
+    expect(deriveBuildNumber('a'.repeat(40), completed)).toBe('102');
+    expect(deriveBuildNumber('a'.repeat(40), [])).toBe('100');
+  });
+
+  it('rejects ambiguous completed build history for the same source commit', () => {
+    const completed = [100, 101].map((number) => ({
+      name: `VRRelay-0.1.0-b000${number}-r123-a1-g${sha.slice(0, 12)}-manifest.json`,
+      state: 'uploaded'
+    }));
+
+    expect(() => deriveBuildNumber(sha, completed)).toThrow(/more than one completed/);
   });
 
   it('does not treat an abandoned starter manifest as completed history', () => {

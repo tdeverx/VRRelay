@@ -1,15 +1,8 @@
 name: Release
 on:
+  push: { branches: [main] }
   workflow_dispatch:
-    inputs:
-      build_number:
-        description: Product build number (increment for each deliverable)
-        required: true
-        default: '100'
-        type: string
 permissions: { contents: read }
-env:
-  VRRELAY_BUILD_NUMBER: ${{ inputs.build_number }}
 concurrency:
   group: vrrelay-rolling-latest
   # actionlint 1.7.12 predates GitHub's multi-run concurrency queue.
@@ -20,6 +13,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       version: ${{ steps.identity.outputs.version }}
+      build_number: ${{ steps.build-number.outputs.build_number }}
       build_id: ${{ steps.identity.outputs.build_id }}
       run_attempt: ${{ steps.identity.outputs.run_attempt }}
     steps:
@@ -27,15 +21,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: '26.5.0', cache: npm }
       - run: npm install --global npm@12.0.1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-        with: { version: v4.2.3 }
-      - name: Install the pinned FFmpeg runtime
-        run: |
-          runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
-          printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
       - run: npm ci
+      - name: Derive the next published product build number
+        id: build-number
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "build_number=$(node script/publish-rolling-release.mjs next-build-number)" >> "$GITHUB_OUTPUT"
       - name: Validate the authoritative build identity
         id: identity
+        env:
+          VRRELAY_BUILD_NUMBER: ${{ steps.build-number.outputs.build_number }}
         run: |
           test "$GITHUB_REF" = refs/heads/main
           version="$(node -p "require('./package.json').version")"
@@ -45,44 +40,6 @@ jobs:
             echo "build_id=$build_id"
             echo "run_attempt=$GITHUB_RUN_ATTEMPT"
           } >> "$GITHUB_OUTPUT"
-      - run: script/check-workflows.sh
-      - run: npm run ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
-      - run: helm lint deploy/kubernetes
-      - run: helm template vrrelay deploy/kubernetes > rendered.yaml
-      - run: node script/check-kubernetes.mjs rendered.yaml
-      - name: Reject shared node identities
-        run: if helm template vrrelay deploy/kubernetes --set edge.replicas=2; then exit 1; fi
-      - name: Verify staged controller bootstrap
-        run: |
-          helm template vrrelay deploy/kubernetes --set sourceWorker.enabled=false --set ingestOrigin.enabled=false --set edge.enabled=false > controller-only.yaml
-          if grep -q vrrelay-mediamtx-origin controller-only.yaml; then exit 1; fi
-      - name: Run real-process distributed VOD smoke test
-        shell: bash
-        run: |
-          set -o pipefail
-          version="$(node -p "require('./package.json').version")"
-          script/check-compose.sh
-          script/container-smoke.sh "$version"
-          script/compose-smoke.sh
-          npm run test:cluster-compose 2>&1 | tee cluster-compose.log
-          npm run test:local-cluster 2>&1 | tee local-cluster.log
-      - name: Run two-worker/two-edge acceptance harness
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run test:integration 2>&1 | tee acceptance.log
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: release-acceptance-logs
-          path: |
-            local-cluster.log
-            cluster-compose.log
-            acceptance.log
-          if-no-files-found: ignore
-          overwrite: true
   security:
     needs: gate
     runs-on: ubuntu-latest
@@ -164,6 +121,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VRRELAY_VERSION: ${{ needs.gate.outputs.version }}
+      VRRELAY_BUILD_NUMBER: ${{ needs.gate.outputs.build_number }}
       VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}
       VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
     steps:
@@ -256,6 +214,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VRRELAY_VERSION: ${{ needs.gate.outputs.version }}
+      VRRELAY_BUILD_NUMBER: ${{ needs.gate.outputs.build_number }}
       VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}
       VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
       VRRELAY_OCI_REPOSITORY: ${{ needs.oci.outputs.repository }}
@@ -309,6 +268,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VRRELAY_VERSION: ${{ needs.gate.outputs.version }}
+      VRRELAY_BUILD_NUMBER: ${{ needs.gate.outputs.build_number }}
       VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}
       VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
       VRRELAY_OCI_REPOSITORY: ${{ needs.oci.outputs.repository }}
