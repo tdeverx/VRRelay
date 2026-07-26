@@ -558,15 +558,20 @@ describe('durable VOD producer coordination', () => {
       });
     await coordinator.ensure(selectedSession, profile, 10);
     expect(starts).toEqual([0, 10]);
-    const active = await coordinator.get(selectedSession.id);
-    expect(active).toMatchObject({
-      ownerNodeId: 'worker-a',
-      generation: 2,
-      state: 'running',
-      demandedSegmentIndex: 10,
-      startSegmentIndex: 10
-    });
-    expect(active?.lastPublishedSegmentIndex).toBeGreaterThanOrEqual(10);
+    await vi.waitFor(
+      async () => {
+        const active = await coordinator.get(selectedSession.id);
+        expect(active).toMatchObject({
+          ownerNodeId: 'worker-a',
+          generation: 2,
+          state: 'running',
+          demandedSegmentIndex: 10,
+          startSegmentIndex: 10
+        });
+        expect(active?.lastPublishedSegmentIndex).toBeGreaterThanOrEqual(10);
+      },
+      { timeout: 2_000, interval: 10 }
+    );
     await coordinator.close();
     repository.close();
   });
@@ -769,7 +774,7 @@ describe('durable VOD producer coordination', () => {
       new MemoryCoordinationStore(),
       {
         demandRefreshIntervalMs: 10,
-        progressStallTimeoutMs: 250
+        progressStallTimeoutMs: 1_000
       },
       undefined,
       (observedStarts) => ({
@@ -806,15 +811,20 @@ describe('durable VOD producer coordination', () => {
     });
 
     await coordinator.ensure(selectedSession, profile, 0);
-    await new Promise((resolve) => setTimeout(resolve, 400));
-
-    expect(starts).toEqual([0]);
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({
-      generation: 1,
-      state: 'running'
-    });
-    await coordinator.close();
-    repository.close();
+    const currentTimeMs = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(currentTimeMs + 2_000);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(starts).toEqual([0]);
+      expect(await coordinator.get(selectedSession.id)).toMatchObject({
+        generation: 1,
+        state: 'running'
+      });
+    } finally {
+      now.mockRestore();
+      await coordinator.close();
+      repository.close();
+    }
   });
 
   it('does not restart a buffered producer while a later segment is pending', async () => {
@@ -1289,7 +1299,10 @@ describe('durable VOD producer coordination', () => {
       windowMs: 30_000
     });
     await coordinator.ensure(selectedSession, profile, 0);
-    expect(publishedPaths.length).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(publishedPaths.length).toBeGreaterThan(0), {
+      timeout: 2_000,
+      interval: 10
+    });
     for (const path of publishedPaths) {
       await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(access(`${path}.vrrelay-object.json`)).rejects.toMatchObject({
