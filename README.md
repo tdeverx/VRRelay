@@ -79,6 +79,9 @@ requirements.
 ## Requirements
 
 - Node.js `26.5.0` and npm `12.0.1` (`.nvmrc` pins the Node version).
+- Native Linux npm installs require glibc 2.34 or newer for the bundled
+  `better-sqlite3` 13 runtime. The Docker and Compose images use compatible
+  Debian trixie bases.
 - FFmpeg 8.1.2 with `libx264`, AAC, HLS, and MPEG-TS support.
 - Git.
 
