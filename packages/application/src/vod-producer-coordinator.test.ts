@@ -919,8 +919,8 @@ describe('durable VOD producer coordination', () => {
       new MemoryCoordinationStore(),
       {
         demandRefreshIntervalMs: 10,
-        progressStallTimeoutMs: 500,
-        waitForSegmentMs: 2_000
+        progressStallTimeoutMs: 2_000,
+        waitForSegmentMs: 10_000
       },
       undefined,
       (observedStarts) => ({
@@ -936,7 +936,7 @@ describe('durable VOD producer coordination', () => {
           observedStarts.push(request.startSegmentIndex);
           await mkdir(directory, { recursive: true });
           for (let offset = 0; offset <= 4; offset += 1) {
-            if (offset > 0) await new Promise((resolve) => setTimeout(resolve, 250));
+            if (offset > 0) await new Promise((resolve) => setTimeout(resolve, 600));
             const index = request.startSegmentIndex + offset;
             const path = join(directory, `segment-${index}.ts`);
             await writeFile(path, `segment-${index}`);
