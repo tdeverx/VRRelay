@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
 import {
   DefaultProviderRegistry,
@@ -12,6 +12,7 @@ import {
   type LiveNormalizer,
   type ObjectStore,
   type RemoteProviderGateway,
+  type RemoteSegmentDispatcher,
   type SecretStore,
   type SegmentRequest,
   type Transcoder
@@ -22,7 +23,14 @@ import {
   PrometheusMetricsSink,
   SqliteRepository
 } from '@vrrelay/adapters';
-import type { BackendStatus, CachedObject, ClusterNode, ProfileRevision } from '@vrrelay/domain';
+import type {
+  BackendStatus,
+  CachedObject,
+  ClusterNode,
+  ProfileRevision,
+  RelaySession,
+  VodProducer
+} from '@vrrelay/domain';
 import { LiveService, ProfileService, ProviderService, SessionService } from './services.js';
 
 const dirs: string[] = [];
@@ -459,6 +467,128 @@ describe('profile lifecycle', () => {
 });
 
 describe('VOD relay service', () => {
+  it('dispatches Stop to the durable remote producer owner after failover', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-remote-stop-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const now = new Date().toISOString();
+    await repo.createProvider({
+      id: 'remote-stop-provider',
+      type: 'jellyfin',
+      name: 'Remote stop fixture',
+      baseUrl: 'https://media.invalid',
+      authMode: 'user_token',
+      secretRef: 'remote-stop-secret',
+      capabilities: ['direct_source'],
+      healthy: true,
+      createdAt: now,
+      updatedAt: now
+    });
+    const session: RelaySession = {
+      id: 'remote-stop-session',
+      name: 'Remote stop fixture',
+      kind: 'vod',
+      source: {
+        providerId: 'remote-stop-provider',
+        itemId: 'movie',
+        versionId: 'version-1'
+      },
+      profileId: 'remote-stop-profile',
+      profileRevision: 1,
+      platformMode: 'universal',
+      state: 'idle',
+      durationSeconds: 120,
+      pinned: false,
+      reportActivity: false,
+      viewers: 0,
+      placementPolicy: 'auto',
+      assignedNodeId: 'source-worker-a',
+      placementLocked: false,
+      outputUrls: {
+        primary: 'https://relay.example/play/remote-stop-fixture/index.m3u8'
+      },
+      createdAt: now,
+      updatedAt: now
+    };
+    expect(
+      (
+        await repo.createSessionWithPlaybackGrant(session, {
+          tokenHash: 'remote-stop-grant',
+          sessionId: session.id,
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: now
+        })
+      ).applied
+    ).toBe(true);
+    const producer: VodProducer = {
+      id: session.id,
+      sessionId: session.id,
+      ownerNodeId: 'source-worker-b',
+      generation: 2,
+      state: 'running',
+      demandedSegmentIndex: 0,
+      startSegmentIndex: 0,
+      playbackAnchorSegmentIndex: 0,
+      playbackAnchorAt: now,
+      lastDemandAt: now,
+      workerHistory: [
+        {
+          generation: 2,
+          nodeId: 'source-worker-b',
+          state: 'running',
+          startSegmentIndex: 0,
+          startedAt: now
+        }
+      ],
+      createdAt: now,
+      updatedAt: now
+    };
+    expect((await repo.createVodProducer(producer)).created).toBe(true);
+    const stopProducer = vi.fn<NonNullable<RemoteSegmentDispatcher['stopProducer']>>(
+      async () => undefined
+    );
+    const dispatcher: RemoteSegmentDispatcher = {
+      connected: () => true,
+      dispatch: async () => undefined,
+      stopProducer,
+      cancel: async () => undefined
+    };
+    const service = new SessionService(
+      repo,
+      new MemorySecretStore(),
+      new DefaultProviderRegistry(),
+      {
+        discover: async () => ({
+          ffmpegVersion: 'test',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment: async () => undefined
+      },
+      new InMemoryEventBus(),
+      {
+        publicUrl: 'https://relay.example',
+        internalUrl: 'http://127.0.0.1:8099',
+        cacheDir: join(dir, 'cache'),
+        cacheTtlMs: 1_000,
+        maxWorkers: 1,
+        nodeId: 'controller-a',
+        roles: ['controller']
+      },
+      { clusterRepository: repo, dispatcher }
+    );
+
+    await expect(service.control(session.id, { state: 'stopped' })).resolves.toMatchObject({
+      state: 'stopped'
+    });
+    expect(stopProducer).toHaveBeenCalledOnce();
+    expect(stopProducer).toHaveBeenCalledWith('source-worker-b', session.id);
+  });
+
   it.each([
     ['not-found', 'Provider connection was not found'],
     ['invalid-state', 'Provider connection is being deleted']

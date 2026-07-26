@@ -360,6 +360,7 @@ export class JellyfinProvider implements MediaProvider {
     const response = await this.#send(source.url, {
       headers: { ...source.headers, ...(range ? { Range: range } : {}) },
       allowPublicHttp: source.allowPublicHttp === true,
+      streamingResponse: true,
       ...(signal ? { signal } : {})
     });
     const status = response.statusCode ?? 0;
@@ -524,49 +525,61 @@ export class JellyfinProvider implements MediaProvider {
       body?: string;
       signal?: AbortSignal;
       allowPublicHttp?: boolean;
+      streamingResponse?: boolean;
     }
   ): Promise<IncomingMessage> {
     // Resolve and validate immediately before opening the socket, then make
     // Node's connector use only that result. Host and TLS SNI remain bound to
     // the administrator-approved hostname while DNS cannot be queried again.
-    const timeout = AbortSignal.timeout(this.#requestTimeoutMs);
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    const target = await awaitWithSignal(this.#resolveTarget(rawUrl), signal);
-    if (
-      target.url.protocol === 'http:' &&
-      !target.privateNetwork &&
-      options.allowPublicHttp !== true
-    )
-      throw new Error('Jellyfin public HTTP transport requires explicit unsafe approval');
-    const hostname = target.url.hostname.replace(/^\[|\]$/g, '');
-    const headers = Object.fromEntries(
-      Object.entries(options.headers ?? {}).filter(([name]) => name.toLowerCase() !== 'host')
-    );
-    headers.Host = target.url.host;
+    const streamingTimeout = options.streamingResponse ? new AbortController() : undefined;
+    const timeoutHandle = streamingTimeout
+      ? setTimeout(() => streamingTimeout.abort(), this.#requestTimeoutMs)
+      : undefined;
+    timeoutHandle?.unref();
+    const timeoutSignal = streamingTimeout?.signal ?? AbortSignal.timeout(this.#requestTimeoutMs);
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, timeoutSignal])
+      : timeoutSignal;
     try {
-      return await this.#requestConnector({
-        url: target.url,
-        options: {
-          method: options.method ?? 'GET',
-          headers,
-          agent: false,
-          signal,
-          ...(target.url.protocol === 'https:' && isIP(hostname) === 0
-            ? { servername: hostname }
-            : {}),
-          lookup: (_hostname, lookupOptions, callback) => {
-            if (lookupOptions.all) {
-              callback(null, [{ address: target.address, family: target.family }]);
-              return;
+      const target = await awaitWithSignal(this.#resolveTarget(rawUrl), signal);
+      if (
+        target.url.protocol === 'http:' &&
+        !target.privateNetwork &&
+        options.allowPublicHttp !== true
+      )
+        throw new Error('Jellyfin public HTTP transport requires explicit unsafe approval');
+      const hostname = target.url.hostname.replace(/^\[|\]$/g, '');
+      const headers = Object.fromEntries(
+        Object.entries(options.headers ?? {}).filter(([name]) => name.toLowerCase() !== 'host')
+      );
+      headers.Host = target.url.host;
+      try {
+        return await this.#requestConnector({
+          url: target.url,
+          options: {
+            method: options.method ?? 'GET',
+            headers,
+            agent: false,
+            signal,
+            ...(target.url.protocol === 'https:' && isIP(hostname) === 0
+              ? { servername: hostname }
+              : {}),
+            lookup: (_hostname, lookupOptions, callback) => {
+              if (lookupOptions.all) {
+                callback(null, [{ address: target.address, family: target.family }]);
+                return;
+              }
+              callback(null, target.address, target.family);
             }
-            callback(null, target.address, target.family);
-          }
-        },
-        ...(options.body ? { body: options.body } : {})
-      });
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? 'request_error';
-      throw new Error(`Jellyfin transport failed (${code})`, { cause: error });
+          },
+          ...(options.body ? { body: options.body } : {})
+        });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? 'request_error';
+        throw new Error(`Jellyfin transport failed (${code})`, { cause: error });
+      }
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     }
   }
 

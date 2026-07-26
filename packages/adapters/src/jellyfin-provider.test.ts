@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { IncomingMessage } from 'node:http';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { UNSAFE_PUBLIC_HTTP_SECURITY_NOTICE, type ProviderConnection } from '@vrrelay/domain';
 import { CatalogQuerySchema } from '@vrrelay/contracts';
@@ -19,6 +19,45 @@ function response(
 }
 
 describe('Jellyfin request transport', () => {
+  it('limits the request timeout to opening a media stream', async () => {
+    let connectorSignal: AbortSignal | undefined;
+    const sourceStream = Object.assign(new PassThrough(), {
+      statusCode: 200,
+      headers: {
+        'content-type': 'video/mp4',
+        'accept-ranges': 'bytes'
+      }
+    }) as unknown as IncomingMessage;
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async (request) => {
+        connectorSignal = request.options.signal;
+        return sourceStream;
+      },
+      requestTimeoutMs: 10
+    });
+    const caller = new AbortController();
+
+    const opened = await provider.openSource(
+      {
+        url: 'https://jellyfin.invalid/Videos/movie/stream',
+        headers: { 'X-Emby-Token': 'sensitive-user-token' },
+        durationSeconds: 7_200,
+        fingerprint: 'fixture'
+      },
+      undefined,
+      caller.signal
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(opened.stream).toBe(sourceStream);
+    expect(connectorSignal?.aborted).toBe(false);
+    caller.abort(new Error('producer stopped'));
+    expect(connectorSignal?.aborted).toBe(true);
+    sourceStream.destroy();
+  });
+
   it('maps provider-neutral home sections to Jellyfin feeds and user progress', async () => {
     const requests: JellyfinConnectorRequest[] = [];
     const provider = new JellyfinProvider('0.1.0', {

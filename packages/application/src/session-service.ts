@@ -307,6 +307,7 @@ export class SessionService {
         transcoder,
         this.#cache,
         {
+          getSession: (id) => this.repository.getSession(id),
           acquire: (signal) => this.#acquire(signal),
           prepare: (session, profile, startSegmentIndex, signal, pacing, generation) =>
             this.#prepareVodProducer(
@@ -642,7 +643,7 @@ export class SessionService {
       // Stop must fence the durable HLS producer immediately.  Keeping the
       // session credential permits an explicit VOD resume to create one fresh
       // generation, but a stopped session must not continue sourcing media.
-      await this.#producers?.stop(id);
+      await this.#stopSessionProducer(updated);
       this.#ephemeralSourceCredentials.delete(id);
       this.#deleteSourceGrants(id);
       if (this.#activity.has(id))
@@ -682,17 +683,7 @@ export class SessionService {
   async delete(id: string): Promise<void> {
     const session = await this.repository.getSession(id);
     if (!session) throw new NotFoundError('Session was not found');
-    // Read durable ownership before stopping or deleting credentials.  A
-    // failed-over producer is not necessarily on the assigned worker.
-    const producer =
-      (await this.#producers?.get(id)) ??
-      (await this.infrastructure.clusterRepository?.getVodProducer(id));
-    await this.#producers?.stop(id);
-    const ownerNodeId = producer?.ownerNodeId ?? session.assignedNodeId;
-    if (ownerNodeId && ownerNodeId !== this.options.nodeId)
-      await this.infrastructure.dispatcher
-        ?.stopProducer?.(ownerNodeId, session.id)
-        .catch(() => undefined);
+    await this.#stopSessionProducer(session);
     if (this.#activity.has(id))
       await this.#reportActivity(session, 0, 'stop').catch(() => undefined);
     this.#ephemeralSourceCredentials.delete(id);
@@ -1113,6 +1104,20 @@ export class SessionService {
 
   async cacheUsageBytes(): Promise<number> {
     return this.#cache.usageBytes();
+  }
+
+  async #stopSessionProducer(session: RelaySession): Promise<void> {
+    // Read durable ownership before stopping or deleting credentials. A
+    // failed-over producer is not necessarily on the assigned worker.
+    const producer =
+      (await this.#producers?.get(session.id)) ??
+      (await this.infrastructure.clusterRepository?.getVodProducer(session.id));
+    await this.#producers?.stop(session.id);
+    const ownerNodeId = producer?.ownerNodeId ?? session.assignedNodeId;
+    if (ownerNodeId && ownerNodeId !== this.options.nodeId)
+      await this.infrastructure.dispatcher
+        ?.stopProducer?.(ownerNodeId, session.id)
+        .catch(() => undefined);
   }
 
   async #generateSegment(

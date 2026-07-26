@@ -20,6 +20,13 @@ export interface FFmpegOptions {
   maxLogBytes?: number;
 }
 
+/** @internal */
+export function ffmpegDecodeAccelerationArgs(
+  mode: ProfileRevision['video']['decodeMode']
+): string[] {
+  return mode === 'software' ? [] : ['-hwaccel', mode];
+}
+
 export function redactFfmpegError(output: string): string {
   return output
     .replace(
@@ -206,6 +213,10 @@ export class FFmpegTranscoder implements Transcoder {
       '-y',
       playlist
     ];
+    const producerAbort = new AbortController();
+    const producerSignal = signal
+      ? AbortSignal.any([signal, producerAbort.signal])
+      : producerAbort.signal;
     const published = new Set<number>();
     const scan = async () => {
       const files = await readdir(directory).catch(() => [] as string[]);
@@ -231,7 +242,7 @@ export class FFmpegTranscoder implements Transcoder {
       }
     };
     let outcome: { error?: unknown } | undefined;
-    const running = this.#run(args, undefined, signal, false, directory).then(
+    const running = this.#run(args, undefined, producerSignal, false, directory).then(
       () => {
         outcome = {};
       },
@@ -239,14 +250,20 @@ export class FFmpegTranscoder implements Transcoder {
         outcome = { error };
       }
     );
-    while (!outcome) {
+    try {
+      while (!outcome) {
+        await scan();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await running;
       await scan();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (outcome.error)
+        throw outcome.error instanceof Error ? outcome.error : new Error('VOD producer failed');
+    } catch (error) {
+      producerAbort.abort();
+      await running;
+      throw error;
     }
-    await running;
-    await scan();
-    if (outcome.error)
-      throw outcome.error instanceof Error ? outcome.error : new Error('VOD producer failed');
   }
 
   async #generateFmp4Segment(
@@ -309,10 +326,8 @@ export class FFmpegTranscoder implements Transcoder {
     const headerBlock = Object.entries(source.headers)
       .map(([key, value]) => `${key}: ${value}\r\n`)
       .join('');
-    const decode = profile.video.decodeMode;
-    const hardware = decode === 'auto' || decode === 'software' ? [] : ['-hwaccel', decode];
     return [
-      ...hardware,
+      ...ffmpegDecodeAccelerationArgs(profile.video.decodeMode),
       ...(headerBlock ? ['-headers', headerBlock] : []),
       ...(source.positionedAtSeconds !== undefined ? ['-seekable', '0'] : []),
       '-i',
