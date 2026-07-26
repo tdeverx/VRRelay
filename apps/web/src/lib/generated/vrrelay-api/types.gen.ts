@@ -742,6 +742,8 @@ export type RuntimeConfiguration = {
     vodProducerIdleTimeoutMs: number;
     vodProducerBufferLowWatermarkMs: number;
     vodProducerBufferHighWatermarkMs: number;
+    vodProducerCatchupRate: number;
+    vodProducerEncoder: 'auto' | 'libx264' | 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv' | 'h264_vaapi' | 'h264_amf';
     vodProducerMaxConcurrent: number;
     vodProducerMaxPerProvider: number;
     nodeName: string;

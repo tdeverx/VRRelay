@@ -281,7 +281,8 @@ async function fixture(
             startSeconds: startSegmentIndex * selectedProfile.delivery.segmentDuration,
             duration:
               durationSeconds - startSegmentIndex * selectedProfile.delivery.segmentDuration,
-            initialReadBurstSeconds: 60
+            initialReadBurstSeconds: 60,
+            readRate: 2
           };
         })
     },
@@ -482,7 +483,8 @@ describe('durable VOD producer coordination', () => {
           startSegmentIndex,
           startSeconds: startSegmentIndex * selectedProfile.delivery.segmentDuration,
           duration: durationSeconds - startSegmentIndex * selectedProfile.delivery.segmentDuration,
-          initialReadBurstSeconds: 60
+          initialReadBurstSeconds: 60,
+          readRate: 2
         };
       }
     );

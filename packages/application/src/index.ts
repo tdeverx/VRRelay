@@ -657,6 +657,7 @@ export interface VodProducerRequest {
   startSeconds: number;
   duration: number;
   initialReadBurstSeconds: number;
+  readRate: number;
   audioTrack?: number;
   subtitleTrack?: number;
 }

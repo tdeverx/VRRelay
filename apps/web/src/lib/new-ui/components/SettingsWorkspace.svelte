@@ -1086,6 +1086,51 @@
                 share one fenced producer generation for each session.</Field.Description
               ></Field.Field
             ><Field.Field
+              ><Field.Label for="producer-catchup-rate">VOD catch-up aggressiveness</Field.Label
+              ><Input
+                id="producer-catchup-rate"
+                type="range"
+                min="1"
+                max="2"
+                step="0.1"
+                value={runtimeDraft.vodProducerCatchupRate}
+                disabled={!runtime?.writable}
+                oninput={(event) => {
+                  runtimeDraft!.vodProducerCatchupRate = Number(event.currentTarget.value);
+                  runtimeValidated = false;
+                }}
+              /><Field.Description
+                >{runtimeDraft.vodProducerCatchupRate.toFixed(1)}× source catch-up rate. Higher
+                values fill the 30–60 second buffer faster.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label>Default H.264 encoder</Field.Label><Select.Root
+                type="single"
+                value={runtimeDraft.vodProducerEncoder}
+                disabled={!runtime?.writable}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  runtimeDraft!.vodProducerEncoder =
+                    value as RuntimeConfiguration['vodProducerEncoder'];
+                  runtimeValidated = false;
+                }}
+                ><Select.Trigger class="w-full">{runtimeDraft.vodProducerEncoder}</Select.Trigger
+                ><Select.Content
+                  ><Select.Group
+                    ><Select.Item value="auto">Auto (best available)</Select.Item><Select.Item
+                      value="libx264">libx264 (software)</Select.Item
+                    ><Select.Item value="h264_videotoolbox">VideoToolbox</Select.Item><Select.Item
+                      value="h264_nvenc">NVIDIA NVENC</Select.Item
+                    ><Select.Item value="h264_qsv">Intel Quick Sync</Select.Item><Select.Item
+                      value="h264_vaapi">VA-API</Select.Item
+                    ><Select.Item value="h264_amf">AMD AMF</Select.Item></Select.Group
+                  ></Select.Content
+                ></Select.Root
+              ><Field.Description
+                >Forces newly created built-in H.264 profiles after restart. The selected encoder
+                must be available on each source worker.</Field.Description
+              ></Field.Field
+            ><Field.Field
               ><Field.Label for="producer-buffer-low"
                 >VOD buffer refill threshold (seconds)</Field.Label
               ><Input

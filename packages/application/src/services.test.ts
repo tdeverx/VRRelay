@@ -491,6 +491,64 @@ describe('profile lifecycle', () => {
     ).toBe(true);
   });
 
+  it('uses a supported forced encoder for all built-in profiles', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-forced-encoder-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new ProfileService(
+      repo,
+      {
+        ...mediaCapabilities,
+        encoders: [
+          { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
+          ...mediaCapabilities.encoders
+        ]
+      },
+      'libx264'
+    );
+
+    await service.seed();
+
+    expect(
+      (await service.list()).every(
+        (seeded) => seeded.video.encoder === 'libx264' && seeded.video.hardwareMode === 'software'
+      )
+    ).toBe(true);
+  });
+
+  it('rejects a forced encoder that is unavailable on the relay', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-unavailable-encoder-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new ProfileService(repo, mediaCapabilities, 'h264_videotoolbox');
+
+    await expect(service.seed()).rejects.toThrow(/forced encoder is not available/);
+  });
+
+  it('moves seeded profiles to a newly forced encoder after a policy change', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-encoder-change-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const capabilities = {
+      ...mediaCapabilities,
+      encoders: [
+        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
+        ...mediaCapabilities.encoders
+      ]
+    };
+
+    await new ProfileService(repo, capabilities).seed();
+    await new ProfileService(repo, capabilities, 'libx264').seed();
+
+    expect(await repo.getProfile('universal-h264-hls-vod')).toMatchObject({
+      revision: 2,
+      video: { encoder: 'libx264', hardwareMode: 'software' }
+    });
+  });
+
   it('keeps an untouched hardware-accelerated built-in profile', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-migration-'));
     dirs.push(dir);

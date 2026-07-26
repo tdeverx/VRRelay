@@ -362,6 +362,18 @@ export const RuntimeConfigurationSchema = z
     vodProducerIdleTimeoutMs: z.number().int().min(15_000).max(600_000).default(60_000),
     vodProducerBufferLowWatermarkMs: z.number().int().min(4_000).max(300_000).default(30_000),
     vodProducerBufferHighWatermarkMs: z.number().int().min(8_000).max(600_000).default(60_000),
+    vodProducerCatchupRate: z.number().min(1).max(2).default(2),
+    vodProducerEncoder: z
+      .enum([
+        'auto',
+        'libx264',
+        'h264_videotoolbox',
+        'h264_nvenc',
+        'h264_qsv',
+        'h264_vaapi',
+        'h264_amf'
+      ])
+      .default('auto'),
     vodProducerMaxConcurrent: z.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.number().int().min(1).max(32).default(2),
     nodeName: z.string().trim().min(1).max(100),

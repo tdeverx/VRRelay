@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto';
 import type { ProfileRevision } from '@vrrelay/domain';
-import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
+import type { CreateProfileRevisionRequest, RuntimeConfiguration } from '@vrrelay/contracts';
 import type { MediaCapabilities, Repository } from './index.js';
 import { ConflictError } from './errors.js';
 
@@ -33,7 +33,8 @@ export class ProfileService {
 
   constructor(
     private readonly repository: Repository,
-    capabilities?: MediaCapabilities
+    capabilities?: MediaCapabilities,
+    private readonly builtInEncoder: RuntimeConfiguration['vodProducerEncoder'] = 'auto'
   ) {
     this.#capabilities = capabilities;
   }
@@ -60,9 +61,22 @@ export class ProfileService {
       { encoder: 'h264_vaapi', hardwareMode: 'vaapi' },
       { encoder: 'h264_amf', hardwareMode: 'amf' }
     ];
-    const hardwareEncoder = hardwareEncoders.find(({ encoder }) => available.has(encoder));
-    const preferredVideo = hardwareEncoder
-      ? hardwareEncoder
+    const selectedEncoder =
+      this.builtInEncoder === 'auto'
+        ? hardwareEncoders.find(({ encoder }) => available.has(encoder))
+        : (hardwareEncoders.find(({ encoder }) => encoder === this.builtInEncoder) ??
+          (this.builtInEncoder === 'libx264'
+            ? { encoder: 'libx264', hardwareMode: 'software' as const }
+            : undefined));
+    if (
+      this.builtInEncoder !== 'auto' &&
+      (!selectedEncoder || !available.has(selectedEncoder.encoder))
+    )
+      throw new ConflictError(
+        `The forced encoder is not available on this relay: ${this.builtInEncoder}`
+      );
+    const preferredVideo = selectedEncoder
+      ? selectedEncoder
       : { encoder: 'libx264', hardwareMode: 'software' as const };
     const now = new Date().toISOString();
     const base: Omit<
@@ -176,15 +190,13 @@ export class ProfileService {
         continue;
       }
       if (
-        latest.revision === 2 &&
         latest.name === profile.name &&
-        latest.video.encoder === 'libx264' &&
-        latest.video.hardwareMode === 'software' &&
-        preferredVideo.hardwareMode !== 'software'
+        (latest.video.encoder !== preferredVideo.encoder ||
+          latest.video.hardwareMode !== preferredVideo.hardwareMode)
       )
         await this.repository.putProfile({
           ...latest,
-          revision: 3,
+          revision: latest.revision + 1,
           video: { ...latest.video, ...preferredVideo },
           createdAt: now
         });

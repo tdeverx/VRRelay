@@ -69,14 +69,15 @@ describe('FFmpeg adapter', () => {
   });
 
   it('aligns FFmpeg initial read pacing with the producer buffer high watermark', () => {
-    expect(ffmpegVodReadPacingArgs(60)).toEqual([
+    expect(ffmpegVodReadPacingArgs(1.5, 60)).toEqual([
       '-readrate',
-      '2',
+      '1.500',
       '-readrate_initial_burst',
       '60.000'
     ]);
-    expect(() => ffmpegVodReadPacingArgs(0)).toThrow(/finite positive duration/);
-    expect(() => ffmpegVodReadPacingArgs(Number.NaN)).toThrow(/finite positive duration/);
+    expect(() => ffmpegVodReadPacingArgs(2, 0)).toThrow(/finite positive duration/);
+    expect(() => ffmpegVodReadPacingArgs(2, Number.NaN)).toThrow(/finite positive duration/);
+    expect(() => ffmpegVodReadPacingArgs(2.1, 60)).toThrow(/between 1x and 2x/);
   });
 
   it('redacts internal grants, credentials, and source URLs from FFmpeg failures', () => {
@@ -187,7 +188,8 @@ describe('FFmpeg adapter', () => {
         startSegmentIndex: 7,
         startSeconds: 8,
         duration: 1,
-        initialReadBurstSeconds: 60
+        initialReadBurstSeconds: 60,
+        readRate: 2
       },
       join(directory, 'producer'),
       async (segment) => {
@@ -235,7 +237,8 @@ describe('FFmpeg adapter', () => {
         startSegmentIndex: 9,
         startSeconds: 8,
         duration: 1,
-        initialReadBurstSeconds: 60
+        initialReadBurstSeconds: 60,
+        readRate: 2
       },
       fmp4Directory,
       async (segment) => {

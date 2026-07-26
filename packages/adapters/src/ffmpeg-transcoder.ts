@@ -30,10 +30,20 @@ export function ffmpegDecodeAccelerationArgs(
 }
 
 /** @internal */
-export function ffmpegVodReadPacingArgs(initialReadBurstSeconds: number): string[] {
+export function ffmpegVodReadPacingArgs(
+  readRate: number,
+  initialReadBurstSeconds: number
+): string[] {
+  if (!Number.isFinite(readRate) || readRate < 1 || readRate > 2)
+    throw new Error('The VOD producer read rate must be between 1x and 2x');
   if (!Number.isFinite(initialReadBurstSeconds) || initialReadBurstSeconds <= 0)
     throw new Error('The VOD producer initial read burst must be a finite positive duration');
-  return ['-readrate', '2', '-readrate_initial_burst', initialReadBurstSeconds.toFixed(3)];
+  return [
+    '-readrate',
+    readRate.toFixed(3),
+    '-readrate_initial_burst',
+    initialReadBurstSeconds.toFixed(3)
+  ];
 }
 
 /** @internal */
@@ -223,7 +233,7 @@ export class FFmpegTranscoder implements Transcoder {
       // Keep FFmpeg's average source-read ceiling while allowing the
       // application watermark pacer to fill its initial buffer before taking
       // ownership of pause/resume flow control.
-      ...ffmpegVodReadPacingArgs(request.initialReadBurstSeconds),
+      ...ffmpegVodReadPacingArgs(request.readRate, request.initialReadBurstSeconds),
       ...this.#inputArgs(request.source, request.profile),
       '-t',
       request.duration.toFixed(3),
