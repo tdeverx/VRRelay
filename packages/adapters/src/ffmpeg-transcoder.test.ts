@@ -122,8 +122,7 @@ setInterval(() => {}, 1000);
           profile,
           startSegmentIndex: 0,
           startSeconds: 0,
-          duration: 60,
-          initialReadBurstSeconds: 60
+          duration: 60
         },
         producerDirectory,
         async () => {
@@ -183,8 +182,7 @@ setInterval(() => {}, 1000);
         profile,
         startSegmentIndex: 7,
         startSeconds: 8,
-        duration: 1,
-        initialReadBurstSeconds: 60
+        duration: 1
       },
       join(directory, 'producer'),
       async (segment) => {
@@ -231,8 +229,7 @@ setInterval(() => {}, 1000);
         },
         startSegmentIndex: 9,
         startSeconds: 8,
-        duration: 1,
-        initialReadBurstSeconds: 60
+        duration: 1
       },
       fmp4Directory,
       async (segment) => {
