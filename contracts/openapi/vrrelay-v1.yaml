@@ -2157,7 +2157,7 @@ components:
           vodProducerIdleTimeoutMs,
           vodProducerBufferLowWatermarkMs,
           vodProducerBufferHighWatermarkMs,
-          vodProducerCatchupRate,
+          vodProducerMaxCatchupRate,
           vodProducerEncoder,
           vodProducerMaxConcurrent,
           vodProducerMaxPerProvider,
@@ -2183,7 +2183,7 @@ components:
           { type: integer, minimum: 4000, maximum: 300000, default: 30000 }
         vodProducerBufferHighWatermarkMs:
           { type: integer, minimum: 8000, maximum: 600000, default: 60000 }
-        vodProducerCatchupRate: { type: number, minimum: 1, maximum: 2, default: 2 }
+        vodProducerMaxCatchupRate: { type: number, minimum: 1, maximum: 2, default: 2 }
         vodProducerEncoder:
           {
             type: string,

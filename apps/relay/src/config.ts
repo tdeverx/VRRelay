@@ -132,7 +132,7 @@ const ConfigSchema = z
     vodProducerBufferHighWatermarkMs: duration
       .pipe(z.number().int().min(8_000).max(600_000))
       .default(60_000),
-    vodProducerCatchupRate: z.coerce.number().min(1).max(2).default(2),
+    vodProducerMaxCatchupRate: z.coerce.number().min(1).max(2).default(2),
     vodProducerEncoder: z
       .enum([
         'auto',
@@ -359,7 +359,15 @@ function isLoopbackRuntimeHost(host: string): boolean {
 function readRuntimeConfiguration(path: string | undefined): RuntimeConfiguration | undefined {
   if (!path) return undefined;
   try {
-    return RuntimeConfigurationSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    // Keep an existing runtime file effective while moving the dashboard label
+    // from an opaque aggressiveness value to a per-stream maximum.
+    if (
+      parsed.vodProducerMaxCatchupRate === undefined &&
+      parsed.vodProducerCatchupRate !== undefined
+    )
+      parsed.vodProducerMaxCatchupRate = parsed.vodProducerCatchupRate;
+    return RuntimeConfigurationSchema.parse(parsed);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw new Error(
@@ -412,8 +420,10 @@ export function loadConfig(environment = process.env): RelayConfig {
     vodProducerBufferHighWatermarkMs:
       environment.VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK ??
       runtime?.vodProducerBufferHighWatermarkMs,
-    vodProducerCatchupRate:
-      environment.VRRELAY_VOD_PRODUCER_CATCHUP_RATE ?? runtime?.vodProducerCatchupRate,
+    vodProducerMaxCatchupRate:
+      environment.VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE ??
+      environment.VRRELAY_VOD_PRODUCER_CATCHUP_RATE ??
+      runtime?.vodProducerMaxCatchupRate,
     vodProducerEncoder: environment.VRRELAY_VOD_PRODUCER_ENCODER ?? runtime?.vodProducerEncoder,
     vodProducerMaxConcurrent:
       environment.VRRELAY_VOD_PRODUCER_MAX_CONCURRENT ?? runtime?.vodProducerMaxConcurrent,

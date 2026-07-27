@@ -12,6 +12,7 @@ import {
   estimateVodProducerBufferMs,
   isVodProducerDemandCovered,
   VodProducerCoordinator,
+  vodProducerCatchupRate,
   vodProducerForwardJoinSegments
 } from './vod-producer-coordinator.js';
 import type { VodProducerCallbacks } from './vod-producer-coordinator.js';
@@ -884,7 +885,10 @@ describe('durable VOD producer coordination', () => {
       windowMs: 30_000
     });
     await coordinator.ensure(selectedSession, profile, 0);
-    expect(sourcePacing()?.state).toBe('buffered');
+    await vi.waitFor(() => expect(sourcePacing()?.state).toBe('buffered'), {
+      timeout: 2_000,
+      interval: 25
+    });
     await coordination.recordSegmentDemand({
       sessionId: selectedSession.id,
       viewerHash: 'viewer-buffered',
@@ -1326,50 +1330,15 @@ describe('durable VOD producer coordination', () => {
     repository.close();
   });
 
-  it('uses low and high watermarks without oscillating between them', async () => {
-    const { coordinator, coordination, repository, sourcePacing } = await fixture(
-      60_000,
-      new MemoryCoordinationStore(),
-      {
-        bufferLowWatermarkMs: 2_500,
-        bufferHighWatermarkMs: 3_000,
-        demandRefreshIntervalMs: 10
-      }
-    );
-    const selectedSession = session('session-buffer-watermarks');
-    await persistSession(repository, selectedSession);
-    await coordination.recordSegmentDemand({
-      sessionId: selectedSession.id,
-      viewerHash: 'viewer-a',
-      segmentIndex: 0,
-      observedAtMs: Date.now(),
-      windowMs: 30_000
-    });
-    await coordinator.ensure(selectedSession, profile, 0);
-    expect(sourcePacing()?.state).toBe('buffered');
-    expect(await coordinator.get(selectedSession.id)).toMatchObject({ bufferState: 'buffered' });
-
-    await coordination.recordSegmentDemand({
-      sessionId: selectedSession.id,
-      viewerHash: 'viewer-a',
-      segmentIndex: 1,
-      observedAtMs: Date.now(),
-      windowMs: 30_000,
-      playbackDiscontinuity: true
-    });
-    await vi.waitFor(
-      async () => {
-        expect(sourcePacing()?.state).toBe('catching_up');
-        expect(await coordinator.get(selectedSession.id)).toMatchObject({
-          bufferState: 'catching_up',
-          playbackAnchorSegmentIndex: 1
-        });
-      },
-      { timeout: 2_000, interval: 10 }
-    );
-    await coordinator.close();
-    repository.close();
-  }, 5_000);
+  it('scales each producer smoothly between normal speed and its configured maximum', () => {
+    const settings = { lowWatermarkMs: 2_500, highWatermarkMs: 3_000, maximumRate: 2 };
+    expect(vodProducerCatchupRate({ ...settings, bufferMs: 0 })).toBe(2);
+    expect(vodProducerCatchupRate({ ...settings, bufferMs: 2_500 })).toBe(2);
+    expect(vodProducerCatchupRate({ ...settings, bufferMs: 2_750 })).toBe(1.5);
+    expect(vodProducerCatchupRate({ ...settings, bufferMs: 3_000 })).toBe(1);
+    expect(vodProducerCatchupRate({ ...settings, bufferMs: 3_500 })).toBe(1);
+    expect(vodProducerCatchupRate({ ...settings, bufferMs: 0, maximumRate: 1 })).toBe(1);
+  });
 
   it('re-evaluates a majority that arrives after the first distant request', async () => {
     const { coordinator, coordination, repository, starts } = await fixture();

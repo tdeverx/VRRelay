@@ -111,12 +111,28 @@ export function estimateVodProducerBufferMs(input: {
   return Math.max(0, publishedHeadMs - estimatedPlaybackPositionMs);
 }
 
+export function vodProducerCatchupRate(input: {
+  bufferMs: number;
+  lowWatermarkMs: number;
+  highWatermarkMs: number;
+  maximumRate: number;
+}): number {
+  if (!Number.isFinite(input.maximumRate) || input.maximumRate < 1 || input.maximumRate > 2)
+    throw new Error('The VOD producer maximum catch-up rate must be between 1x and 2x');
+  if (input.maximumRate === 1 || input.bufferMs >= input.highWatermarkMs) return 1;
+  if (input.bufferMs <= input.lowWatermarkMs) return input.maximumRate;
+  const deficit =
+    (input.highWatermarkMs - input.bufferMs) / (input.highWatermarkMs - input.lowWatermarkMs);
+  return 1 + (input.maximumRate - 1) * Math.min(1, Math.max(0, deficit));
+}
+
 export interface VodProducerCoordinatorOptions {
   cacheDir: string;
   nodeId: string;
   idleTimeoutMs: number;
   bufferLowWatermarkMs: number;
   bufferHighWatermarkMs: number;
+  maxCatchupRate?: number;
   maxConcurrentProducers?: number;
   maxConcurrentProducersPerProvider?: number;
   leaseMs?: number;
@@ -277,7 +293,6 @@ export class VodProducerCoordinator {
       active.lastDemandAtMs = demandedAt;
       this.#applyPlaybackAnchor(active, dominant);
       active.demandedSegmentIndex = dominant.index;
-      this.#reconcilePacing(profile, active);
       await this.#transition(session.id, active.generation, (current) => ({
         ...current,
         demandedSegmentIndex: dominant.index,
@@ -518,7 +533,7 @@ export class VodProducerCoordinator {
         demandedSegmentIndex: startSegmentIndex,
         lastDemandAtMs: Date.now(),
         placementLocked: currentSession.placementLocked,
-        pacing: new VodProducerSourcePacer(),
+        pacing: new VodProducerSourcePacer(this.options.maxCatchupRate ?? 2),
         publishedAny: false,
         pendingWaiters: new Set(),
         progressWatchStartedAtMs: undefined,
@@ -652,7 +667,7 @@ export class VodProducerCoordinator {
               refreshing = false;
             });
         },
-        Math.max(1, this.options.demandRefreshIntervalMs ?? 2_000)
+        Math.max(1, this.options.demandRefreshIntervalMs ?? 1_000)
       );
       idleCheck.unref();
       this.metrics?.increment('vod_producers_started_total');
@@ -676,7 +691,6 @@ export class VodProducerCoordinator {
             terminalSegmentPublished ||= segment.index >= terminalSegmentIndex;
             this.#retries.delete(session.id);
             active.lastPublishedSegmentIndex = segment.index;
-            this.#reconcilePacing(profile, active);
             this.#resetProgressWatch(active, Date.now());
             await this.#transition(session.id, active.generation, (current) => ({
               ...current,
@@ -1102,16 +1116,17 @@ export class VodProducerCoordinator {
       playbackAnchorAtMs: active.playbackAnchorAtMs,
       observedAtMs: Date.now()
     });
-    if (active.pacing.state === 'catching_up' && bufferMs >= this.options.bufferHighWatermarkMs) {
-      active.pacing.pause();
-      active.progressWatchStartedAtMs = undefined;
-    } else if (
-      active.pacing.state === 'buffered' &&
-      bufferMs <= this.options.bufferLowWatermarkMs
-    ) {
-      active.pacing.resume();
+    const wasCatchingUp = active.pacing.state === 'catching_up';
+    active.pacing.setRate(
+      vodProducerCatchupRate({
+        bufferMs,
+        lowWatermarkMs: this.options.bufferLowWatermarkMs,
+        highWatermarkMs: this.options.bufferHighWatermarkMs,
+        maximumRate: this.options.maxCatchupRate ?? 2
+      })
+    );
+    if (!wasCatchingUp && active.pacing.state === 'catching_up')
       this.#resetProgressWatch(active, Date.now());
-    }
   }
 
   #resetProgressWatch(active: ActiveProducer, observedAtMs: number): void {

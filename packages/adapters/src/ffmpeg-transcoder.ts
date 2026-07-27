@@ -230,9 +230,9 @@ export class FFmpegTranscoder implements Transcoder {
       ...(request.source.positionedAtSeconds === request.startSeconds
         ? []
         : ['-ss', request.startSeconds.toFixed(3)]),
-      // Keep FFmpeg's average source-read ceiling while allowing the
-      // application watermark pacer to fill its initial buffer before taking
-      // ownership of pause/resume flow control.
+      // Cap FFmpeg at this stream's configured maximum. The application pacer
+      // continuously scales the opaque source proxy between normal speed and
+      // that maximum without restarting the upstream connection.
       ...ffmpegVodReadPacingArgs(request.readRate, request.initialReadBurstSeconds),
       ...this.#inputArgs(request.source, request.profile),
       '-t',

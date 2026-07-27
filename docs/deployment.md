@@ -82,8 +82,9 @@ Use `compose.gpu.yml` as a host-specific example for `/dev/dri` or NVIDIA access
 
 Administrators can stage a global built-in H.264 encoder policy through Runtime settings or
 `VRRELAY_VOD_PRODUCER_ENCODER`. `auto` selects the best discovered encoder; an explicit value
-forces the named encoder after restart and must be available on every source worker. The catch-up
-read rate is separately configurable from 1× to 2× with `VRRELAY_VOD_PRODUCER_CATCHUP_RATE`.
+forces the named encoder after restart and must be available on every source worker. The maximum
+catch-up rate per stream is separately configurable from 1× to 2× with
+`VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE`; each stream automatically scales from 1× to that cap.
 
 The standalone host ports remain 8099 (HTTP), 1935 (RTMP), 8889 (WHIP), 8189/UDP (WebRTC), and 8890/UDP (SRT). The administration port binds to `127.0.0.1` by default so an unconfigured instance cannot be claimed from the LAN. Set `VRRELAY_HTTP_HOST=0.0.0.0` only after configuring canonical HTTPS administration and playback URLs plus a random first-run setup token. Override the port numbers with `VRRELAY_HTTP_PORT`, `VRRELAY_RTMP_PORT`, `VRRELAY_WHIP_PORT`, `VRRELAY_WEBRTC_UDP_PORT`, and `VRRELAY_SRT_PORT` when running parallel stacks or avoiding a host-port conflict.
 
@@ -103,8 +104,9 @@ or production secrets are unsafe. Configure the proxy to send one
 `VRRELAY_VIEWER_REGION_HEADER`. `VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT` defaults to `60s` and accepts
 15 seconds through 10 minutes. `VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK` and
 `VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK` default to `30s` and `60s`; the high watermark must be
-greater than the low watermark. The producer catches up below the low watermark and backpressures
-its existing source connection at the high watermark. `VRRELAY_LOG_LEVEL=info` is the normal setting; use `debug` only
+greater than the low watermark. Every producer checks its own headroom once per second, runs at its
+configured maximum below the low watermark, and smoothly returns to 1× by the high watermark.
+`VRRELAY_LOG_LEVEL=info` is the normal setting; use `debug` only
 while collecting detailed redacted playback traces. Advanced deployments may also set the standard
 Pino levels `trace`, `warn`, `error`, `fatal`, or `silent` through the environment; the dashboard
 intentionally exposes only Normal and Detailed. `VRRELAY_VOD_PRODUCER_MAX_CONCURRENT` and

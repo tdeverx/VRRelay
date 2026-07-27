@@ -1086,22 +1086,24 @@
                 share one fenced producer generation for each session.</Field.Description
               ></Field.Field
             ><Field.Field
-              ><Field.Label for="producer-catchup-rate">VOD catch-up aggressiveness</Field.Label
+              ><Field.Label for="producer-max-catchup-rate"
+                >Maximum VOD catch-up rate per stream</Field.Label
               ><Input
-                id="producer-catchup-rate"
+                id="producer-max-catchup-rate"
                 type="range"
                 min="1"
                 max="2"
                 step="0.1"
-                value={runtimeDraft.vodProducerCatchupRate}
+                value={runtimeDraft.vodProducerMaxCatchupRate}
                 disabled={!runtime?.writable}
                 oninput={(event) => {
-                  runtimeDraft!.vodProducerCatchupRate = Number(event.currentTarget.value);
+                  runtimeDraft!.vodProducerMaxCatchupRate = Number(event.currentTarget.value);
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >{runtimeDraft.vodProducerCatchupRate.toFixed(1)}× source catch-up rate. Higher
-                values fill the 30–60 second buffer faster.</Field.Description
+                >Each stream automatically moves between 1× and
+                {runtimeDraft.vodProducerMaxCatchupRate.toFixed(1)}× every second based on its
+                buffer headroom. 1× keeps the stream at normal playback speed.</Field.Description
               ></Field.Field
             ><Field.Field
               ><Field.Label>Default H.264 encoder</Field.Label><Select.Root
@@ -1147,7 +1149,7 @@
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >When producer headroom reaches this level, catch-up transcoding resumes.</Field.Description
+                >At or below this headroom, the producer uses its configured maximum catch-up rate.</Field.Description
               ></Field.Field
             ><Field.Field
               ><Field.Label for="producer-buffer-high">VOD buffer target (seconds)</Field.Label
@@ -1165,7 +1167,8 @@
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >Catch-up pauses at this level. It must be greater than the refill threshold.</Field.Description
+                >At or above this headroom, the producer returns to 1×. It must exceed the refill
+                threshold.</Field.Description
               ></Field.Field
             ></Field.Group
           ></Card.Content

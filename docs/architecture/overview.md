@@ -133,12 +133,11 @@ Activated object-store/backend configuration records per-node application state 
 The HLS manifest is finite on its first response: it declares `PLAYLIST-TYPE:VOD`, every planned segment duration, and `ENDLIST`. This gives a compatible player a finite duration and seekable segment timeline. The player maintains its own current position; that value is not supplied by the manifest. VRRelay does not synchronize viewers. A VRChat world distributes the URL and playback time and seeks clients as needed.
 
 No permanent alternate rendition is generated. The producer starts at the demanded segment and
-uses a low/high watermark buffer. By default it catches up at up to approximately 2× while
-headroom is at or below 30 seconds, backpressures the same source connection at 60 seconds, and
-does not resume catch-up until the low watermark is reached. Both watermarks are configurable and
-the hysteresis prevents rapid pacing oscillation. FFmpeg retains a structured 2× source-read safety
-ceiling, with its initial read allowance set to the same duration as the high watermark so the
-application pacer takes ownership before FFmpeg begins enforcing that ceiling. Headroom is measured
+uses a low/high watermark buffer. Every second, each producer measures its own headroom and smoothly
+sets its source pace between 1× and its configured per-stream maximum (2× by default): it uses the
+maximum at or below the low watermark, 1× at or above the high watermark, and linearly scales between
+them. FFmpeg retains that configured maximum as a structured source-read safety ceiling, while the
+application pacer adjusts the existing source connection without restarting it. Headroom is measured
 from the completed segment timeline against a one-speed playback clock anchored when the producer
 generation starts. Segment requests remain demand and seek evidence; an eager player downloading
 every available segment does not collapse measured playback headroom to zero. It stops after 60

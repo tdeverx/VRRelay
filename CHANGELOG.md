@@ -6,15 +6,19 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Replaced VOD catch-up aggressiveness with a per-stream maximum rate. Producers now evaluate their
+  own buffer headroom every second and continuously scale between 1× and that maximum without
+  restarting the shared upstream connection.
+
 - Made pull requests and merge-queue entries the exhaustive deterministic validation gate.
   Protected `main` now builds, signs, scans, validates, and publishes the rolling release without
   rerunning functional acceptance tests. Releases are published automatically with the existing
   single `latest` tag; product build numbers are derived from completed manifests, with safe
   same-commit retries and append-only historical assets.
-- Added staged administrator controls for the built-in H.264 encoder policy and VOD catch-up rate.
-  `auto` selects the best discovered encoder, while an explicit choice is validated on startup;
-  the catch-up source read rate can be tuned from 1× to 2× alongside the existing 30–60 second
-  buffer thresholds.
+- Added staged administrator controls for the built-in H.264 encoder policy and per-stream VOD
+  catch-up maximum. `auto` selects the best discovered encoder, while an explicit choice is
+  validated on startup; each stream automatically scales between 1× and the configured maximum
+  alongside the existing 30–60 second buffer thresholds.
 - Fixed HLS prefetches and interleaved viewer requests being mistaken for user
   seeks. A distant segment request now requires a following request in the
   same playback window before it can move the VOD producer's pacing anchor.

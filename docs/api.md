@@ -56,7 +56,7 @@ Node capability responses report cache usage in bytes, the configured cache limi
 
 `GET /api/v1/sessions` returns both the authorized session list and a matching array of short-lived
 runtime snapshots. These snapshots expose estimated 30-second viewers, derived activity,
-producer/window and catch-up/buffered state, transcode realtime factor, upstream source connection
+producer/window and catch-up/steady state, transcode realtime factor, upstream source connection
 and request counts, source ingress, viewer egress, and delivery-cache
 counts. They contain no client identity, source URL, provider credential, or unbounded Prometheus
 label and expire naturally when a node stops reporting.

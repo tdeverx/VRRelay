@@ -221,7 +221,7 @@ export interface SessionServiceOptions {
   vodProducerIdleTimeoutMs?: number;
   vodProducerBufferLowWatermarkMs?: number;
   vodProducerBufferHighWatermarkMs?: number;
-  vodProducerCatchupRate?: number;
+  vodProducerMaxCatchupRate?: number;
   vodProducerMaxConcurrent?: number;
   vodProducerMaxPerProvider?: number;
 }
@@ -334,6 +334,7 @@ export class SessionService {
           idleTimeoutMs: options.vodProducerIdleTimeoutMs ?? 60_000,
           bufferLowWatermarkMs: options.vodProducerBufferLowWatermarkMs ?? 30_000,
           bufferHighWatermarkMs: options.vodProducerBufferHighWatermarkMs ?? 60_000,
+          maxCatchupRate: options.vodProducerMaxCatchupRate ?? 2,
           maxConcurrentProducers: Math.min(
             options.vodProducerMaxConcurrent ?? options.maxWorkers,
             options.maxWorkers
@@ -1313,7 +1314,7 @@ export class SessionService {
       startSeconds,
       duration: session.durationSeconds - startSeconds,
       initialReadBurstSeconds: (this.options.vodProducerBufferHighWatermarkMs ?? 60_000) / 1_000,
-      readRate: this.options.vodProducerCatchupRate ?? 2,
+      readRate: this.options.vodProducerMaxCatchupRate ?? 2,
       ...(source.defaultAudio !== undefined ? { audioTrack: source.defaultAudio } : {}),
       ...(source.defaultSubtitle !== undefined ? { subtitleTrack: source.defaultSubtitle } : {})
     };
