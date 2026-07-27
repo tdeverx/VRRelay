@@ -20,6 +20,7 @@ grep -q subtitles "$work/ffmpeg-filters.txt"
 test -s "$work/ffmpeg/ffmpeg-build-metadata.json"
 test -s "$work/ffmpeg/vrrelay-ffmpeg-8.1.2-darwin-arm64-source.tar.xz"
 node script/runtime-provenance.mjs --output "$work/provenance.json" "ffmpeg=$work/ffmpeg/ffmpeg"
+export PATH="$work/ffmpeg:$PATH"
 npm run verify:core
 VRRELAY_BUILD_NUMBER="${VRRELAY_BUILD_NUMBER:-100}" \
   VRRELAY_FFMPEG_BINARY="$work/ffmpeg/ffmpeg" \
