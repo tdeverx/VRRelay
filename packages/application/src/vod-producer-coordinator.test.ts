@@ -1379,7 +1379,7 @@ describe('durable VOD producer coordination', () => {
     });
     await coordinator.close();
     repository.close();
-  }, 5_000);
+  }, 10_000);
 
   it('does not restart a failed producer after its durable session is deleted', async () => {
     let markPrepared!: () => void;

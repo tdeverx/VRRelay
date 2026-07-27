@@ -23,7 +23,7 @@ const FAILURE_RETRY_MIN_MS = 1_000;
 const FAILURE_RETRY_MAX_MS = 30_000;
 const PROGRESS_STALL_MIN_MS = 45_000;
 const PROGRESS_STALL_ERROR = 'Persistent VOD producer stopped publishing while catching up';
-const SWITCH_CONFIRM_MS = 6_000;
+const SWITCH_CONFIRM_MS = 1_000;
 const ACTIVE_STATES: readonly VodProducer['state'][] = ['starting', 'running', 'switching'];
 
 interface ActiveProducer {
@@ -1100,11 +1100,6 @@ export class VodProducerCoordinator {
       bufferLowWatermarkMs: this.options.bufferLowWatermarkMs,
       segmentDurationSeconds
     });
-    // A forward request beyond the encoded head is a waiter for the current
-    // producer, not evidence that another FFmpeg generation should start.
-    // Replacing it merely chases a player that is already ahead of the output.
-    if (demandedIndex > (active.lastPublishedSegmentIndex ?? active.startSegmentIndex))
-      return false;
     return !covered && (currentViewers === 0 || demandedViewers > currentViewers);
   }
 
