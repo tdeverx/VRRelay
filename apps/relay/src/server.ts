@@ -999,10 +999,14 @@ export async function createServer(
         'Sign in with Jellyfin to view profiles',
         403
       );
+    const configuration = identity.value.defaultProfileId
+      ? undefined
+      : await services.auth.configuration();
+    const allowedProfileIds = configuration?.allowedProfileIds ?? identity.value.allowedProfileIds;
     return {
-      defaultProfileId: identity.value.defaultProfileId,
+      defaultProfileId: identity.value.defaultProfileId ?? configuration?.defaultProfileId,
       items: (await services.profiles.list()).filter((profile) =>
-        identity.value.allowedProfileIds.includes(profile.profileId)
+        allowedProfileIds.includes(profile.profileId)
       )
     };
   });
@@ -1554,7 +1558,11 @@ export async function createServer(
           const identity = principal.id
             ? await services.repository.getUserIdentity(principal.id)
             : undefined;
-          if (!identity?.value.allowedProfileIds.includes(body.profileId))
+          const allowedProfileIds = identity?.value.defaultProfileId
+            ? identity.value.allowedProfileIds
+            : ((await services.auth.configuration())?.allowedProfileIds ??
+              identity?.value.allowedProfileIds);
+          if (!allowedProfileIds?.includes(body.profileId))
             throw new ApplicationError(
               'profile_not_allowed',
               'Profile is not available to this user',

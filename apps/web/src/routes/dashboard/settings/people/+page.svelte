@@ -4,12 +4,11 @@
   import { page } from '$app/state';
   import { ShieldCheck, Trash2, UserRound } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import type { Profile, UserIdentity } from '@vrrelay/domain';
+  import type { Profile, UserIdentity, UserRole } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import ConfirmAction from '#lib/new-ui/components/ConfirmAction.svelte';
-  import { Badge } from '#lib/new-ui/components/ui/badge';
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
   import * as Select from '#lib/new-ui/components/ui/select';
@@ -23,6 +22,7 @@
   let error = $state('');
   let busyId = $state('');
   let pendingDelete = $state<UserRecord | null>(null);
+  const followDefaultProfile = '__follow_default__';
 
   onMount(load);
 
@@ -47,8 +47,10 @@
   async function save(
     record: UserRecord,
     update: {
+      role?: UserRole;
       allowedProfileIds?: string[];
       defaultProfileId?: string;
+      followDefault?: boolean;
     },
     message: string
   ) {
@@ -57,9 +59,9 @@
       const allowedProfileIds = update.allowedProfileIds ?? record.value.allowedProfileIds;
       const updated = await api.updateUser(record.value.id, {
         expectedRevision: record.revision,
-        roles: record.value.roles,
+        roles: [update.role ?? record.value.roles[0] ?? 'user'],
         allowedProfileIds,
-        ...((update.defaultProfileId ?? record.value.defaultProfileId)
+        ...(!update.followDefault && (update.defaultProfileId ?? record.value.defaultProfileId)
           ? { defaultProfileId: update.defaultProfileId ?? record.value.defaultProfileId }
           : {})
       });
@@ -74,7 +76,17 @@
     }
   }
 
+  function changeRole(record: UserRecord, role: UserRole) {
+    return save(record, { role }, `${record.value.displayName} is now ${role}.`);
+  }
+
   function changeDefaultProfile(record: UserRecord, defaultProfileId: string) {
+    if (defaultProfileId === followDefaultProfile)
+      return save(
+        record,
+        { allowedProfileIds: [], followDefault: true },
+        `${record.value.displayName} now follows the default profile.`
+      );
     return save(
       record,
       { allowedProfileIds: [defaultProfileId], defaultProfileId },
@@ -93,10 +105,7 @@
 </script>
 
 <div class="space-y-6 p-4 md:p-6">
-  <PageHeader
-    title="People & access"
-    description="Review roles, choose each user's profile, and inspect their entitlements."
-  />
+  <PageHeader title="People & access" description="Choose each user's role and profile." />
   <Card.Root>
     <Card.Header>
       <div class="flex items-center gap-2">
@@ -118,70 +127,88 @@
     count={2}
   />
   {#if !loading && !error && users.length > 0}
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div class="grid gap-4 lg:grid-cols-2">
       {#each users as record (record.value.id)}
-        <Card.Root>
-          <Card.Header class="gap-4">
-            <div class="bg-muted grid size-10 place-items-center rounded-full">
-              <UserRound class="size-5" />
-            </div>
-            <div class="min-w-0 flex-1">
-              <Card.Title>{record.value.displayName}</Card.Title>
-              <Card.Description
-                >Last signed in {new Date(
-                  record.value.lastSeenAt
-                ).toLocaleString()}</Card.Description
+        <Card.Root class="overflow-hidden">
+          <Card.Header>
+            <div class="flex items-start gap-3">
+              <div class="bg-muted grid size-11 shrink-0 place-items-center rounded-full">
+                <UserRound class="size-5" />
+              </div>
+              <div class="min-w-0 flex-1 pt-0.5">
+                <Card.Title>{record.value.displayName}</Card.Title>
+                <Card.Description class="mt-1"
+                  >Last signed in {new Date(
+                    record.value.lastSeenAt
+                  ).toLocaleString()}</Card.Description
+                >
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-destructive hover:bg-destructive/10 hover:text-destructive shrink-0"
+                disabled={busyId === record.value.id || currentUser?.id === record.value.id}
+                aria-label={`Delete ${record.value.displayName}`}
+                title={currentUser?.id === record.value.id
+                  ? 'You cannot delete your own user.'
+                  : `Delete ${record.value.displayName}`}
+                onclick={() => (pendingDelete = record)}><Trash2 /></Button
               >
             </div>
-            <div class="flex flex-wrap gap-2">
-              {#each record.value.roles as role}<Badge variant="outline">{role}</Badge>{/each}
-            </div>
-            <Button
-              variant="destructive"
-              size="icon"
-              disabled={busyId === record.value.id || currentUser?.id === record.value.id}
-              aria-label={`Delete ${record.value.displayName}`}
-              title={currentUser?.id === record.value.id
-                ? 'You cannot delete your own user.'
-                : `Delete ${record.value.displayName}`}
-              onclick={() => (pendingDelete = record)}><Trash2 /></Button
-            >
           </Card.Header>
-          <Card.Content class="grid gap-5 border-t pt-5">
+          <Card.Content
+            class="bg-muted/20 grid gap-4 border-t pt-5 sm:grid-cols-[9rem_minmax(0,1fr)]"
+          >
+            <div class="space-y-2">
+              <label class="text-sm font-medium" for={`role-${record.value.id}`}>Role</label>
+              <Select.Root
+                type="single"
+                value={record.value.roles[0] ?? 'user'}
+                disabled={busyId === record.value.id}
+                onValueChange={(value) => value && changeRole(record, value as UserRole)}
+              >
+                <Select.Trigger
+                  id={`role-${record.value.id}`}
+                  class="w-full"
+                  aria-label={`Role for ${record.value.displayName}`}
+                  >{record.value.roles[0] ?? 'user'}</Select.Trigger
+                >
+                <Select.Content>
+                  <Select.Item value="user">User</Select.Item>
+                  <Select.Item value="operator">Operator</Select.Item>
+                  <Select.Item value="admin">Admin</Select.Item>
+                  <Select.Item value="owner">Owner</Select.Item>
+                </Select.Content>
+              </Select.Root>
+              <p class="text-muted-foreground text-xs">Dashboard permissions.</p>
+            </div>
             <div class="space-y-2">
               <label class="text-sm font-medium" for={`default-profile-${record.value.id}`}
-                >Default profile</label
+                >Profile</label
               >
               <Select.Root
                 type="single"
-                value={record.value.defaultProfileId}
+                value={record.value.defaultProfileId ?? followDefaultProfile}
                 disabled={busyId === record.value.id || profiles.length === 0}
                 onValueChange={(value) => value && changeDefaultProfile(record, value)}
               >
                 <Select.Trigger id={`default-profile-${record.value.id}`} class="w-full">
-                  {profiles.find((profile) => profile.profileId === record.value.defaultProfileId)
-                    ?.name ?? 'Choose a profile'}
+                  {record.value.defaultProfileId
+                    ? (profiles.find(
+                        (profile) => profile.profileId === record.value.defaultProfileId
+                      )?.name ?? 'Choose a profile')
+                    : 'Auto (follow default)'}
                 </Select.Trigger>
                 <Select.Content>
+                  <Select.Item value={followDefaultProfile}>Auto (follow default)</Select.Item>
                   {#each profiles as profile}
                     <Select.Item value={profile.profileId}>{profile.name}</Select.Item>
                   {/each}
                 </Select.Content>
               </Select.Root>
               <p class="text-muted-foreground text-xs">
-                This is the profile available to the user.
+                Choose one profile or follow the app default automatically.
               </p>
-            </div>
-            <div class="space-y-2">
-              <p class="text-sm font-medium">Entitlements</p>
-              <div class="flex flex-wrap gap-2">
-                {#each record.value.allowedProfileIds as profileId}
-                  <Badge variant="secondary"
-                    >{profiles.find((profile) => profile.profileId === profileId)?.name ??
-                      profileId}</Badge
-                  >
-                {/each}
-              </div>
             </div>
           </Card.Content>
         </Card.Root>

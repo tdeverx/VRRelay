@@ -11,7 +11,8 @@ semantic versioning after the first public release.
   overflow menu. The app-wide video encoder backend selects the implementation for each profile
   codec, including H.265 and AV1 where FFmpeg support is available. Removed the deferred Advanced
   Relay workflow, corrected Jellyfin catalog search forwarding, and replaced the Users table with
-  a profile-and-entitlements grid.
+  a user grid with role and single-profile controls. Users can follow the app-wide default profile
+  automatically without maintaining a separate entitlement list.
 - Reduced redundant helper-level tests while retaining the functional, security, persistence,
   browser, distributed, and packaging gates. Pull requests and merge-queue candidates run the full
   validation matrix; completed merges to `main` run a focused build with generous job timeouts and
