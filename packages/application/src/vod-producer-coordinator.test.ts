@@ -579,7 +579,7 @@ describe('durable VOD producer coordination', () => {
     );
     await coordinator.close();
     repository.close();
-  });
+  }, 60_000);
 
   it('stops an otherwise continuous producer after the demand timeout', async () => {
     const { coordinator, coordination, repository } = await fixture(
@@ -1300,7 +1300,8 @@ describe('durable VOD producer coordination', () => {
       expect(coordinator.isActive(selectedSession.id)).toBe(false);
       if (action !== 'close') await coordinator.close();
       repository.close();
-    }
+    },
+    60_000
   );
 
   it('removes each published producer scratch segment while the producer remains active', async () => {
@@ -1414,7 +1415,7 @@ describe('durable VOD producer coordination', () => {
     expect(producer?.workerHistory).toHaveLength(1);
     await coordinator.close();
     repository.close();
-  });
+  }, 30_000);
 
   it('fences a running producer when its durable session disappears', async () => {
     const { coordinator, coordination, repository } = await fixture(

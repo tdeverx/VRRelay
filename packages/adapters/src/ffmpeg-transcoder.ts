@@ -24,9 +24,11 @@ export interface FFmpegOptions {
 export function ffmpegDecodeAccelerationArgs(
   mode: ProfileRevision['video']['decodeMode']
 ): string[] {
-  // Let FFmpeg select an available accelerator for `auto`; this keeps the
-  // policy portable while allowing each worker to use its validated hardware.
-  return mode === 'software' ? [] : ['-hwaccel', mode];
+  // Do not ask FFmpeg to probe every compiled accelerator for `auto`. A build
+  // can advertise CUDA or VA-API without the host libraries/devices needed to
+  // initialise them, which makes otherwise portable work abort. Hardware
+  // decode remains an explicit, validated profile choice.
+  return mode === 'auto' || mode === 'software' ? [] : ['-hwaccel', mode];
 }
 
 /** @internal */
