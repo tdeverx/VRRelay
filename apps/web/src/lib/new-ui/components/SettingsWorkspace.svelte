@@ -6,7 +6,7 @@
   import { toast } from 'svelte-sonner';
   import type {
     PersonalAccessToken,
-    ProfileRevision,
+    Profile,
     PublicProviderConnection,
     Scope
   } from '@vrrelay/domain';
@@ -29,7 +29,7 @@
   type Section = 'connections' | 'tokens' | 'network' | 'runtime';
   let { initialSection = 'connections' }: { initialSection?: Section } = $props();
   let providers = $state<PublicProviderConnection[]>([]);
-  let profiles = $state<ProfileRevision[]>([]);
+  let profiles = $state<Profile[]>([]);
   let tokens = $state<Array<Omit<PersonalAccessToken, 'tokenHash'>>>([]);
   let runtime = $state<Awaited<ReturnType<typeof api.runtimeConfiguration>> | null>(null);
   let runtimeDraft = $state<RuntimeConfiguration | null>(null);
@@ -72,13 +72,7 @@
       .filter(([, enabled]) => enabled)
       .map(([scope]) => scope) as Scope[]
   );
-  let profileChoices = $derived.by(() => {
-    const latest = new Map<string, ProfileRevision>();
-    for (const profile of profiles) {
-      if (!latest.has(profile.profileId)) latest.set(profile.profileId, profile);
-    }
-    return [...latest.values()];
-  });
+  let profileChoices = $derived(profiles);
 
   function preferredVodProfileId(): string {
     return (
@@ -1106,31 +1100,30 @@
                 buffer headroom. 1× keeps the stream at normal playback speed.</Field.Description
               ></Field.Field
             ><Field.Field
-              ><Field.Label>Default H.264 encoder</Field.Label><Select.Root
+              ><Field.Label>Default video encoder</Field.Label><Select.Root
                 type="single"
-                value={runtimeDraft.vodProducerEncoder}
+                value={runtimeDraft.videoEncoder}
                 disabled={!runtime?.writable}
                 onValueChange={(value) => {
                   if (!value) return;
-                  runtimeDraft!.vodProducerEncoder =
-                    value as RuntimeConfiguration['vodProducerEncoder'];
+                  runtimeDraft!.videoEncoder = value as RuntimeConfiguration['videoEncoder'];
                   runtimeValidated = false;
                 }}
-                ><Select.Trigger class="w-full">{runtimeDraft.vodProducerEncoder}</Select.Trigger
+                ><Select.Trigger class="w-full">{runtimeDraft.videoEncoder}</Select.Trigger
                 ><Select.Content
                   ><Select.Group
-                    ><Select.Item value="auto">Auto (best available)</Select.Item><Select.Item
-                      value="libx264">libx264 (software)</Select.Item
-                    ><Select.Item value="h264_videotoolbox">VideoToolbox</Select.Item><Select.Item
-                      value="h264_nvenc">NVIDIA NVENC</Select.Item
-                    ><Select.Item value="h264_qsv">Intel Quick Sync</Select.Item><Select.Item
-                      value="h264_vaapi">VA-API</Select.Item
-                    ><Select.Item value="h264_amf">AMD AMF</Select.Item></Select.Group
+                    ><Select.Item value="auto">Auto (compatible default)</Select.Item><Select.Item
+                      value="software">Software</Select.Item
+                    ><Select.Item value="videotoolbox">VideoToolbox</Select.Item><Select.Item
+                      value="nvenc">NVIDIA NVENC</Select.Item
+                    ><Select.Item value="qsv">Intel Quick Sync</Select.Item><Select.Item
+                      value="vaapi">VA-API</Select.Item
+                    ><Select.Item value="amf">AMD AMF</Select.Item></Select.Group
                   ></Select.Content
                 ></Select.Root
               ><Field.Description
-                >Forces newly created built-in H.264 profiles after restart. The selected encoder
-                must be available on each source worker.</Field.Description
+                >Selects the app-wide encoder backend for every profile codec after restart. The
+                selected backend must support that codec on each source worker.</Field.Description
               ></Field.Field
             ><Field.Field
               ><Field.Label for="producer-buffer-low"

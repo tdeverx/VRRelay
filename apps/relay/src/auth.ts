@@ -161,8 +161,6 @@ export class AuthService {
         providerId: configuration.providerId,
         providerUserId,
         displayName: providerIdentity.username ?? request.username,
-        defaultProfileId: configuration.defaultProfileId,
-        allowedProfileIds: configuration.allowedProfileIds,
         observedAt: new Date().toISOString()
       });
 
@@ -299,9 +297,10 @@ export class AuthService {
     const value: UserIdentity = {
       ...current.value,
       roles: [...new Set(update.roles)],
-      allowedProfileIds: [...new Set(update.allowedProfileIds)],
-      ...(update.defaultProfileId ? { defaultProfileId: update.defaultProfileId } : {})
+      allowedProfileIds: [...new Set(update.allowedProfileIds)]
     };
+    if (update.defaultProfileId) value.defaultProfileId = update.defaultProfileId;
+    else if (value.allowedProfileIds.length === 0) delete value.defaultProfileId;
     if (value.defaultProfileId && !value.allowedProfileIds.includes(value.defaultProfileId))
       throw new ApplicationError('invalid_profile_access', 'Default profile must be allowed', 409);
     const result = await this.repository.compareAndSetUserIdentityPreservingOwner(
@@ -462,8 +461,6 @@ export class AuthService {
     providerId: string;
     providerUserId: string;
     displayName: string;
-    defaultProfileId: string;
-    allowedProfileIds: readonly string[];
     observedAt: string;
   }): Promise<VersionedRecord<UserIdentity>> {
     let record = await this.repository.getUserIdentity(input.identityId);
@@ -476,8 +473,7 @@ export class AuthService {
             providerUserId: input.providerUserId,
             displayName: input.displayName,
             roles: ['user'],
-            defaultProfileId: input.defaultProfileId,
-            allowedProfileIds: [...input.allowedProfileIds],
+            allowedProfileIds: [],
             firstSeenAt: input.observedAt,
             lastSeenAt: input.observedAt
           });

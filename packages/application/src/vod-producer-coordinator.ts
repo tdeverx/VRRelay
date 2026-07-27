@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ProfileRevision, RelaySession, VodProducer } from '@vrrelay/domain';
+import type { Profile, RelaySession, VodProducer } from '@vrrelay/domain';
 import type {
   ClusterRepository,
   CoordinationStore,
@@ -149,7 +149,7 @@ export interface VodProducerCallbacks {
   acquire?(signal: AbortSignal): Promise<void>;
   prepare(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     startSegmentIndex: number,
     signal: AbortSignal,
     pacing: VodProducerSourcePacing,
@@ -189,7 +189,7 @@ export class VodProducerCoordinator {
 
   async ensure(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     segmentIndex: number,
     signal?: AbortSignal
   ): Promise<void> {
@@ -222,7 +222,7 @@ export class VodProducerCoordinator {
 
   async #ensureRequest(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     segmentIndex: number,
     lifecycleFence: number,
     sessionFence: number,
@@ -404,7 +404,7 @@ export class VodProducerCoordinator {
 
   async #start(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     startSegmentIndex: number,
     lifecycleFence: number,
     sessionFence: number
@@ -432,7 +432,7 @@ export class VodProducerCoordinator {
 
   async #startExclusive(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     startSegmentIndex: number,
     starting: StartingProducer
   ): Promise<ActiveProducer | undefined> {
@@ -598,7 +598,7 @@ export class VodProducerCoordinator {
 
   async #run(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     initial: VodProducer,
     active: ActiveProducer,
     leaseKey: string
@@ -782,7 +782,7 @@ export class VodProducerCoordinator {
 
   async #refreshDemand(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     active: ActiveProducer
   ): Promise<void> {
     if (active.controller.signal.aborted) return;
@@ -998,7 +998,7 @@ export class VodProducerCoordinator {
 
   async #dominantDemand(
     sessionId: string,
-    profile: ProfileRevision,
+    profile: Profile,
     requestedIndex: number,
     active?: ActiveProducer
   ): Promise<{
@@ -1103,7 +1103,7 @@ export class VodProducerCoordinator {
     return !covered && (currentViewers === 0 || demandedViewers > currentViewers);
   }
 
-  #reconcilePacing(profile: ProfileRevision, active: ActiveProducer): void {
+  #reconcilePacing(profile: Profile, active: ActiveProducer): void {
     const bufferMs = estimateVodProducerBufferMs({
       playbackAnchorSegmentIndex: active.playbackAnchorSegmentIndex,
       lastPublishedSegmentIndex: active.lastPublishedSegmentIndex,
@@ -1131,11 +1131,7 @@ export class VodProducerCoordinator {
         : undefined;
   }
 
-  #progressStalled(
-    profile: ProfileRevision,
-    active: ActiveProducer,
-    observedAtMs: number
-  ): boolean {
+  #progressStalled(profile: Profile, active: ActiveProducer, observedAtMs: number): boolean {
     if (
       !active.publishedAny ||
       active.pendingWaiters.size === 0 ||

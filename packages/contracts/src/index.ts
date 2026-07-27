@@ -64,8 +64,7 @@ export const CatalogQuerySchema = z.object({
 });
 export type CatalogQuery = z.infer<typeof CatalogQuerySchema>;
 
-export const CreateProfileRevisionRequestSchema = z.object({
-  profileId: z.string().optional(),
+export const ProfileInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(500).optional(),
   platform: PlatformModeSchema,
@@ -75,7 +74,7 @@ export const CreateProfileRevisionRequestSchema = z.object({
   delivery: DeliverySettingsSchema,
   processing: ProcessingSettingsSchema
 });
-export type CreateProfileRevisionRequest = z.infer<typeof CreateProfileRevisionRequestSchema>;
+export type ProfileInput = z.infer<typeof ProfileInputSchema>;
 
 export const CreateSessionRequestSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -83,7 +82,6 @@ export const CreateSessionRequestSchema = z.discriminatedUnion('kind', [
     name: z.string().min(1).max(160).optional(),
     source: MediaSourceRefSchema,
     profileId: z.string(),
-    profileRevision: z.number().int().min(1),
     platformMode: PlatformModeSchema,
     pinned: z.boolean().default(false),
     reportActivity: z.boolean().default(true),
@@ -98,7 +96,6 @@ export const CreateSessionRequestSchema = z.discriminatedUnion('kind', [
     name: z.string().min(1).max(160),
     liveChannelId: z.string(),
     profileId: z.string(),
-    profileRevision: z.number().int().min(1),
     platformMode: PlatformModeSchema,
     pinned: z.boolean().default(true),
     reportActivity: z.literal(false).default(false),
@@ -363,16 +360,8 @@ export const RuntimeConfigurationSchema = z
     vodProducerBufferLowWatermarkMs: z.number().int().min(4_000).max(300_000).default(30_000),
     vodProducerBufferHighWatermarkMs: z.number().int().min(8_000).max(600_000).default(60_000),
     vodProducerMaxCatchupRate: z.number().min(1).max(2).default(2),
-    vodProducerEncoder: z
-      .enum([
-        'auto',
-        'libx264',
-        'h264_videotoolbox',
-        'h264_nvenc',
-        'h264_qsv',
-        'h264_vaapi',
-        'h264_amf'
-      ])
+    videoEncoder: z
+      .enum(['auto', 'software', 'videotoolbox', 'nvenc', 'qsv', 'vaapi', 'amf'])
       .default('auto'),
     vodProducerMaxConcurrent: z.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.number().int().min(1).max(32).default(2),
@@ -417,7 +406,6 @@ export type SessionControlRequest = z.infer<typeof SessionControlRequestSchema>;
 export const PlacementPreviewRequestSchema = z.object({
   providerId: z.string().optional(),
   profileId: z.string(),
-  profileRevision: z.number().int().min(1),
   placementPolicy: PlacementPolicySchema,
   preferredNodeId: z.string().optional(),
   preferredRegion: z.string().optional()

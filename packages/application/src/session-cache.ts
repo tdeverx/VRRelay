@@ -5,7 +5,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { dirname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { CachedObject, ProfileRevision, RelaySession } from '@vrrelay/domain';
+import type { CachedObject, Profile, RelaySession } from '@vrrelay/domain';
 import type { EventBus, MetricsSink, ObjectStore } from './index.js';
 import { createServiceEvent as event } from './service-helpers.js';
 
@@ -70,7 +70,7 @@ export class SessionCache {
 
   async publishObject(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     index: number,
     destination: string,
     contentKey: string
@@ -86,8 +86,7 @@ export class SessionCache {
           sha256: segmentSha256,
           metadata: {
             sessionId: session.id,
-            profileId: profile.profileId,
-            revision: String(profile.revision)
+            profileId: profile.profileId
           }
         })
       );
@@ -108,7 +107,6 @@ export class SessionCache {
             metadata: {
               sessionId: session.id,
               profileId: profile.profileId,
-              revision: String(profile.revision),
               initialization: 'true'
             }
           })
@@ -121,7 +119,7 @@ export class SessionCache {
     }
   }
 
-  contentKey(session: RelaySession, profile: ProfileRevision, index: number): string {
+  contentKey(session: RelaySession, profile: Profile, index: number): string {
     const source = session.source!;
     const identity = JSON.stringify({
       pipelineEpoch: 2,
@@ -132,7 +130,7 @@ export class SessionCache {
       audio: source.audioTrackId,
       subtitle: source.subtitleTrackId,
       profile: profile.profileId,
-      revision: profile.revision,
+      profileUpdatedAt: profile.updatedAt,
       index,
       duration: profile.delivery.segmentDuration
     });

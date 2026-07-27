@@ -11,7 +11,7 @@ import type {
   MediaSourceRef,
   PersonalAccessToken,
   PlaybackGrant,
-  ProfileRevision,
+  Profile,
   ProviderCapability,
   ProviderConnection,
   ProviderType,
@@ -537,9 +537,10 @@ export interface Repository {
     id: string,
     expectedRevision: number
   ): Promise<AtomicDeleteResult<ProviderConnection>>;
-  putProfile(profile: ProfileRevision): Promise<void>;
-  listProfiles(): Promise<ProfileRevision[]>;
-  getProfile(id: string, revision?: number): Promise<ProfileRevision | undefined>;
+  putProfile(profile: Profile): Promise<void>;
+  deleteProfile(id: string): Promise<void>;
+  listProfiles(): Promise<Profile[]>;
+  getProfile(id: string): Promise<Profile | undefined>;
   createSessionWithPlaybackGrant(
     session: RelaySession,
     grant: PlaybackGrant,
@@ -642,7 +643,7 @@ export interface MediaCapabilities {
 
 export interface SegmentRequest {
   source: ResolvedSource;
-  profile: ProfileRevision;
+  profile: Profile;
   segmentIndex: number;
   startSeconds: number;
   duration: number;
@@ -652,7 +653,7 @@ export interface SegmentRequest {
 
 export interface VodProducerRequest {
   source: ResolvedSource;
-  profile: ProfileRevision;
+  profile: Profile;
   startSegmentIndex: number;
   startSeconds: number;
   duration: number;
@@ -690,7 +691,7 @@ export interface LiveNormalizer {
     ownerId: string | undefined,
     sourceUrl: string,
     destinationUrl: string,
-    profile: ProfileRevision,
+    profile: Profile,
     signal?: AbortSignal
   ): Promise<void>;
   stop(channelId: string): Promise<void>;

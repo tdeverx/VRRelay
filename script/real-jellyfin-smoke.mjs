@@ -160,9 +160,7 @@ async function main() {
   assert(selected.versions?.[0]?.id, 'Selected Jellyfin media did not expose a source version');
 
   const profiles = (await api('/api/v1/profiles')).items;
-  const profile = profiles.find(
-    (candidate) => candidate.profileId === 'universal-h264-hls-vod' && candidate.revision === 1
-  );
+  const profile = profiles.find((candidate) => candidate.profileId === 'universal-h264-hls-vod');
   assert(profile, 'The default universal H.264/AAC HLS profile was unavailable');
 
   log('Creating a finite just-in-time VOD session');
@@ -179,7 +177,6 @@ async function main() {
         audioTrackId: selected.audioTracks?.find((track) => track.isDefault)?.id
       },
       profileId: profile.profileId,
-      profileRevision: profile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: true,

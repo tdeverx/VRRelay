@@ -233,7 +233,7 @@ export class JellyfinProvider implements MediaProvider {
       SortOrder: 'Descending'
     });
     if (query.parentId) params.set('ParentId', query.parentId);
-    if (query.search) params.set('SearchTerm', query.search);
+    if (query.search) params.set('searchTerm', query.search);
     if ((query.kinds?.length ?? 0) > 0) params.set('IncludeItemTypes', query.kinds.join(','));
     let path = connection.userId ? `/Users/${connection.userId}/Items` : '/Items';
     if (query.section === 'continue_watching' && connection.userId) {

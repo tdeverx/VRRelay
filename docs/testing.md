@@ -146,7 +146,7 @@ real-time normalizer, retrieves an MPEG-TS segment through the opaque grant-back
 reconciles publisher disconnect, revokes playback, and deletes the live channel. Pass
 `-- --passthrough` only to test the non-normalizing diagnostic path.
 
-When testing media behavior, record the source properties, immutable profile revision, platform, player, startup, duration, pause, seeks, late join, completion, audio/video, and HTTPS/URL-permission result. Do not infer VRChat compatibility from FFmpeg success alone.
+When testing media behavior, record the source properties, profile name and update time, platform, player, startup, duration, pause, seeks, late join, completion, audio/video, and HTTPS/URL-permission result. Do not infer VRChat compatibility from FFmpeg success alone.
 
 ## Benchmark scenarios
 
@@ -210,7 +210,6 @@ Use the checks that match the changed area:
 npm run check:compose
 npm run test:container
 npm run test:compose
-npm run test:cluster-compose
 helm lint deploy/kubernetes
 helm template vrrelay deploy/kubernetes > /dev/null
 swift build --package-path apps/macos -c release --arch arm64
@@ -221,11 +220,8 @@ The container smoke test performs a fresh native-architecture image build, valid
 
 The standalone Compose smoke test builds the production image, creates disposable data and cache volumes, waits for the relay health check, verifies the dashboard and MediaMTX Control API, confirms the MPEG-TS HLS setting and opens the RTMP listener. It removes its project-scoped containers, volumes, network, and image on exit.
 
-The cluster Compose smoke test boots the checked-in production topology with PostgreSQL, Valkey,
-role-scoped MinIO identities, a controller, source worker, ingest origin, edge, and both MediaMTX
-services. It performs first-run setup, issues single-use role tokens, verifies all three agents enroll
-and remain connected over mTLS WSS, checks controller and edge health, and probes the ingest
-MediaMTX Control API. Its randomly generated secrets, project-scoped containers, volumes, network,
-and image are removed on exit.
+The distributed acceptance harness is the single production-cluster topology test. The narrower
+cluster Compose smoke was removed because it repeated the same enrollment, mTLS, role, and health
+paths without exercising the harness's stronger media and failover assertions.
 
 Windows packaging must be built and exercised on Windows. macOS signing and notarization require release-only credentials; ordinary local builds remain unsigned.

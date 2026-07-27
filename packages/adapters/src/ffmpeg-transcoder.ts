@@ -12,18 +12,18 @@ import type {
   VodProducerRequest,
   ProducedVodSegment
 } from '@vrrelay/application';
-import type { ProfileRevision } from '@vrrelay/domain';
+import type { Profile } from '@vrrelay/domain';
+import { resolveFfmpegVideoEncoder, type VideoEncoderPreference } from './ffmpeg-encoder.js';
 import { terminateChildProcess } from './supervised-child-process.js';
 
 export interface FFmpegOptions {
   ffmpegPath: string;
   maxLogBytes?: number;
+  videoEncoder?: VideoEncoderPreference;
 }
 
 /** @internal */
-export function ffmpegDecodeAccelerationArgs(
-  mode: ProfileRevision['video']['decodeMode']
-): string[] {
+export function ffmpegDecodeAccelerationArgs(mode: Profile['video']['decodeMode']): string[] {
   // Do not ask FFmpeg to probe every compiled accelerator for `auto`. A build
   // can advertise CUDA or VA-API without the host libraries/devices needed to
   // initialise them, which makes otherwise portable work abort. Hardware
@@ -99,10 +99,13 @@ export function redactFfmpegError(output: string): string {
 export class FFmpegTranscoder implements Transcoder {
   readonly #ffmpegPath: string;
   readonly #maxLogBytes: number;
+  readonly #videoEncoder: VideoEncoderPreference;
+  #availableEncoders = new Set<string>();
 
   constructor(options: FFmpegOptions) {
     this.#ffmpegPath = options.ffmpegPath;
     this.#maxLogBytes = options.maxLogBytes ?? 32_768;
+    this.#videoEncoder = options.videoEncoder ?? 'auto';
   }
 
   async discover(signal?: AbortSignal): Promise<MediaCapabilities> {
@@ -119,6 +122,7 @@ export class FFmpegTranscoder implements Transcoder {
         .map((line) => line.match(/^\s*[A-Z.]{6}\s+(\S+)/)?.[1])
         .filter((value): value is string => Boolean(value))
     );
+    this.#availableEncoders = availableEncoders;
     const candidates: Array<[string, string, boolean]> = [
       ['libx264', 'h264', false],
       ['h264_videotoolbox', 'h264', true],
@@ -356,7 +360,7 @@ export class FFmpegTranscoder implements Transcoder {
     }
   }
 
-  #inputArgs(source: ResolvedSource, profile: ProfileRevision): string[] {
+  #inputArgs(source: ResolvedSource, profile: Profile): string[] {
     const headerBlock = Object.entries(source.headers)
       .map(([key, value]) => `${key}: ${value}\r\n`)
       .join('');
@@ -369,9 +373,13 @@ export class FFmpegTranscoder implements Transcoder {
     ];
   }
 
-  #videoArgs(profile: ProfileRevision, source?: ResolvedSource, subtitleTrack?: number): string[] {
+  #videoArgs(profile: Profile, source?: ResolvedSource, subtitleTrack?: number): string[] {
     const video = profile.video;
-    const encoder = video.codec === 'copy' ? 'copy' : video.encoder;
+    const encoder = resolveFfmpegVideoEncoder(
+      video.codec,
+      this.#videoEncoder,
+      this.#availableEncoders
+    );
     if (encoder === 'copy') {
       if (profile.processing.toneMap || profile.processing.burnSubtitles)
         throw new Error(
@@ -394,9 +402,8 @@ export class FFmpegTranscoder implements Transcoder {
       const escaped = source.url.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
       filters.push(`subtitles='${escaped}':si=${subtitleTrack}`);
     }
-    if (video.hardwareMode === 'vaapi') filters.push('format=nv12', 'hwupload');
-    else if (video.hardwareMode === 'qsv')
-      filters.push('format=nv12', 'hwupload=extra_hw_frames=64');
+    if (encoder.includes('vaapi')) filters.push('format=nv12', 'hwupload');
+    else if (encoder.includes('qsv')) filters.push('format=nv12', 'hwupload=extra_hw_frames=64');
     else filters.push(`format=${video.pixelFormat}`);
     return [
       '-vf',
@@ -423,7 +430,7 @@ export class FFmpegTranscoder implements Transcoder {
     ];
   }
 
-  #audioArgs(profile: ProfileRevision): string[] {
+  #audioArgs(profile: Profile): string[] {
     const audio = profile.audio;
     return audio.codec === 'copy'
       ? ['-c:a', 'copy']

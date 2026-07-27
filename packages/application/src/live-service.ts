@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto';
-import type {
-  LiveChannel,
-  ProfileRevision,
-  PublicLiveChannel,
-  RelaySession
-} from '@vrrelay/domain';
+import type { LiveChannel, Profile, PublicLiveChannel, RelaySession } from '@vrrelay/domain';
 import { publicLiveChannel } from '@vrrelay/domain';
 import type { CreateLiveChannelRequest } from '@vrrelay/contracts';
 import type {
@@ -404,18 +399,14 @@ export class LiveService {
     await this.#recordPublisherStates();
   }
 
-  async #normalizationProfile(channel: LiveChannel): Promise<ProfileRevision | undefined> {
-    if (channel.normalizationProfileId && channel.normalizationProfileRevision) {
-      return this.repository.getProfile(
-        channel.normalizationProfileId,
-        channel.normalizationProfileRevision
-      );
-    }
+  async #normalizationProfile(channel: LiveChannel): Promise<Profile | undefined> {
+    if (channel.normalizationProfileId)
+      return this.repository.getProfile(channel.normalizationProfileId);
     const session = (await this.repository.listSessions()).find((candidate) =>
       liveSessionOwnsChannel(candidate, channel.id)
     );
     if (!session) return undefined;
-    return this.repository.getProfile(session.profileId, session.profileRevision);
+    return this.repository.getProfile(session.profileId);
   }
 
   async stop(): Promise<void> {

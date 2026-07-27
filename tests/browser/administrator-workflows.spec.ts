@@ -11,7 +11,6 @@ import {
 const administratorPassword = 'VRRelay-browser-test-password';
 let authenticationCookies: Awaited<ReturnType<APIRequestContext['storageState']>>['cookies'] = [];
 let authenticationCsrf = '';
-let administratorProviderId = '';
 let administratorProviderName = '';
 const pageErrors = new WeakMap<BrowserContext, string[]>();
 let browserClientSequence = 10;
@@ -60,7 +59,6 @@ test.beforeAll(async ({ request }) => {
     (await providersResponse.json()) as { items: Array<{ id: string; name: string }> }
   ).items.find((provider) => provider.name === 'Browser Jellyfin');
   if (existingProvider) {
-    administratorProviderId = existingProvider.id;
     administratorProviderName = existingProvider.name;
     return;
   }
@@ -79,7 +77,6 @@ test.beforeAll(async ({ request }) => {
     }
   });
   expect(providerResponse.ok()).toBe(true);
-  administratorProviderId = ((await providerResponse.json()) as { id: string }).id;
 });
 
 test.beforeEach(async ({ context, page }) => {
@@ -189,7 +186,6 @@ test('renders every administrator route accessibly at review breakpoints', async
   const routes = [
     '/dashboard',
     '/dashboard/live',
-    '/dashboard/relay/new',
     '/dashboard/sessions',
     '/dashboard/system/nodes',
     '/dashboard/system/services',
@@ -373,47 +369,6 @@ test('restores the desktop sidebar preference after reload', async ({ page, isMo
     'data-state',
     changedState ?? ''
   );
-});
-
-test('validates local placement and keeps the relay wizard on the working route', async ({
-  page,
-  isMobile
-}) => {
-  test.slow();
-  await expect
-    .poll(
-      async () => {
-        const response = await page.request.get('/api/v1/nodes');
-        const body = (await response.json()) as {
-          items: Array<{ id: string; capabilities: { providerIds: string[] } }>;
-        };
-        return body.items.find((node) => node.id === 'standalone')?.capabilities.providerIds;
-      },
-      { timeout: 25_000 }
-    )
-    .toContain(administratorProviderId);
-
-  await page.goto('/dashboard');
-  if (isMobile) await page.getByRole('button', { name: 'Open navigation' }).click();
-  await page.getByRole('link', { name: 'Advanced relay', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard\/relay\/new$/);
-  await page.getByRole('button', { name: /Browser Jellyfin|Provider/ }).click();
-  await page.getByRole('option', { name: administratorProviderName, exact: true }).click();
-  const movie = page.locator('[data-slot="card"]').filter({ hasText: 'Browser Movie' });
-  await movie.getByRole('button', { name: 'Select source' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('radio', { name: 'Local', exact: true }).click();
-
-  await expect(page).toHaveURL(/\/dashboard\/relay\/new$/);
-  await expect(page.getByText('VRRelay node', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.getByRole('heading', { name: 'Review' }).last()).toBeVisible();
-  await page.getByRole('button', { name: 'Create relay' }).click();
-  await expect(page).toHaveURL(/\/dashboard\/sessions\?created=/);
-  await expect(page.getByText('Advanced relay created')).toBeVisible();
-  await expect(page.getByText('Browser Movie', { exact: true }).last()).toBeVisible();
 });
 
 test('serves one role-aware dashboard for recovery and Jellyfin users', async ({

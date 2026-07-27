@@ -6,6 +6,19 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Simplified media profiles into mutable records with no revision or per-profile encoder state.
+  Profiles can now be created from a clean slate and edited, duplicated, or deleted from their
+  overflow menu. The app-wide video encoder backend selects the implementation for each profile
+  codec, including H.265 and AV1 where FFmpeg support is available. Removed the deferred Advanced
+  Relay workflow, corrected Jellyfin catalog search forwarding, and replaced the Users table with
+  a user grid with role and single-profile controls. Users can follow the app-wide default profile
+  automatically without maintaining a separate entitlement list.
+- Reduced redundant helper-level tests while retaining the functional, security, persistence,
+  browser, distributed, and packaging gates. Pull requests and merge-queue candidates run the full
+  validation matrix; completed merges to `main` run a focused build with generous job timeouts and
+  stale-run cancellation. Removed unused local build/sync wrappers and the duplicate cluster
+  Compose smoke; Windows PR validation now compiles the native tray and production application
+  without rerunning the Linux unit, lint, audit, and repository gates.
 - Replaced VOD catch-up aggressiveness with a per-stream maximum rate. Producers now evaluate their
   own buffer headroom every second and continuously scale between 1× and that maximum without
   restarting the shared upstream connection.
@@ -15,18 +28,16 @@ semantic versioning after the first public release.
   rerunning functional acceptance tests. Releases are published automatically with the existing
   single `latest` tag; product build numbers are derived from completed manifests, with safe
   same-commit retries and append-only historical assets.
-- Added staged administrator controls for the built-in H.264 encoder policy and per-stream VOD
-  catch-up maximum. `auto` selects the best discovered encoder, while an explicit choice is
-  validated on startup; each stream automatically scales between 1× and the configured maximum
+- Added staged administrator controls for the app-wide video encoder backend and per-stream VOD
+  catch-up maximum. `auto` selects the best discovered backend for each codec, while an explicit
+  choice is validated on startup; each stream automatically scales between 1× and the configured maximum
   alongside the existing 30–60 second buffer thresholds.
 - Fixed HLS prefetches and interleaved viewer requests being mistaken for user
   seeks. A distant segment request now requires a following request in the
   same playback window before it can move the VOD producer's pacing anchor.
 - Fixed VOD catch-up stalls by treating requests ahead of the encoded head as
-  waiters rather than repeatedly replacing the active FFmpeg producer. Built-in
-  profiles now select an available H.264 hardware encoder per worker (including
-  VideoToolbox), with portable software fallback, and automatic decode lets
-  FFmpeg use the worker's available accelerator.
+  waiters rather than repeatedly replacing the active FFmpeg producer. Automatic
+  decode lets FFmpeg use the worker's available accelerator.
 - Consolidated the pending runtime, development, and GitHub Actions dependency
   updates. The SvelteKit 3 prerelease migration now uses its `$app/tsconfig`
   layout through the existing TypeScript compatibility boundary, and

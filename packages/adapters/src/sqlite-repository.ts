@@ -15,7 +15,7 @@ import type {
   NodeCertificateState,
   AgentLogEntry,
   JobLogEntry,
-  ProfileRevision,
+  Profile,
   ProviderConnection,
   RelaySession,
   SegmentJob,
@@ -46,7 +46,7 @@ import { sameSessionIdentity } from './repository-invariants.js';
 
 type StoredEntity =
   | ProviderConnection
-  | ProfileRevision
+  | Profile
   | RelaySession
   | PlaybackGrant
   | LiveChannel
@@ -87,7 +87,7 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
   {
     version: 1,
     name: 'core repository',
-    checksum: 'c7b62ec82b38dc38d50b655f5dc767ccb16bac86a187f488a2bc2f7e6fe2b8c2',
+    checksum: '853fe497712316cf20a1b3bfd0160ce3bf294a3e524907fa9b78bc331b8c6f15',
     statements: [
       `CREATE TABLE IF NOT EXISTS providers (
         id TEXT PRIMARY KEY,
@@ -95,11 +95,10 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
         updated_at TEXT NOT NULL
       )`,
       `CREATE TABLE IF NOT EXISTS profiles (
-        profile_id TEXT NOT NULL,
-        revision INTEGER NOT NULL,
+        profile_id TEXT PRIMARY KEY,
         json TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        PRIMARY KEY (profile_id, revision)
+        updated_at TEXT NOT NULL
       )`,
       `CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -350,12 +349,12 @@ const SQLITE_SCHEMA_SHAPE = {
   },
   profiles: {
     columns: {
-      profile_id: SQLITE_TEXT_REQUIRED,
-      revision: SQLITE_INTEGER_REQUIRED,
+      profile_id: SQLITE_TEXT_KEY,
       json: SQLITE_TEXT_REQUIRED,
-      created_at: SQLITE_TEXT_REQUIRED
+      created_at: SQLITE_TEXT_REQUIRED,
+      updated_at: SQLITE_TEXT_REQUIRED
     },
-    primaryKey: ['profile_id', 'revision']
+    primaryKey: ['profile_id']
   },
   sessions: {
     columns: {
@@ -1064,29 +1063,28 @@ export class SqliteRepository implements Repository, ClusterRepository, AuditRep
     return operation.immediate();
   }
 
-  async putProfile(profile: ProfileRevision): Promise<void> {
+  async putProfile(profile: Profile): Promise<void> {
     this.#db
       .prepare(
-        `INSERT INTO profiles(profile_id, revision, json, created_at)
+        `INSERT INTO profiles(profile_id, json, created_at, updated_at)
          VALUES (?, ?, ?, ?)
-         ON CONFLICT(profile_id, revision) DO NOTHING`
+         ON CONFLICT(profile_id) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at`
       )
-      .run(profile.profileId, profile.revision, JSON.stringify(profile), profile.createdAt);
+      .run(profile.profileId, JSON.stringify(profile), profile.createdAt, profile.updatedAt);
   }
 
-  async listProfiles(): Promise<ProfileRevision[]> {
-    return this.#list<ProfileRevision>('profiles', 'profile_id, revision DESC');
+  async deleteProfile(id: string): Promise<void> {
+    this.#db.prepare('DELETE FROM profiles WHERE profile_id = ?').run(id);
   }
 
-  async getProfile(id: string, revision?: number): Promise<ProfileRevision | undefined> {
-    const row = revision
-      ? this.#db
-          .prepare('SELECT json FROM profiles WHERE profile_id = ? AND revision = ?')
-          .get(id, revision)
-      : this.#db
-          .prepare('SELECT json FROM profiles WHERE profile_id = ? ORDER BY revision DESC LIMIT 1')
-          .get(id);
-    return this.#parseRow<ProfileRevision>(row);
+  async listProfiles(): Promise<Profile[]> {
+    return this.#list<Profile>('profiles', 'profile_id');
+  }
+
+  async getProfile(id: string): Promise<Profile | undefined> {
+    return this.#parseRow<Profile>(
+      this.#db.prepare('SELECT json FROM profiles WHERE profile_id = ?').get(id)
+    );
   }
 
   async createSessionWithPlaybackGrant(

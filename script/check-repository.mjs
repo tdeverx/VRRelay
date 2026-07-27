@@ -542,11 +542,15 @@ const profileService = await readFile(
   resolve(root, 'packages/application/src/profile-service.ts'),
   'utf8'
 );
-if (
-  !profileService.includes("encoder: 'libx264'") ||
-  !profileService.includes("hardwareMode: 'software'")
-)
-  failures.push('built-in media profiles must use the same software encoder on every platform');
+if (profileService.includes('hardwareMode:') || profileService.includes('video: { encoder:'))
+  failures.push('media profiles must not persist app-wide encoder backend settings');
+const ffmpegEncoder = await readFile(
+  resolve(root, 'packages/adapters/src/ffmpeg-encoder.ts'),
+  'utf8'
+);
+for (const codec of ['h264:', 'h265:', 'av1:'])
+  if (!ffmpegEncoder.includes(codec))
+    failures.push(`app-wide encoder selection does not map the ${codec.slice(0, -1)} codec`);
 const linuxFfmpegInstaller = await readFile(
   resolve(root, 'script/install-pinned-ffmpeg-linux.sh'),
   'utf8'

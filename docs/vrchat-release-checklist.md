@@ -1,6 +1,6 @@
 # VRChat release evidence
 
-Record app/build, world, player, platform, headset, network, trusted HTTPS host, profile revision, media fingerprint, tester count, date, and tester. Attach the compatibility record and redacted logs.
+Record app/build, world, player, platform, headset, network, trusted HTTPS host, profile name, media fingerprint, tester count, date, and tester. Attach the compatibility record and redacted logs.
 
 | Check                                  | PC AVPro | PC Unity/direct | Quest AVPro | Quest Unity/direct | VideoTXL | ProTV |
 | -------------------------------------- | -------- | --------------- | ----------- | ------------------ | -------- | ----- |

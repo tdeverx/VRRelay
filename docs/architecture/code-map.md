@@ -45,7 +45,7 @@ packages/adapters ┘             └──> packages/contracts
 
 ## VOD request path
 
-1. The API validates a provider-neutral source and immutable profile revision.
+1. The API validates a provider-neutral source and profile.
 2. The application selects an eligible explicitly bound worker.
 3. A deterministic content key coalesces identical segment work.
 4. The worker resolves the original source locally and runs a structured FFmpeg pipeline.

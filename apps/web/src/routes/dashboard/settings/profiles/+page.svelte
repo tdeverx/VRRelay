@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Plus } from '@lucide/svelte';
-  import type { CompatibilityResult, ProfileRevision } from '@vrrelay/domain';
+  import { Copy, Ellipsis, Pencil, Plus, Trash2 } from '@lucide/svelte';
+  import type { CompatibilityResult, Profile } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import { loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
@@ -16,9 +16,11 @@
   import * as Select from '#lib/new-ui/components/ui/select';
   import { Switch } from '#lib/new-ui/components/ui/switch';
   import * as Table from '#lib/new-ui/components/ui/table';
+  import * as DropdownMenu from '#lib/new-ui/components/ui/dropdown-menu';
+  import ConfirmAction from '#lib/new-ui/components/ConfirmAction.svelte';
   import { toast } from 'svelte-sonner';
 
-  let profiles = $state<ProfileRevision[]>([]);
+  let profiles = $state<Profile[]>([]);
   let evidence = $state<CompatibilityResult[]>([]);
   let loading = $state(true);
   let error = $state('');
@@ -40,6 +42,7 @@
     audio: true,
     video: true
   });
+  let pendingDelete = $state<Profile | null>(null);
   const checkLabels: Record<keyof typeof checks, string> = {
     startup: 'Starts',
     duration: 'Duration',
@@ -59,7 +62,7 @@
       ]);
       profiles = profileResult.items;
       evidence = evidenceResult.items;
-      selectedProfile = profiles[0] ? `${profiles[0].profileId}:${profiles[0].revision}` : '';
+      selectedProfile = profiles[0]?.profileId ?? '';
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       error = reason instanceof Error ? reason.message : 'Could not load profiles.';
@@ -68,24 +71,20 @@
     }
   });
 
-  function evidenceCount(profile: ProfileRevision) {
-    return evidence.filter(
-      (result) =>
-        result.profileId === profile.profileId && result.profileRevision === profile.revision
-    ).length;
+  function evidenceCount(profile: Profile) {
+    return evidence.filter((result) => result.profileId === profile.profileId).length;
   }
 
   async function recordTest(event: SubmitEvent) {
     event.preventDefault();
-    const [profileId, revision] = selectedProfile.split(':');
-    if (!profileId || !revision || !applicationVersion.trim() || !player.trim()) return;
+    const profileId = selectedProfile;
+    if (!profileId || !applicationVersion.trim() || !player.trim()) return;
     recording = true;
     try {
       const result = await api.createCompatibility({
         applicationVersion: applicationVersion.trim(),
         player: player.trim(),
         profileId,
-        profileRevision: Number(revision),
         platform,
         state: resultState,
         ...checks,
@@ -100,13 +99,19 @@
       recording = false;
     }
   }
+
+  async function deletePendingProfile() {
+    if (!pendingDelete) return;
+    const deleted = pendingDelete;
+    await api.deleteProfile(deleted.profileId);
+    profiles = profiles.filter((profile) => profile.profileId !== deleted.profileId);
+    pendingDelete = null;
+    toast.success(`${deleted.name} was deleted.`);
+  }
 </script>
 
 <div class="space-y-6 p-4 md:p-6">
-  <PageHeader
-    title="Profiles"
-    description="Versioned encoding and delivery presets shared by every relay."
-  >
+  <PageHeader title="Profiles" description="Encoding and delivery presets shared by every relay.">
     {#snippet actions()}<Button href="/dashboard/settings/profiles/new"
         ><Plus data-icon="inline-start" />New profile</Button
       >{/snippet}
@@ -123,22 +128,48 @@
       <Table.Root
         ><Table.Header
           ><Table.Row
-            ><Table.Head>Name</Table.Head><Table.Head>Revision</Table.Head><Table.Head
-              >Platform</Table.Head
-            ><Table.Head>Video</Table.Head><Table.Head>Delivery</Table.Head><Table.Head
-              >Evidence</Table.Head
-            ><Table.Head>Status</Table.Head></Table.Row
+            ><Table.Head>Name</Table.Head><Table.Head>Platform</Table.Head><Table.Head
+              >Video</Table.Head
+            ><Table.Head>Delivery</Table.Head><Table.Head>Evidence</Table.Head><Table.Head
+              >Status</Table.Head
+            ><Table.Head><span class="sr-only">Actions</span></Table.Head></Table.Row
           ></Table.Header
         >
         <Table.Body
           >{#each profiles as profile}<Table.Row
               ><Table.Cell class="font-medium">{profile.name}</Table.Cell><Table.Cell
-                >{profile.revision}</Table.Cell
-              ><Table.Cell>{profile.platform}</Table.Cell><Table.Cell
+                >{profile.platform}</Table.Cell
+              ><Table.Cell
                 >{profile.video.codec} · {profile.video.width}×{profile.video.height}</Table.Cell
               ><Table.Cell>{profile.delivery.playlistType}</Table.Cell><Table.Cell
                 >{evidenceCount(profile)} tests</Table.Cell
               ><Table.Cell><StatusBadge value={profile.state ?? 'experimental'} /></Table.Cell
+              ><Table.Cell
+                ><DropdownMenu.Root
+                  ><DropdownMenu.Trigger
+                    >{#snippet child({ props })}<Button
+                        {...props}
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Actions for ${profile.name}`}><Ellipsis /></Button
+                      >{/snippet}</DropdownMenu.Trigger
+                  ><DropdownMenu.Content align="end"
+                    ><DropdownMenu.Item
+                      onclick={() =>
+                        goto(
+                          `/dashboard/settings/profiles/new?edit=${encodeURIComponent(profile.profileId)}`
+                        )}><Pencil />Edit</DropdownMenu.Item
+                    ><DropdownMenu.Item
+                      onclick={() =>
+                        goto(
+                          `/dashboard/settings/profiles/new?duplicate=${encodeURIComponent(profile.profileId)}`
+                        )}><Copy />Duplicate</DropdownMenu.Item
+                    ><DropdownMenu.Item
+                      variant="destructive"
+                      onclick={() => (pendingDelete = profile)}><Trash2 />Delete</DropdownMenu.Item
+                    ></DropdownMenu.Content
+                  ></DropdownMenu.Root
+                ></Table.Cell
               ></Table.Row
             >{/each}</Table.Body
         >
@@ -148,8 +179,33 @@
       {#each profiles as profile}<Card.Root
           ><Card.Header
             ><Card.Title>{profile.name}</Card.Title><Card.Description
-              >Revision {profile.revision} · {profile.platform}</Card.Description
-            ><Card.Action><StatusBadge value={profile.state ?? 'experimental'} /></Card.Action
+              >{profile.platform}</Card.Description
+            ><Card.Action class="flex items-center gap-1"
+              ><StatusBadge value={profile.state ?? 'experimental'} /><DropdownMenu.Root
+                ><DropdownMenu.Trigger
+                  >{#snippet child({ props })}<Button
+                      {...props}
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Actions for ${profile.name}`}><Ellipsis /></Button
+                    >{/snippet}</DropdownMenu.Trigger
+                ><DropdownMenu.Content align="end"
+                  ><DropdownMenu.Item
+                    onclick={() =>
+                      goto(
+                        `/dashboard/settings/profiles/new?edit=${encodeURIComponent(profile.profileId)}`
+                      )}><Pencil />Edit</DropdownMenu.Item
+                  ><DropdownMenu.Item
+                    onclick={() =>
+                      goto(
+                        `/dashboard/settings/profiles/new?duplicate=${encodeURIComponent(profile.profileId)}`
+                      )}><Copy />Duplicate</DropdownMenu.Item
+                  ><DropdownMenu.Item
+                    variant="destructive"
+                    onclick={() => (pendingDelete = profile)}><Trash2 />Delete</DropdownMenu.Item
+                  ></DropdownMenu.Content
+                ></DropdownMenu.Root
+              ></Card.Action
             ></Card.Header
           ><Card.Content class="text-sm"
             >{profile.video.codec} · {profile.video.width}×{profile.video.height} · {profile
@@ -164,25 +220,22 @@
       <Card.Header>
         <Card.Title>Record a playback test</Card.Title>
         <Card.Description>
-          Attach compatibility evidence to the exact profile revision that was tested.
+          Attach compatibility evidence to the profile that was tested.
         </Card.Description>
       </Card.Header>
       <Card.Content>
         <form class="space-y-5" onsubmit={recordTest}>
           <Field.Group class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Field.Field>
-              <Field.Label for="evidence-profile">Profile revision</Field.Label>
+              <Field.Label for="evidence-profile">Profile</Field.Label>
               <Select.Root type="single" bind:value={selectedProfile}>
                 <Select.Trigger id="evidence-profile" class="w-full">
-                  {profiles.find(
-                    (profile) => `${profile.profileId}:${profile.revision}` === selectedProfile
-                  )?.name ?? 'Choose a profile'}
+                  {profiles.find((profile) => profile.profileId === selectedProfile)?.name ??
+                    'Choose a profile'}
                 </Select.Trigger>
                 <Select.Content>
                   {#each profiles as profile}
-                    <Select.Item value={`${profile.profileId}:${profile.revision}`}>
-                      {profile.name} · revision {profile.revision}
-                    </Select.Item>
+                    <Select.Item value={profile.profileId}>{profile.name}</Select.Item>
                   {/each}
                 </Select.Content>
               </Select.Root>
@@ -255,3 +308,12 @@
     </Card.Root>
   {/if}
 </div>
+
+<ConfirmAction
+  open={Boolean(pendingDelete)}
+  onOpenChange={(open) => !open && (pendingDelete = null)}
+  title="Delete profile?"
+  description={`Delete ${pendingDelete?.name ?? 'this profile'}. Profiles assigned to a session, live channel, compatibility result, or user cannot be deleted.`}
+  confirmLabel="Delete profile"
+  onConfirm={deletePendingProfile}
+/>

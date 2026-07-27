@@ -164,7 +164,7 @@ const jellyfin = createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/Users/browser-user/Items') {
     const parentId = url.searchParams.get('ParentId');
     const recursive = url.searchParams.get('Recursive') === 'true';
-    const search = url.searchParams.get('SearchTerm')?.toLocaleLowerCase();
+    const search = url.searchParams.get('searchTerm')?.toLocaleLowerCase();
     const kinds = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
     const start = Number(url.searchParams.get('StartIndex') ?? 0);
     const limit = Number(url.searchParams.get('Limit') ?? 50);

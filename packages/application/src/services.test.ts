@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CreateProfileRevisionRequest } from '@vrrelay/contracts';
+import type { ProfileInput } from '@vrrelay/contracts';
 import {
   DefaultProviderRegistry,
   InMemoryEventBus,
@@ -27,7 +27,7 @@ import type {
   BackendStatus,
   CachedObject,
   ClusterNode,
-  ProfileRevision,
+  Profile,
   RelaySession,
   VodProducer
 } from '@vrrelay/domain';
@@ -85,7 +85,7 @@ class CapturingLiveNormalizer implements LiveNormalizer {
     channelId: string;
     sourceUrl: string;
     destinationUrl: string;
-    profile: ProfileRevision;
+    profile: Profile;
   }> = [];
   readonly runningChannels = new Set<string>();
 
@@ -94,7 +94,7 @@ class CapturingLiveNormalizer implements LiveNormalizer {
     _ownerId: string | undefined,
     sourceUrl: string,
     destinationUrl: string,
-    profile: ProfileRevision
+    profile: Profile
   ): Promise<void> {
     this.starts.push({ channelId, sourceUrl, destinationUrl, profile });
     this.runningChannels.add(channelId);
@@ -323,24 +323,22 @@ class SessionConflictRepository extends SqliteRepository {
 }
 
 type ProfileInputOverrides = Omit<
-  Partial<CreateProfileRevisionRequest>,
+  Partial<ProfileInput>,
   'video' | 'audio' | 'delivery' | 'processing'
 > & {
-  video?: Partial<CreateProfileRevisionRequest['video']>;
-  audio?: Partial<CreateProfileRevisionRequest['audio']>;
-  delivery?: Partial<CreateProfileRevisionRequest['delivery']>;
-  processing?: Partial<CreateProfileRevisionRequest['processing']>;
+  video?: Partial<ProfileInput['video']>;
+  audio?: Partial<ProfileInput['audio']>;
+  delivery?: Partial<ProfileInput['delivery']>;
+  processing?: Partial<ProfileInput['processing']>;
 };
 
-function profileInput(overrides: ProfileInputOverrides = {}): CreateProfileRevisionRequest {
-  const base: CreateProfileRevisionRequest = {
+function profileInput(overrides: ProfileInputOverrides = {}): ProfileInput {
+  const base: ProfileInput = {
     name: 'Profile experiment',
     platform: 'universal',
     state: 'experimental',
     video: {
       codec: 'h264',
-      encoder: 'libx264',
-      hardwareMode: 'software',
       decodeMode: 'auto',
       profile: 'high',
       level: '4.1',
@@ -448,7 +446,6 @@ async function ownedVodSessionFixture(
           kind: 'vod',
           source: { providerId, itemId: 'movie' },
           profileId: 'universal-h264-hls-vod',
-          profileRevision: 1,
           platformMode: 'universal',
           pinned: false,
           reportActivity: false,
@@ -464,204 +461,6 @@ async function ownedVodSessionFixture(
       )
   };
 }
-
-describe('profile lifecycle', () => {
-  it('prefers an available hardware encoder for the built-in profiles', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-seed-'));
-    dirs.push(dir);
-    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-    await repo.migrate();
-    const service = new ProfileService(repo, {
-      ...mediaCapabilities,
-      encoders: [
-        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
-        ...mediaCapabilities.encoders
-      ]
-    });
-
-    await service.seed();
-
-    expect(await service.list()).toHaveLength(5);
-    expect(
-      (await service.list()).every(
-        (seeded) =>
-          seeded.video.encoder === 'h264_videotoolbox' &&
-          seeded.video.hardwareMode === 'videotoolbox'
-      )
-    ).toBe(true);
-  });
-
-  it('uses a supported forced encoder for all built-in profiles', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-forced-encoder-'));
-    dirs.push(dir);
-    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-    await repo.migrate();
-    const service = new ProfileService(
-      repo,
-      {
-        ...mediaCapabilities,
-        encoders: [
-          { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
-          ...mediaCapabilities.encoders
-        ]
-      },
-      'libx264'
-    );
-
-    await service.seed();
-
-    expect(
-      (await service.list()).every(
-        (seeded) => seeded.video.encoder === 'libx264' && seeded.video.hardwareMode === 'software'
-      )
-    ).toBe(true);
-  });
-
-  it('rejects a forced encoder that is unavailable on the relay', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-unavailable-encoder-'));
-    dirs.push(dir);
-    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-    await repo.migrate();
-    const service = new ProfileService(repo, mediaCapabilities, 'h264_videotoolbox');
-
-    await expect(service.seed()).rejects.toThrow(/forced encoder is not available/);
-  });
-
-  it('moves seeded profiles to a newly forced encoder after a policy change', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-encoder-change-'));
-    dirs.push(dir);
-    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-    await repo.migrate();
-    const capabilities = {
-      ...mediaCapabilities,
-      encoders: [
-        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
-        ...mediaCapabilities.encoders
-      ]
-    };
-
-    await new ProfileService(repo, capabilities).seed();
-    await new ProfileService(repo, capabilities, 'libx264').seed();
-
-    expect(await repo.getProfile('universal-h264-hls-vod')).toMatchObject({
-      revision: 2,
-      video: { encoder: 'libx264', hardwareMode: 'software' }
-    });
-  });
-
-  it('keeps an untouched hardware-accelerated built-in profile', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-migration-'));
-    dirs.push(dir);
-    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-    await repo.migrate();
-    const createdAt = new Date().toISOString();
-    await repo.putProfile({
-      ...profileInput({
-        name: 'Universal H.264 / AAC HLS',
-        video: { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' }
-      }),
-      profileId: 'universal-h264-hls-vod',
-      revision: 1,
-      description: 'Finite MPEG-TS HLS VOD baseline for PC and Quest testing.',
-      createdAt
-    });
-    const service = new ProfileService(repo, {
-      ...mediaCapabilities,
-      encoders: [
-        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
-        ...mediaCapabilities.encoders
-      ]
-    });
-
-    await service.seed();
-
-    await expect(repo.getProfile('universal-h264-hls-vod')).resolves.toMatchObject({
-      revision: 1,
-      video: { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' }
-    });
-    await expect(repo.getProfile('universal-h264-hls-vod', 1)).resolves.toMatchObject({
-      revision: 1,
-      video: { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' }
-    });
-  });
-
-  it('accepts implemented HLS profile shapes', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-implemented-'));
-    dirs.push(dir);
-    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-    await repo.migrate();
-    const service = new ProfileService(repo, mediaCapabilities);
-
-    await expect(service.createRevision(profileInput())).resolves.toMatchObject({
-      profileId: expect.any(String),
-      revision: 1,
-      delivery: { method: 'hls', container: 'mpegts', segmentType: 'mpegts' }
-    });
-  });
-
-  it.each([
-    ['manual verified state', { state: 'verified' }, /must start as experimental/],
-    ['RTSP delivery', { delivery: { method: 'rtsp' } }, /RTSP and HTTP MPEG-TS/],
-    ['HTTP MPEG-TS delivery', { delivery: { method: 'mpegts_http' } }, /RTSP and HTTP MPEG-TS/],
-    ['low-latency delivery', { delivery: { latencyMode: 'low' } }, /Low-latency/],
-    ['HLS event playlist', { delivery: { playlistType: 'event' } }, /event playlists/],
-    [
-      'mismatched HLS segment shape',
-      { delivery: { container: 'fmp4', segmentType: 'mpegts' } },
-      /matching MPEG-TS or fMP4/
-    ],
-    [
-      'direct fragmented MP4 delivery',
-      {
-        delivery: {
-          method: 'fragmented_mp4',
-          container: 'mp4',
-          segmentType: 'none',
-          playlistType: 'vod'
-        }
-      } as unknown as ProfileInputOverrides,
-      /Direct fragmented MP4/
-    ],
-    [
-      'schema-only passthrough policy',
-      { processing: { passthrough: 'compatible' } },
-      /Passthrough policy/
-    ]
-  ] as Array<[string, ProfileInputOverrides, RegExp]>)(
-    'rejects unsupported %s profile revisions',
-    async (_name, overrides, expected) => {
-      const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-rejected-'));
-      dirs.push(dir);
-      const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-      await repo.migrate();
-      const service = new ProfileService(repo, mediaCapabilities);
-
-      await expect(service.createRevision(profileInput(overrides))).rejects.toThrow(expected);
-      await expect(repo.listProfiles()).resolves.toEqual([]);
-    }
-  );
-
-  it.each([
-    [
-      'encoder',
-      { video: { encoder: 'h264_nvenc', hardwareMode: 'nvenc' } },
-      /video encoder is not available/
-    ],
-    ['pixel format', { video: { pixelFormat: 'yuv444p' } }, /pixel format is not available/]
-  ] as Array<[string, ProfileInputOverrides, RegExp]>)(
-    'rejects a profile whose %s was not discovered',
-    async (_name, overrides, expected) => {
-      const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-capability-'));
-      dirs.push(dir);
-      const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
-      await repo.migrate();
-      const service = new ProfileService(repo, mediaCapabilities);
-
-      await expect(service.createRevision(profileInput(overrides))).rejects.toThrow(expected);
-      await expect(repo.listProfiles()).resolves.toEqual([]);
-    }
-  );
-});
 
 describe('VOD relay service', () => {
   it('dispatches Stop to the durable remote producer owner after failover', async () => {
@@ -692,7 +491,6 @@ describe('VOD relay service', () => {
         versionId: 'version-1'
       },
       profileId: 'remote-stop-profile',
-      profileRevision: 1,
       platformMode: 'universal',
       state: 'idle',
       durationSeconds: 120,
@@ -994,7 +792,6 @@ describe('VOD relay service', () => {
           kind: 'vod',
           source: { providerId: 'provider-atomic-failure', itemId: 'movie' },
           profileId: 'universal-h264-hls-vod',
-          profileRevision: 1,
           platformMode: 'universal',
           pinned: false,
           reportActivity: false,
@@ -1061,9 +858,8 @@ describe('VOD relay service', () => {
     const registry = new DefaultProviderRegistry();
     registry.register(languageProvider);
     const profiles = new ProfileService(repo, mediaCapabilities);
-    const selectedProfile = await profiles.createRevision(
+    const selectedProfile = await profiles.create(
       profileInput({
-        profileId: 'language-profile',
         audio: { defaultLanguage: 'jpn' }
       })
     );
@@ -1095,7 +891,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p-audio-language', itemId: 'movie' },
       profileId: selectedProfile.profileId,
-      profileRevision: selectedProfile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1109,7 +904,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p-audio-language', itemId: 'movie', audioTrackId: 'audio-eng' },
       profileId: selectedProfile.profileId,
-      profileRevision: selectedProfile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1150,8 +944,8 @@ describe('VOD relay service', () => {
     };
     const registry = new DefaultProviderRegistry();
     registry.register(sourceProvider);
-    const selectedProfile = await new ProfileService(repo, mediaCapabilities).createRevision(
-      profileInput({ profileId: 'source-stats-profile' })
+    const selectedProfile = await new ProfileService(repo, mediaCapabilities).create(
+      profileInput()
     );
     let service!: SessionService;
     const transcoder: Transcoder = {
@@ -1184,7 +978,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p-source-stats', itemId: 'movie' },
       profileId: selectedProfile.profileId,
-      profileRevision: selectedProfile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1222,8 +1015,8 @@ describe('VOD relay service', () => {
     await secrets.put('producer-fallback-secret', 'token');
     const registry = new DefaultProviderRegistry();
     registry.register(provider);
-    const selectedProfile = await new ProfileService(repo, mediaCapabilities).createRevision(
-      profileInput({ profileId: 'producer-fallback-profile' })
+    const selectedProfile = await new ProfileService(repo, mediaCapabilities).create(
+      profileInput()
     );
     const service = new SessionService(
       repo,
@@ -1254,7 +1047,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p-producer-fallback', itemId: 'movie' },
       profileId: selectedProfile.profileId,
-      profileRevision: selectedProfile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1300,8 +1092,8 @@ describe('VOD relay service', () => {
     };
     const registry = new DefaultProviderRegistry();
     registry.register(sourceProvider);
-    const selectedProfile = await new ProfileService(repo, mediaCapabilities).createRevision(
-      profileInput({ profileId: 'source-ranges-profile' })
+    const selectedProfile = await new ProfileService(repo, mediaCapabilities).create(
+      profileInput()
     );
     let service!: SessionService;
     const transcoder: Transcoder = {
@@ -1339,7 +1131,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p-source-ranges', itemId: 'movie' },
       profileId: selectedProfile.profileId,
-      profileRevision: selectedProfile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1457,7 +1248,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p1', itemId: 'm1' },
       profileId: 'universal-h264-hls-vod',
-      profileRevision: 1,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1544,7 +1334,7 @@ describe('VOD relay service', () => {
       'vrrelay_segment_job_retries_total{mode="unknown",source="manual"} 1'
     );
     expect(renderedMetrics).toContain(
-      'vrrelay_segment_generation_seconds_count{delivery="mpegts",encoder="libx264"} 2'
+      'vrrelay_segment_generation_seconds_count{delivery="mpegts",codec="h264"} 2'
     );
     expect(renderedMetrics).toContain('vrrelay_cache_requests_total{layer="disk",outcome="miss"}');
     expect(renderedMetrics).toContain('vrrelay_workers_active{kind="transcode"} 0');
@@ -1692,7 +1482,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p1', itemId: 'm1' },
       profileId: 'universal-h264-hls-vod',
-      profileRevision: 1,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1796,7 +1585,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p1', itemId: 'm1' },
       profileId: 'universal-h264-hls-vod',
-      profileRevision: 1,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -1912,7 +1700,6 @@ describe('VOD relay service', () => {
       kind: 'vod',
       source: { providerId: 'p1', itemId: 'm1' },
       profileId: 'universal-h264-hls-vod',
-      profileRevision: 1,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -2020,7 +1807,6 @@ describe('provider lifecycle', () => {
       source: { providerId: 'provider-delete', itemId: 'movie' },
       durationSeconds: 10,
       profileId: 'universal-h264-hls-vod',
-      profileRevision: 1,
       platformMode: 'universal',
       state: 'idle',
       pinned: false,
@@ -2450,7 +2236,6 @@ describe('Live relay service', () => {
         name: 'Missing channel',
         liveChannelId: 'missing',
         profileId: 'h264-live-hls',
-        profileRevision: 1,
         platformMode: 'universal',
         pinned: true,
         reportActivity: false,
@@ -2464,7 +2249,6 @@ describe('Live relay service', () => {
       name: 'OBS test',
       liveChannelId: created.channel.id,
       profileId: 'h264-live-hls',
-      profileRevision: 1,
       platformMode: 'universal',
       pinned: true,
       reportActivity: false,
@@ -2688,9 +2472,8 @@ describe('Live relay service', () => {
       filters: [],
       pixelFormats: ['yuv420p']
     });
-    const liveProfile = await profileService.createRevision(
+    const liveProfile = await profileService.create(
       profileInput({
-        profileId: 'live-custom',
         delivery: { playlistType: 'live' },
         video: {
           width: 1280,
@@ -2750,7 +2533,6 @@ describe('Live relay service', () => {
       name: 'Profiled OBS session',
       liveChannelId: created.channel.id,
       profileId: liveProfile.profileId,
-      profileRevision: liveProfile.revision,
       platformMode: 'universal',
       pinned: true,
       reportActivity: false,
@@ -2760,8 +2542,7 @@ describe('Live relay service', () => {
     });
     const stored = (await repo.getLiveChannel(created.channel.id))!;
     expect(stored).toMatchObject({
-      normalizationProfileId: liveProfile.profileId,
-      normalizationProfileRevision: liveProfile.revision
+      normalizationProfileId: liveProfile.profileId
     });
 
     await live.reconcilePublisherPaths(new Set([stored.ingestPath!]));
@@ -2773,7 +2554,7 @@ describe('Live relay service', () => {
       destinationUrl: `rtsp://mediamtx:8554/${stored.path}`
     });
     expect(normalizer.starts[0]!.profile).toMatchObject({
-      profileId: 'live-custom',
+      profileId: liveProfile.profileId,
       video: { width: 1280, height: 720, frameRate: 60, gop: 120 },
       audio: { channels: 1, sampleRate: 44_100, bitrateKbps: 128 }
     });
@@ -2793,12 +2574,11 @@ describe('Live relay service', () => {
     const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
     await repo.migrate();
     const profileService = new ProfileService(repo, mediaCapabilities);
-    const firstProfile = await profileService.createRevision(
-      profileInput({ profileId: 'live-a', delivery: { playlistType: 'live' } })
+    const firstProfile = await profileService.create(
+      profileInput({ delivery: { playlistType: 'live' } })
     );
-    const secondProfile = await profileService.createRevision(
+    const secondProfile = await profileService.create(
       profileInput({
-        profileId: 'live-b',
         delivery: { playlistType: 'live' },
         video: { width: 1280, height: 720 }
       })
@@ -2848,16 +2628,14 @@ describe('Live relay service', () => {
     await sessions.create({
       ...baseRequest,
       name: 'First profile',
-      profileId: firstProfile.profileId,
-      profileRevision: firstProfile.revision
+      profileId: firstProfile.profileId
     });
 
     await expect(
       sessions.create({
         ...baseRequest,
         name: 'Second profile',
-        profileId: secondProfile.profileId,
-        profileRevision: secondProfile.revision
+        profileId: secondProfile.profileId
       })
     ).rejects.toThrow('different normalization profile');
   });
@@ -3071,7 +2849,6 @@ describe('provider failover bindings', () => {
       kind: 'vod',
       source: { providerId: 'provider-1', itemId: 'movie' },
       profileId: 'universal-h264-hls-vod',
-      profileRevision: 1,
       platformMode: 'universal',
       pinned: false,
       reportActivity: false,
@@ -3326,7 +3103,6 @@ describe('crash recovery', () => {
       source: { providerId: 'provider-session-secret-retry', itemId: 'movie' },
       durationSeconds: 60,
       profileId: 'profile-session-secret-retry',
-      profileRevision: 1,
       platformMode: 'pc',
       state: 'active',
       pinned: false,
@@ -3412,7 +3188,6 @@ describe('crash recovery', () => {
       source: { providerId: 'provider-delete-recovery', itemId: 'movie' },
       durationSeconds: 60,
       profileId: 'profile-delete-recovery',
-      profileRevision: 1,
       platformMode: 'pc',
       state: 'active',
       pinned: false,

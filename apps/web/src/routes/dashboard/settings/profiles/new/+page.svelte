@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { ArrowLeft, FlaskConical } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import type { ProfileRevision } from '@vrrelay/domain';
+  import type { Profile } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import { adminRoute, loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
@@ -17,16 +17,13 @@
   import * as Select from '#lib/new-ui/components/ui/select';
   import { Switch } from '#lib/new-ui/components/ui/switch';
 
-  let profiles = $state<ProfileRevision[]>([]);
-  let encoders = $state<
-    Array<{ name: string; codec: string; hardware: boolean; available: boolean }>
-  >([]);
-  let baseKey = $state('');
-  let name = $state('Compatibility experiment');
+  let profiles = $state<Profile[]>([]);
+  let editingId = $state('');
+  let duplicateId = $state('');
+  let name = $state('New profile');
+  let platform = $state<Profile['platform']>('universal');
   let codec = $state<'h264' | 'h265' | 'av1' | 'copy'>('h264');
-  let encoder = $state('libx264');
-  let hardwareMode = $state<ProfileRevision['video']['hardwareMode']>('software');
-  let decodeMode = $state<ProfileRevision['video']['decodeMode']>('auto');
+  let decodeMode = $state<Profile['video']['decodeMode']>('auto');
   let pixelFormat = $state('yuv420p');
   let bitrate = $state(8000);
   let maxrate = $state(9000);
@@ -36,38 +33,39 @@
   let frameRate = $state(30);
   let gop = $state(60);
   let bFrames = $state(0);
-  let audioCodec = $state<ProfileRevision['audio']['codec']>('aac');
+  let audioCodec = $state<Profile['audio']['codec']>('aac');
   let audioChannels = $state(2);
   let audioLayout = $state('stereo');
   let sampleRate = $state(48000);
   let audioBitrate = $state(192);
   let defaultAudioLanguage = $state('eng');
-  let method = $state<ProfileRevision['delivery']['method']>('hls');
-  let container = $state<ProfileRevision['delivery']['container']>('mpegts');
+  let method = $state<Profile['delivery']['method']>('hls');
+  let container = $state<Profile['delivery']['container']>('mpegts');
+  let playlistType = $state<Profile['delivery']['playlistType']>('vod');
   let segmentDuration = $state(4);
-  let latencyMode = $state<ProfileRevision['delivery']['latencyMode']>('standard');
+  let latencyMode = $state<Profile['delivery']['latencyMode']>('standard');
   let toneMap = $state(false);
   let burnSubtitles = $state(false);
-  let passthrough = $state<ProfileRevision['processing']['passthrough']>('never');
+  let passthrough = $state<Profile['processing']['passthrough']>('never');
   let saving = $state(false);
   let loading = $state(true);
   let loadError = $state('');
   let step = $state(0);
   const steps = ['Basics', 'Video', 'Audio & delivery', 'Processing & review'];
-  const deliveryMethods: Array<ProfileRevision['delivery']['method']> = ['hls'];
-  let base = $derived(
-    profiles.find((profile) => `${profile.profileId}:${profile.revision}` === baseKey)
+  const deliveryMethods: Array<Profile['delivery']['method']> = ['hls'];
+  let pageTitle = $derived(
+    editingId ? 'Edit profile' : duplicateId ? 'Duplicate profile' : 'New profile'
   );
 
   onMount(async () => {
     try {
-      const [profileResult, capabilityResult] = await Promise.all([
-        api.profiles(),
-        api.capabilities()
-      ]);
+      const profileResult = await api.profiles();
       profiles = profileResult.items;
-      encoders = capabilityResult.encoders;
-      if (profiles[0]) selectBase(`${profiles[0].profileId}:${profiles[0].revision}`);
+      editingId = page.url.searchParams.get('edit') ?? '';
+      duplicateId = page.url.searchParams.get('duplicate') ?? '';
+      const source = profiles.find((profile) => profile.profileId === (editingId || duplicateId));
+      if ((editingId || duplicateId) && !source) throw new Error('Profile was not found.');
+      if (source) loadProfile(source, Boolean(duplicateId));
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       loadError = reason instanceof Error ? reason.message : 'Could not load profiles.';
@@ -76,14 +74,10 @@
     }
   });
 
-  function selectBase(value: string) {
-    baseKey = value;
-    const profile = profiles.find((item) => `${item.profileId}:${item.revision}` === value);
-    if (!profile) return;
-    name = `${profile.name} experiment`;
+  function loadProfile(profile: Profile, duplicate: boolean) {
+    name = duplicate ? `${profile.name} copy` : profile.name;
+    platform = profile.platform;
     codec = profile.video.codec;
-    encoder = profile.video.encoder;
-    hardwareMode = profile.video.hardwareMode;
     decodeMode = profile.video.decodeMode;
     pixelFormat = profile.video.pixelFormat;
     bitrate = profile.video.bitrateKbps;
@@ -102,6 +96,7 @@
     defaultAudioLanguage = profile.audio.defaultLanguage ?? 'eng';
     method = profile.delivery.method;
     container = profile.delivery.container;
+    playlistType = profile.delivery.playlistType;
     segmentDuration = profile.delivery.segmentDuration;
     latencyMode = profile.delivery.latencyMode;
     toneMap = profile.processing.toneMap;
@@ -109,25 +104,7 @@
     passthrough = profile.processing.passthrough;
   }
 
-  function selectCodec(value: string) {
-    codec = value as typeof codec;
-    const available = encoders.find((item) => item.codec === codec && item.available);
-    if (!available) return;
-    encoder = available.name;
-    hardwareMode = available.name.includes('videotoolbox')
-      ? 'videotoolbox'
-      : available.name.includes('nvenc')
-        ? 'nvenc'
-        : available.name.includes('qsv')
-          ? 'qsv'
-          : available.name.includes('vaapi')
-            ? 'vaapi'
-            : available.name.includes('amf')
-              ? 'amf'
-              : 'software';
-  }
-
-  function deliveryContainerOptions(): Array<ProfileRevision['delivery']['container']> {
+  function deliveryContainerOptions(): Array<Profile['delivery']['container']> {
     return ['mpegts', 'fmp4'];
   }
 
@@ -139,20 +116,17 @@
   });
 
   async function save() {
-    if (!base) return;
     saving = true;
     try {
-      const revision = await api.createProfileRevision({
-        ...base,
+      const input = {
         name,
         description: 'User-created compatibility experiment.',
+        platform,
         state: 'experimental',
         video: {
-          ...base.video,
           codec,
-          encoder,
-          hardwareMode,
           decodeMode,
+          profile: codec === 'h264' ? 'high' : undefined,
           pixelFormat,
           bitrateKbps: Number(bitrate),
           maxrateKbps: Number(maxrate),
@@ -161,10 +135,10 @@
           height: Number(height),
           frameRate: Number(frameRate),
           gop: Number(gop),
-          bFrames: Number(bFrames)
+          bFrames: Number(bFrames),
+          preset: 'veryfast'
         },
         audio: {
-          ...base.audio,
           codec: audioCodec,
           channels: Number(audioChannels),
           layout: audioLayout,
@@ -173,17 +147,18 @@
           defaultLanguage: defaultAudioLanguage.trim().toLowerCase() || undefined
         },
         delivery: {
-          ...base.delivery,
           method,
           container,
           segmentType: container === 'fmp4' ? 'fmp4' : 'mpegts',
           segmentDuration: Number(segmentDuration),
           latencyMode,
-          playlistType: method === 'hls' ? base.delivery.playlistType : 'vod'
+          playlistType
         },
-        processing: { ...base.processing, toneMap, burnSubtitles, passthrough }
-      });
-      toast.success(`Created revision ${revision.revision}.`);
+        processing: { toneMap, burnSubtitles, passthrough, maxWorkers: 2 }
+      } satisfies import('@vrrelay/contracts').ProfileInput;
+      if (editingId) await api.updateProfile(editingId, input);
+      else await api.createProfile(input);
+      toast.success(editingId ? 'Profile updated.' : 'Profile created.');
       await goto('/dashboard/settings/profiles');
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'Could not create profile.');
@@ -195,8 +170,8 @@
 
 <div class="space-y-6 p-4 md:p-6">
   <PageHeader
-    title="New profile revision"
-    description="Clone a known profile, tune its structured pipeline, then test it in VRChat."
+    title={pageTitle}
+    description="Configure a structured media profile, then test it in VRChat."
     >{#snippet actions()}<Button variant="outline" href="/dashboard/settings/profiles"
         ><ArrowLeft data-icon="inline-start" />Profiles</Button
       >{/snippet}</PageHeader
@@ -205,7 +180,7 @@
   {#if !loading && !loadError}
     <Alert.Root
       ><FlaskConical /><Alert.Title>Compatibility experiment</Alert.Title><Alert.Description
-        >Every setting is validated and immutable. VRRelay never accepts raw FFmpeg arguments.</Alert.Description
+        >Every setting is validated. VRRelay never accepts raw FFmpeg arguments.</Alert.Description
       ></Alert.Root
     >
     <nav class="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Profile creation steps">
@@ -219,56 +194,39 @@
       <Card.Root class={step !== 0 ? 'hidden' : ''}
         ><Card.Header
           ><Card.Title>Identity</Card.Title><Card.Description
-            >Start from an existing immutable profile.</Card.Description
+            >Name the profile and choose its target platform and codec.</Card.Description
           ></Card.Header
         ><Card.Content
           ><Field.Group
             ><Field.Field
-              ><Field.Label>Base revision</Field.Label><Select.Root
+              ><Field.Label for="profile-name">Profile name</Field.Label><Input
+                id="profile-name"
+                bind:value={name}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="profile-platform">Platform</Field.Label><Select.Root
                 type="single"
-                value={baseKey}
-                onValueChange={(value) => selectBase(value ?? '')}
-                ><Select.Trigger class="w-full">{base?.name ?? 'Select profile'}</Select.Trigger
+                bind:value={platform}
+                ><Select.Trigger id="profile-platform" class="w-full">{platform}</Select.Trigger
                 ><Select.Content
                   ><Select.Group
-                    >{#each profiles as profile}<Select.Item
-                        value={`${profile.profileId}:${profile.revision}`}
-                        >{profile.name} · r{profile.revision}</Select.Item
+                    >{#each ['universal', 'pc', 'quest', 'dual'] as value}<Select.Item {value}
+                        >{value}</Select.Item
                       >{/each}</Select.Group
                   ></Select.Content
                 ></Select.Root
               ></Field.Field
             ><Field.Field
-              ><Field.Label for="profile-name">Revision name</Field.Label><Input
-                id="profile-name"
-                bind:value={name}
-              /></Field.Field
-            ><Field.Field
               ><Field.Label for="profile-codec">Video codec</Field.Label><Select.Root
                 type="single"
                 value={codec}
-                onValueChange={(value) => selectCodec(value ?? 'h264')}
+                onValueChange={(value) => (codec = (value ?? 'h264') as typeof codec)}
                 ><Select.Trigger id="profile-codec" class="w-full"
                   >{codec.toUpperCase()}</Select.Trigger
                 ><Select.Content
                   ><Select.Group
                     >{#each ['h264', 'h265', 'av1', 'copy'] as value}<Select.Item {value}
                         >{value.toUpperCase()}</Select.Item
-                      >{/each}</Select.Group
-                  ></Select.Content
-                ></Select.Root
-              ></Field.Field
-            ><Field.Field
-              ><Field.Label for="profile-encoder">Encoder implementation</Field.Label><Select.Root
-                type="single"
-                bind:value={encoder}
-                ><Select.Trigger id="profile-encoder" class="w-full">{encoder}</Select.Trigger
-                ><Select.Content
-                  ><Select.Group
-                    >{#each encoders.filter((item) => item.codec === codec) as item}<Select.Item
-                        value={item.name}
-                        disabled={!item.available}
-                        >{item.name}{item.available ? '' : ' · unavailable'}</Select.Item
                       >{/each}</Select.Group
                   ></Select.Content
                 ></Select.Root
@@ -280,23 +238,10 @@
       <Card.Root class={step !== 1 ? 'hidden' : ''}
         ><Card.Header
           ><Card.Title>Video</Card.Title><Card.Description
-            >Structured encoder, rate-control and output geometry settings.</Card.Description
+            >Structured rate-control and output geometry settings.</Card.Description
           ></Card.Header
         ><Card.Content
           ><Field.Group class="grid sm:grid-cols-2"
-            ><Field.Field
-              ><Field.Label for="hardware-mode">Hardware mode</Field.Label><Select.Root
-                type="single"
-                bind:value={hardwareMode}
-                ><Select.Trigger id="hardware-mode" class="w-full">{hardwareMode}</Select.Trigger
-                ><Select.Content
-                  ><Select.Group
-                    >{#each ['auto', 'software', 'videotoolbox', 'qsv', 'vaapi', 'nvenc', 'amf'] as value}<Select.Item
-                        {value}>{value}</Select.Item
-                      >{/each}</Select.Group
-                  ></Select.Content
-                ></Select.Root
-              ></Field.Field
             ><Field.Field
               ><Field.Label for="decode-mode">Decode acceleration</Field.Label><Select.Root
                 type="single"
@@ -459,6 +404,19 @@
                 ></Select.Root
               ></Field.Field
             ><Field.Field
+              ><Field.Label for="playlist-type">Playlist type</Field.Label><Select.Root
+                type="single"
+                bind:value={playlistType}
+                ><Select.Trigger id="playlist-type" class="w-full">{playlistType}</Select.Trigger
+                ><Select.Content
+                  ><Select.Group
+                    ><Select.Item value="vod">VOD</Select.Item><Select.Item value="live"
+                      >Live</Select.Item
+                    ></Select.Group
+                  ></Select.Content
+                ></Select.Root
+              ></Field.Field
+            ><Field.Field
               ><Field.Label for="segment-duration">Segment duration (seconds)</Field.Label><Input
                 id="segment-duration"
                 type="number"
@@ -516,10 +474,10 @@
     <div class="flex justify-between gap-2">
       <Button variant="outline" disabled={step === 0} onclick={() => (step -= 1)}>Back</Button>
       {#if step < steps.length - 1}
-        <Button disabled={!base || !name.trim()} onclick={() => (step += 1)}>Continue</Button>
+        <Button disabled={!name.trim()} onclick={() => (step += 1)}>Continue</Button>
       {:else}
-        <Button disabled={!base || !name.trim() || saving} onclick={save}
-          >{saving ? 'Creating…' : 'Create profile revision'}</Button
+        <Button disabled={!name.trim() || saving} onclick={save}
+          >{saving ? 'Saving…' : editingId ? 'Save changes' : 'Create profile'}</Button
         >
       {/if}
     </div>

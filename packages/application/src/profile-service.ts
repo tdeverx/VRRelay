@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto';
-import type { ProfileRevision } from '@vrrelay/domain';
-import type { CreateProfileRevisionRequest, RuntimeConfiguration } from '@vrrelay/contracts';
+import type { Profile } from '@vrrelay/domain';
+import type { ProfileInput } from '@vrrelay/contracts';
 import type { MediaCapabilities, Repository } from './index.js';
-import { ConflictError } from './errors.js';
+import { ConflictError, NotFoundError } from './errors.js';
 
-function assertImplementedProfile(input: CreateProfileRevisionRequest): void {
+function assertImplementedProfile(input: ProfileInput): void {
   if (input.state === 'verified')
     throw new ConflictError(
-      'Profile revisions must start as experimental until compatibility evidence promotes them'
+      'Profiles must start as experimental until compatibility evidence promotes them'
     );
   if (input.delivery.latencyMode !== 'standard')
     throw new ConflictError('Low-latency delivery profiles are not implemented');
   if (input.processing.passthrough !== 'never')
     throw new ConflictError('Passthrough policy profiles are not implemented');
-
   if ((input.delivery.method as string) === 'fragmented_mp4')
     throw new ConflictError('Direct fragmented MP4 delivery is not supported');
   if (input.delivery.method === 'rtsp' || input.delivery.method === 'mpegts_http')
@@ -33,8 +32,7 @@ export class ProfileService {
 
   constructor(
     private readonly repository: Repository,
-    capabilities?: MediaCapabilities,
-    private readonly builtInEncoder: RuntimeConfiguration['vodProducerEncoder'] = 'auto'
+    capabilities?: MediaCapabilities
   ) {
     this.#capabilities = capabilities;
   }
@@ -45,47 +43,17 @@ export class ProfileService {
         'Media capabilities must be discovered before profiles can be seeded'
       );
     this.#capabilities = capabilities;
-    const existingProfiles = await this.repository.listProfiles();
-    const available = new Set(
-      capabilities.encoders.filter((encoder) => encoder.available).map((encoder) => encoder.name)
-    );
-    if (!available.has('libx264'))
-      throw new ConflictError('The portable built-in profiles require the libx264 encoder');
-    const hardwareEncoders: ReadonlyArray<{
-      encoder: string;
-      hardwareMode: ProfileRevision['video']['hardwareMode'];
-    }> = [
-      { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' },
-      { encoder: 'h264_nvenc', hardwareMode: 'nvenc' },
-      { encoder: 'h264_qsv', hardwareMode: 'qsv' },
-      { encoder: 'h264_vaapi', hardwareMode: 'vaapi' },
-      { encoder: 'h264_amf', hardwareMode: 'amf' }
-    ];
-    const selectedEncoder =
-      this.builtInEncoder === 'auto'
-        ? hardwareEncoders.find(({ encoder }) => available.has(encoder))
-        : (hardwareEncoders.find(({ encoder }) => encoder === this.builtInEncoder) ??
-          (this.builtInEncoder === 'libx264'
-            ? { encoder: 'libx264', hardwareMode: 'software' as const }
-            : undefined));
-    if (
-      this.builtInEncoder !== 'auto' &&
-      (!selectedEncoder || !available.has(selectedEncoder.encoder))
-    )
-      throw new ConflictError(
-        `The forced encoder is not available on this relay: ${this.builtInEncoder}`
-      );
-    const preferredVideo = selectedEncoder
-      ? selectedEncoder
-      : { encoder: 'libx264', hardwareMode: 'software' as const };
+    if ((await this.repository.listProfiles()).length > 0) return;
+    if (!capabilities.encoders.some((encoder) => encoder.codec === 'h264' && encoder.available))
+      throw new ConflictError('The built-in profiles require an available H.264 encoder');
+
     const now = new Date().toISOString();
     const base: Omit<
-      ProfileRevision,
-      'profileId' | 'revision' | 'name' | 'description' | 'platform' | 'state' | 'createdAt'
+      Profile,
+      'profileId' | 'name' | 'description' | 'platform' | 'state' | 'createdAt' | 'updatedAt'
     > = {
       video: {
         codec: 'h264',
-        ...preferredVideo,
         decodeMode: 'auto',
         profile: 'high',
         level: '4.1',
@@ -118,32 +86,31 @@ export class ProfileService {
       },
       processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 2 }
     };
-    const profiles: ProfileRevision[] = [
+    const profiles: Profile[] = [
       {
         ...base,
         profileId: 'universal-h264-hls-vod',
-        revision: 1,
         name: 'Universal H.264 / AAC HLS',
         description: 'Finite MPEG-TS HLS VOD baseline for PC and Quest testing.',
         platform: 'universal',
         state: 'experimental',
-        createdAt: now
+        createdAt: now,
+        updatedAt: now
       },
       {
         ...base,
         profileId: 'pc-h264-hls-vod',
-        revision: 1,
         name: 'PC H.264 1080p',
         description: 'Higher-bitrate PC-oriented HLS VOD output.',
         platform: 'pc',
         state: 'experimental',
         video: { ...base.video, bitrateKbps: 12_000, maxrateKbps: 13_000, bufferKbps: 26_000 },
-        createdAt: now
+        createdAt: now,
+        updatedAt: now
       },
       {
         ...base,
         profileId: 'quest-h264-hls-vod',
-        revision: 1,
         name: 'Quest H.264 720p',
         description: 'Conservative Quest-oriented H.264/AAC profile.',
         platform: 'quest',
@@ -156,81 +123,97 @@ export class ProfileService {
           maxrateKbps: 4_500,
           bufferKbps: 9_000
         },
-        createdAt: now
+        createdAt: now,
+        updatedAt: now
       },
       {
         ...base,
         profileId: 'h264-live-hls',
-        revision: 1,
         name: 'H.264 / AAC Live HLS',
         description: 'Standard-latency HLS output for OBS live channels.',
         platform: 'universal',
         state: 'experimental',
         delivery: { ...base.delivery, playlistType: 'live' },
-        createdAt: now
+        createdAt: now,
+        updatedAt: now
       },
       {
         ...base,
         profileId: 'universal-h264-fmp4-hls-vod',
-        revision: 1,
         name: 'Universal H.264 / AAC fMP4 HLS',
         description: 'Experimental finite fMP4 HLS VOD output.',
         platform: 'universal',
         state: 'experimental',
         delivery: { ...base.delivery, container: 'fmp4', segmentType: 'fmp4' },
-        createdAt: now
+        createdAt: now,
+        updatedAt: now
       }
     ];
-    for (const profile of profiles) {
-      const latest = existingProfiles
-        .filter((existing) => existing.profileId === profile.profileId)
-        .sort((left, right) => right.revision - left.revision)[0];
-      if (!latest) {
-        await this.repository.putProfile(profile);
-        continue;
-      }
-      if (
-        latest.name === profile.name &&
-        (latest.video.encoder !== preferredVideo.encoder ||
-          latest.video.hardwareMode !== preferredVideo.hardwareMode)
-      )
-        await this.repository.putProfile({
-          ...latest,
-          revision: latest.revision + 1,
-          video: { ...latest.video, ...preferredVideo },
-          createdAt: now
-        });
-    }
+    for (const profile of profiles) await this.repository.putProfile(profile);
   }
 
-  async list(): Promise<ProfileRevision[]> {
+  async list(): Promise<Profile[]> {
     return this.repository.listProfiles();
   }
 
-  async createRevision(input: CreateProfileRevisionRequest): Promise<ProfileRevision> {
-    assertImplementedProfile(input);
-    const capabilities = this.#capabilities;
-    if (!capabilities)
-      throw new ConflictError(
-        'Media capabilities must be discovered before profiles can be created'
-      );
-    if (
-      !capabilities.encoders.some(
-        (encoder) => encoder.available && encoder.name === input.video.encoder
-      )
-    )
-      throw new ConflictError('The selected video encoder is not available on this relay');
-    if (!capabilities.pixelFormats.includes(input.video.pixelFormat))
-      throw new ConflictError('The selected pixel format is not available on this relay');
-    const profileId = input.profileId ?? randomUUID();
-    const previous = await this.repository.getProfile(profileId);
-    const profile: ProfileRevision = {
+  async create(input: ProfileInput): Promise<Profile> {
+    await this.#validate(input);
+    const profileId = randomUUID();
+    const now = new Date().toISOString();
+    const profile: Profile = { ...input, profileId, createdAt: now, updatedAt: now };
+    await this.repository.putProfile(profile);
+    return profile;
+  }
+
+  async update(profileId: string, input: ProfileInput): Promise<Profile> {
+    await this.#validate(input);
+    const current = await this.repository.getProfile(profileId);
+    if (!current) throw new NotFoundError('Profile was not found');
+    const profile: Profile = {
       ...input,
       profileId,
-      revision: (previous?.revision ?? 0) + 1,
-      createdAt: new Date().toISOString()
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString()
     };
     await this.repository.putProfile(profile);
     return profile;
+  }
+
+  async delete(profileId: string): Promise<void> {
+    if (!(await this.repository.getProfile(profileId)))
+      throw new NotFoundError('Profile was not found');
+    const inUse =
+      (await this.repository.listSessions()).some((session) => session.profileId === profileId) ||
+      (await this.repository.listLiveChannels()).some(
+        (channel) => channel.normalizationProfileId === profileId
+      ) ||
+      (await this.repository.listCompatibilityResults()).some(
+        (result) => result.profileId === profileId
+      ) ||
+      (await this.repository.listUserIdentities()).some(
+        ({ value }) =>
+          value.defaultProfileId === profileId || value.allowedProfileIds.includes(profileId)
+      );
+    if (inUse)
+      throw new ConflictError(
+        'Profile is still assigned to a session, live channel, compatibility result, or user entitlement'
+      );
+    await this.repository.deleteProfile(profileId);
+  }
+
+  async #validate(input: ProfileInput): Promise<void> {
+    assertImplementedProfile(input);
+    const capabilities = this.#capabilities;
+    if (!capabilities)
+      throw new ConflictError('Media capabilities must be discovered before profiles can be saved');
+    if (
+      input.video.codec !== 'copy' &&
+      !capabilities.encoders.some(
+        (encoder) => encoder.available && encoder.codec === input.video.codec
+      )
+    )
+      throw new ConflictError('No available encoder supports the selected video codec');
+    if (!capabilities.pixelFormats.includes(input.video.pixelFormat))
+      throw new ConflictError('The selected pixel format is not available on this relay');
   }
 }

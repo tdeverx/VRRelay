@@ -226,8 +226,6 @@ export type CatalogPage = {
 
 export type VideoSettings = {
     codec: 'h264' | 'h265' | 'av1' | 'copy';
-    encoder: string;
-    hardwareMode: 'auto' | 'software' | 'videotoolbox' | 'qsv' | 'vaapi' | 'nvenc' | 'amf';
     decodeMode: 'auto' | 'software' | 'videotoolbox' | 'd3d11va' | 'qsv' | 'vaapi' | 'cuda';
     profile?: string;
     level?: string;
@@ -270,7 +268,7 @@ export type ProcessingSettings = {
     maxWorkers: number;
 };
 
-export type CreateProfileRevisionRequest = {
+export type ProfileInput = {
     profileId?: string;
     name: string;
     description?: string;
@@ -282,21 +280,21 @@ export type CreateProfileRevisionRequest = {
     processing: ProcessingSettings;
 };
 
-export type ProfileRevision = CreateProfileRevisionRequest & {
+export type Profile = ProfileInput & {
     profileId: string;
-    revision: number;
     state?: CompatibilityState;
     disabledReason?: string;
     createdAt: string;
+    updatedAt: string;
 };
 
 export type ProfileList = {
-    items: Array<ProfileRevision>;
+    items: Array<Profile>;
 };
 
 export type CatalogProfileList = {
     defaultProfileId: string;
-    items: Array<ProfileRevision>;
+    items: Array<Profile>;
 };
 
 export type MediaCapabilities = {
@@ -316,7 +314,6 @@ export type MediaCapabilities = {
 export type SessionCommon = {
     name?: string;
     profileId: string;
-    profileRevision: number;
     platformMode: PlatformMode;
     pinned?: boolean;
     placementPolicy?: PlacementPolicy;
@@ -348,7 +345,6 @@ export type RelaySession = {
     source?: MediaSourceRef;
     liveChannelId?: string;
     profileId: string;
-    profileRevision: number;
     platformMode: PlatformMode;
     state: 'idle' | 'queued' | 'starting' | 'active' | 'live' | 'error' | 'stopped';
     durationSeconds?: number;
@@ -445,7 +441,6 @@ export type LiveChannel = {
     originNodeId?: string;
     region?: string;
     normalizationProfileId?: string;
-    normalizationProfileRevision?: number;
     normalize: boolean;
     publisherState: 'offline' | 'online' | 'reconnecting' | 'error';
     publisherUpdatedAt?: string;
@@ -480,7 +475,6 @@ export type CompatibilityInput = {
     platform: 'pc' | 'quest';
     player: string;
     profileId: string;
-    profileRevision: number;
     state: CompatibilityState;
     startup: boolean;
     duration: boolean;
@@ -543,6 +537,7 @@ export type EventList = {
 
 export type NodeCapability = {
     encoders: Array<string>;
+    videoCodecs?: Array<'h264' | 'h265' | 'av1' | 'copy'>;
     hardwareDevices: Array<string>;
     maxWorkers: number;
     activeWorkers: number;
@@ -662,7 +657,6 @@ export type CreatedBinding = {
 export type PlacementPreviewRequest = {
     providerId?: string;
     profileId: string;
-    profileRevision: number;
     placementPolicy: PlacementPolicy;
     preferredNodeId?: string;
     preferredRegion?: string;
@@ -743,7 +737,7 @@ export type RuntimeConfiguration = {
     vodProducerBufferLowWatermarkMs: number;
     vodProducerBufferHighWatermarkMs: number;
     vodProducerMaxCatchupRate: number;
-    vodProducerEncoder: 'auto' | 'libx264' | 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv' | 'h264_vaapi' | 'h264_amf';
+    videoEncoder: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf';
     vodProducerMaxConcurrent: number;
     vodProducerMaxPerProvider: number;
     nodeName: string;
@@ -900,6 +894,8 @@ export type BackendActivationRequestWritable = BackendValidationRequestWritable;
 
 export type ProviderId = string;
 
+export type ProfileId = string;
+
 export type ItemId = string;
 
 export type SessionId = string;
@@ -926,7 +922,7 @@ export type UpdateUser = UpdateUserRequest;
 
 export type CreateProvider = CreateProviderRequestWritable;
 
-export type CreateProfileRevision = CreateProfileRevisionRequest;
+export type ProfileInput2 = ProfileInput;
 
 export type CreateSession = CreateSessionRequest;
 
@@ -1626,28 +1622,73 @@ export type ListProfilesData = {
 
 export type ListProfilesResponses = {
     /**
-     * Immutable profile revisions
+     * Encoding and delivery profiles
      */
     200: ProfileList;
 };
 
 export type ListProfilesResponse = ListProfilesResponses[keyof ListProfilesResponses];
 
-export type CreateProfileRevisionData = {
-    body: CreateProfileRevision;
+export type CreateProfileData = {
+    body: ProfileInput2;
     path?: never;
     query?: never;
     url: '/profiles';
 };
 
-export type CreateProfileRevisionResponses = {
+export type CreateProfileResponses = {
     /**
-     * Immutable profile revision
+     * Encoding and delivery profile
      */
-    201: ProfileRevision;
+    201: Profile;
 };
 
-export type CreateProfileRevisionResponse = CreateProfileRevisionResponses[keyof CreateProfileRevisionResponses];
+export type CreateProfileResponse = CreateProfileResponses[keyof CreateProfileResponses];
+
+export type DeleteProfileData = {
+    body?: never;
+    path: {
+        profileId: string;
+    };
+    query?: never;
+    url: '/profiles/{profileId}';
+};
+
+export type DeleteProfileErrors = {
+    /**
+     * Request failed
+     */
+    409: ApiError;
+};
+
+export type DeleteProfileError = DeleteProfileErrors[keyof DeleteProfileErrors];
+
+export type DeleteProfileResponses = {
+    /**
+     * Profile deleted
+     */
+    204: void;
+};
+
+export type DeleteProfileResponse = DeleteProfileResponses[keyof DeleteProfileResponses];
+
+export type UpdateProfileData = {
+    body: ProfileInput2;
+    path: {
+        profileId: string;
+    };
+    query?: never;
+    url: '/profiles/{profileId}';
+};
+
+export type UpdateProfileResponses = {
+    /**
+     * Encoding and delivery profile
+     */
+    200: Profile;
+};
+
+export type UpdateProfileResponse = UpdateProfileResponses[keyof UpdateProfileResponses];
 
 export type GetMediaCapabilitiesData = {
     body?: never;
