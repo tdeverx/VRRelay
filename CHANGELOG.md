@@ -15,7 +15,9 @@ semantic versioning after the first public release.
 - Reduced redundant helper-level tests while retaining the functional, security, persistence,
   browser, distributed, and packaging gates. Pull requests and merge-queue candidates run the full
   validation matrix; completed merges to `main` run a focused build with generous job timeouts and
-  stale-run cancellation.
+  stale-run cancellation. Removed unused local build/sync wrappers and the duplicate cluster
+  Compose smoke; Windows PR validation now compiles the native tray and production application
+  without rerunning the Linux unit, lint, audit, and repository gates.
 - Replaced VOD catch-up aggressiveness with a per-stream maximum rate. Producers now evaluate their
   own buffer headroom every second and continuously scale between 1× and that maximum without
   restarting the shared upstream connection.

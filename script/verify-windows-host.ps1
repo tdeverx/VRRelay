@@ -8,8 +8,8 @@ $Tray = Join-Path $OutputRoot 'VRRelayTray.exe'
 if ($LASTEXITCODE -ne 0) { throw "Native Windows tray build failed with exit code $LASTEXITCODE" }
 Push-Location $Root
 try {
-  npm run verify:core
-  if ($LASTEXITCODE -ne 0) { throw "Windows core verification failed with exit code $LASTEXITCODE" }
+  npm run build
+  if ($LASTEXITCODE -ne 0) { throw "Windows production build failed with exit code $LASTEXITCODE" }
 } finally {
   Pop-Location
 }
