@@ -1112,7 +1112,7 @@
                 ><Select.Trigger class="w-full">{runtimeDraft.videoEncoder}</Select.Trigger
                 ><Select.Content
                   ><Select.Group
-                    ><Select.Item value="auto">Auto (best available)</Select.Item><Select.Item
+                    ><Select.Item value="auto">Auto (compatible default)</Select.Item><Select.Item
                       value="software">Software</Select.Item
                     ><Select.Item value="videotoolbox">VideoToolbox</Select.Item><Select.Item
                       value="nvenc">NVIDIA NVENC</Select.Item

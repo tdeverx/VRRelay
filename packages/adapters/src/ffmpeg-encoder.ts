@@ -33,12 +33,12 @@ const encoders: Record<
 };
 
 const automaticOrder: Exclude<VideoEncoderPreference, 'auto'>[] = [
+  'software',
   'videotoolbox',
   'nvenc',
   'qsv',
   'vaapi',
-  'amf',
-  'software'
+  'amf'
 ];
 
 export function resolveFfmpegVideoEncoder(
