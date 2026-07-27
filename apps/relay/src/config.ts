@@ -133,16 +133,8 @@ const ConfigSchema = z
       .pipe(z.number().int().min(8_000).max(600_000))
       .default(60_000),
     vodProducerMaxCatchupRate: z.coerce.number().min(1).max(2).default(2),
-    vodProducerEncoder: z
-      .enum([
-        'auto',
-        'libx264',
-        'h264_videotoolbox',
-        'h264_nvenc',
-        'h264_qsv',
-        'h264_vaapi',
-        'h264_amf'
-      ])
+    videoEncoder: z
+      .enum(['auto', 'software', 'videotoolbox', 'nvenc', 'qsv', 'vaapi', 'amf'])
       .default('auto'),
     vodProducerMaxConcurrent: z.coerce.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.coerce.number().int().min(1).max(32).default(2),
@@ -424,7 +416,7 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE ??
       environment.VRRELAY_VOD_PRODUCER_CATCHUP_RATE ??
       runtime?.vodProducerMaxCatchupRate,
-    vodProducerEncoder: environment.VRRELAY_VOD_PRODUCER_ENCODER ?? runtime?.vodProducerEncoder,
+    videoEncoder: environment.VRRELAY_VIDEO_ENCODER ?? runtime?.videoEncoder,
     vodProducerMaxConcurrent:
       environment.VRRELAY_VOD_PRODUCER_MAX_CONCURRENT ?? runtime?.vodProducerMaxConcurrent,
     vodProducerMaxPerProvider:

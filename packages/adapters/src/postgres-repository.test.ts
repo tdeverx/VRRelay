@@ -120,9 +120,9 @@ class FakeMigrationClient {
     column('providers', 'revision', 'int4', 'NO', '1'),
     column('providers', 'deletion_pending', 'bool', 'NO', 'false'),
     column('profiles', 'profile_id', 'text'),
-    column('profiles', 'revision', 'int4'),
     column('profiles', 'document', 'jsonb'),
     column('profiles', 'created_at', 'timestamptz'),
+    column('profiles', 'updated_at', 'timestamptz'),
     column('sessions', 'id', 'text'),
     column('sessions', 'document', 'jsonb'),
     column('sessions', 'updated_at', 'timestamptz'),
@@ -197,7 +197,7 @@ class FakeMigrationClient {
   constraints = [
     ['schema_migrations', 'PRIMARY KEY', ['version']],
     ['providers', 'PRIMARY KEY', ['id']],
-    ['profiles', 'PRIMARY KEY', ['profile_id', 'revision']],
+    ['profiles', 'PRIMARY KEY', ['profile_id']],
     ['sessions', 'PRIMARY KEY', ['id']],
     ['playback_grants', 'PRIMARY KEY', ['token_hash']],
     ['live_channels', 'PRIMARY KEY', ['id']],
@@ -618,7 +618,6 @@ describe.runIf(Boolean(postgresUrl))('PostgreSQL repository integration', () => 
       kind: 'live',
       liveChannelId: 'live-a',
       profileId: 'profile-a',
-      profileRevision: 1,
       platformMode: 'pc',
       state: 'active',
       pinned: false,
@@ -959,7 +958,6 @@ describe.runIf(Boolean(postgresUrl))('PostgreSQL repository integration', () => 
         kind: 'vod',
         source: { providerId, itemId: 'movie-a' },
         profileId: 'profile-a',
-        profileRevision: 1,
         platformMode: 'pc',
         state: 'active',
         durationSeconds: 120,
@@ -1040,7 +1038,7 @@ describe.runIf(Boolean(postgresUrl))('PostgreSQL repository integration', () => 
         repository.compareAndSetSession(
           {
             ...currentSession.value,
-            profileRevision: currentSession.value.profileRevision + 1,
+            name: `${currentSession.value.name} updated`,
             updatedAt: new Date().toISOString()
           },
           currentSession.revision

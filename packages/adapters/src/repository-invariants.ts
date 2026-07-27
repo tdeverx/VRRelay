@@ -23,7 +23,6 @@ export function sameSessionIdentity(current: RelaySession, candidate: RelaySessi
     sameMediaSource(current.source, candidate.source) &&
     current.liveChannelId === candidate.liveChannelId &&
     current.profileId === candidate.profileId &&
-    current.profileRevision === candidate.profileRevision &&
     current.platformMode === candidate.platformMode &&
     current.durationSeconds === candidate.durationSeconds &&
     current.createdAt === candidate.createdAt

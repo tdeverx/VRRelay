@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ProfileRevision } from '@vrrelay/domain';
+import type { Profile } from '@vrrelay/domain';
 import { FFmpegLiveNormalizer, liveNormalizerArgs } from './ffmpeg-live-normalizer.js';
 
 function optionValue(args: string[], option: string): string | undefined {
@@ -16,16 +16,13 @@ describe('FFmpeg live normalizer', () => {
   });
 
   it('builds the live normalization command from the selected profile', () => {
-    const profile: ProfileRevision = {
+    const profile: Profile = {
       profileId: 'live-720p60',
-      revision: 3,
       name: 'Live 720p60',
       platform: 'pc',
       state: 'experimental',
       video: {
         codec: 'h264',
-        encoder: 'libx264',
-        hardwareMode: 'software',
         decodeMode: 'auto',
         profile: 'high',
         level: '4.1',
@@ -56,7 +53,8 @@ describe('FFmpeg live normalizer', () => {
         latencyMode: 'standard'
       },
       processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 1 },
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     const args = liveNormalizerArgs(
@@ -126,14 +124,11 @@ describe('FFmpeg live normalizer', () => {
     });
     const profile = {
       profileId: 'live-supervision',
-      revision: 1,
       name: 'Live supervision',
       platform: 'universal',
       state: 'experimental',
       video: {
         codec: 'h264',
-        encoder: 'libx264',
-        hardwareMode: 'software',
         decodeMode: 'auto',
         pixelFormat: 'yuv420p',
         width: 1280,
@@ -166,8 +161,9 @@ describe('FFmpeg live normalizer', () => {
         passthrough: 'never',
         maxWorkers: 1
       },
-      createdAt: new Date().toISOString()
-    } satisfies ProfileRevision;
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    } satisfies Profile;
 
     const starting = normalizer.start(
       'channel-a',

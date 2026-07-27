@@ -2,7 +2,7 @@
 
 The default VOD profile is H.264 8-bit `yuv420p`, AAC-LC stereo at 48 kHz, at most 30 fps, delivered as MPEG-TS HLS. Live uses H.264/AAC HLS. These are candidates until a real VRChat build records evidence.
 
-H.265, AV1, copy codecs, fMP4 HLS, hardware-specific encoders, tone mapping, and subtitle burn-in are experiments that require retained matrix evidence before support can be claimed. Direct fragmented MP4, low-latency HLS, RTSP, HTTP MPEG-TS, HLS event playlists, mismatched HLS segment/container shapes, and passthrough policy profiles are not implemented profile outputs and cannot be saved as new profile revisions.
+H.265, AV1, copy codecs, fMP4 HLS, hardware-specific encoder backends, tone mapping, and subtitle burn-in are experiments that require retained matrix evidence before support can be claimed. Direct fragmented MP4, low-latency HLS, RTSP, HTTP MPEG-TS, HLS event playlists, mismatched HLS segment/container shapes, and passthrough policy profiles are not implemented profile outputs and cannot be saved.
 
 The dashboard profile form only offers implemented delivery shapes. Compatibility evidence records startup, duration, pause, seeking, late join, completion, audio, video, platform, and player before a profile can be promoted.
 

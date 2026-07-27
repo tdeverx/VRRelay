@@ -278,7 +278,6 @@ async function main() {
       name: 'Real OBS playback smoke',
       liveChannelId: created.channel.id,
       profileId: profile.profileId,
-      profileRevision: profile.revision,
       platformMode: 'universal',
       pinned: true,
       reportActivity: false,

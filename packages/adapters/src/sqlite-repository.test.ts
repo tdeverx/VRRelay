@@ -44,7 +44,6 @@ function session(id: string, updatedAt: string): RelaySession {
     source: { providerId: 'provider-a', itemId: 'item-a' },
     durationSeconds: 60,
     profileId: 'profile-a',
-    profileRevision: 1,
     platformMode: 'pc',
     state: 'active',
     pinned: false,

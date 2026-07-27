@@ -133,8 +133,6 @@ const FfmpegOptionValueSchema = z
 
 export const VideoSettingsSchema = z.object({
   codec: z.enum(['h264', 'h265', 'av1', 'copy']),
-  encoder: FfmpegOptionValueSchema,
-  hardwareMode: z.enum(['auto', 'software', 'videotoolbox', 'qsv', 'vaapi', 'nvenc', 'amf']),
   decodeMode: z.enum(['auto', 'software', 'videotoolbox', 'd3d11va', 'qsv', 'vaapi', 'cuda']),
   profile: FfmpegOptionValueSchema.optional(),
   level: FfmpegOptionValueSchema.optional(),
@@ -192,9 +190,8 @@ export const ProcessingSettingsSchema = z.object({
 });
 export type ProcessingSettings = z.infer<typeof ProcessingSettingsSchema>;
 
-export const ProfileRevisionSchema = z.object({
+export const ProfileSchema = z.object({
   profileId: z.string().min(1),
-  revision: z.number().int().min(1),
   name: z.string().min(1).max(120),
   description: z.string().max(500).optional(),
   platform: PlatformModeSchema,
@@ -204,9 +201,10 @@ export const ProfileRevisionSchema = z.object({
   delivery: DeliverySettingsSchema,
   processing: ProcessingSettingsSchema,
   disabledReason: z.string().optional(),
-  createdAt: z.iso.datetime()
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime()
 });
-export type ProfileRevision = z.infer<typeof ProfileRevisionSchema>;
+export type Profile = z.infer<typeof ProfileSchema>;
 
 export const SessionKindSchema = z.enum(['vod', 'live']);
 export type SessionKind = z.infer<typeof SessionKindSchema>;
@@ -233,7 +231,6 @@ export const RelaySessionSchema = z
     source: MediaSourceRefSchema.optional(),
     liveChannelId: z.string().optional(),
     profileId: z.string(),
-    profileRevision: z.number().int().min(1),
     platformMode: PlatformModeSchema,
     state: SessionStateSchema,
     durationSeconds: z.number().positive().optional(),
@@ -280,7 +277,6 @@ export const LiveChannelSchema = z.object({
   originNodeId: z.string().optional(),
   region: z.string().optional(),
   normalizationProfileId: z.string().optional(),
-  normalizationProfileRevision: z.number().int().min(1).optional(),
   normalize: z.boolean().default(true),
   publisherState: z.enum(['offline', 'online', 'reconnecting', 'error']).default('offline'),
   publisherUpdatedAt: z.iso.datetime().optional(),
@@ -318,7 +314,6 @@ export const CompatibilityResultSchema = z.object({
   platform: z.enum(['pc', 'quest']),
   player: z.string(),
   profileId: z.string(),
-  profileRevision: z.number().int().min(1),
   state: CompatibilityStateSchema,
   startup: z.boolean(),
   duration: z.boolean(),
@@ -360,6 +355,7 @@ export type NodeState = z.infer<typeof NodeStateSchema>;
 
 export const NodeCapabilitySchema = z.object({
   encoders: z.array(z.string()),
+  videoCodecs: z.array(z.enum(['h264', 'h265', 'av1', 'copy'])).optional(),
   hardwareDevices: z.array(z.string()),
   maxWorkers: z.number().int().min(0),
   activeWorkers: z.number().int().min(0),

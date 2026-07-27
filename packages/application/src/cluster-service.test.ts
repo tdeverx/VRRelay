@@ -1109,14 +1109,11 @@ describe('cluster service', () => {
     });
     const profile = {
       profileId: 'hevc',
-      revision: 1,
       name: 'HEVC',
       platform: 'pc' as const,
       state: 'experimental' as const,
       video: {
         codec: 'h265' as const,
-        encoder: 'hevc_nvenc',
-        hardwareMode: 'nvenc' as const,
         decodeMode: 'auto' as const,
         pixelFormat: 'yuv420p',
         width: 1920,
@@ -1149,7 +1146,8 @@ describe('cluster service', () => {
         passthrough: 'never' as const,
         maxWorkers: 1
       },
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
     const result = await cluster.previewPlacement({
       policy: 'hosted',
@@ -1165,9 +1163,7 @@ describe('cluster service', () => {
       name: 'H.264',
       video: {
         ...profile.video,
-        codec: 'h264' as const,
-        encoder: 'libx264',
-        hardwareMode: 'software' as const
+        codec: 'h264' as const
       }
     };
     await expect(

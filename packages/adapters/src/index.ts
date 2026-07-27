@@ -1,4 +1,5 @@
 export * from './ffmpeg-transcoder.js';
+export * from './ffmpeg-encoder.js';
 export * from './jellyfin-provider.js';
 export * from './network-policy.js';
 export * from './provider-registry.js';

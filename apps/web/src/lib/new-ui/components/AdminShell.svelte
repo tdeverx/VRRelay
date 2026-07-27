@@ -11,7 +11,6 @@
     HardDrive,
     KeyRound,
     Library,
-    ListPlus,
     LogOut,
     Moon,
     Network,
@@ -66,12 +65,6 @@
       {
         label: 'Admin',
         items: [
-          {
-            label: 'Advanced relay',
-            href: `${routePrefix}/relay/new`,
-            icon: ListPlus,
-            visible: isAdmin
-          },
           {
             label: 'People & access',
             href: `${routePrefix}/settings/people`,

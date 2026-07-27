@@ -27,7 +27,6 @@ function session(id: string, lastPlaybackActivityAt: string, pinned = false): Re
     source: { providerId: 'provider-retention', itemId: `item-${id}` },
     durationSeconds: 60,
     profileId: 'profile-retention',
-    profileRevision: 1,
     platformMode: 'pc',
     state: 'active',
     pinned,

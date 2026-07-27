@@ -4,8 +4,9 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   JobLogEntry,
+  NodeCapability,
   NodeRole,
-  ProfileRevision,
+  Profile,
   RelaySession,
   SegmentJob
 } from '@vrrelay/domain';
@@ -25,6 +26,15 @@ import { SessionCache } from './session-cache.js';
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
 const DEFAULT_JOB_LOG_RETENTION_ROWS = 1000;
 const DEFAULT_JOB_LOG_QUERY_LIMIT = 200;
+
+function supportsVideoCodec(capabilities: NodeCapability, codec: Profile['video']['codec']) {
+  if (codec === 'copy') return true;
+  if (capabilities.videoCodecs) return capabilities.videoCodecs.includes(codec);
+  const names = capabilities.encoders.map((encoder) => encoder.toLowerCase());
+  if (codec === 'h264') return names.some((name) => name.includes('264'));
+  if (codec === 'h265') return names.some((name) => name.includes('265') || name.includes('hevc'));
+  return names.some((name) => name.includes('av1'));
+}
 
 class SegmentJobCancelledError extends Error {
   constructor() {
@@ -105,7 +115,7 @@ export interface SessionJobCallbacks {
   getSession(id: string): Promise<RelaySession>;
   generateSegment(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     index: number,
     destination: string,
     signal?: AbortSignal
@@ -258,17 +268,17 @@ export class SessionJobCoordinator {
     const session = await this.callbacks.getSession(job.sessionId);
     if (session.kind !== 'vod' || !session.source || !session.durationSeconds)
       throw new ConflictError('The segment job no longer references a retryable VOD session');
-    const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
-    if (!profile) throw new NotFoundError('Profile revision was not found');
+    const profile = await this.repository.getProfile(session.profileId);
+    if (!profile) throw new NotFoundError('Profile was not found');
     const expectedKey = this.cache.contentKey(session, profile, job.segmentIndex);
     if (expectedKey !== job.contentKey)
-      throw new ConflictError('The segment job does not match the immutable session revision');
+      throw new ConflictError('The segment job does not match the current profile');
     const extension = profile.delivery.segmentType === 'fmp4' ? 'm4s' : 'ts';
     const destination = join(
       this.options.cacheDir,
       'vod',
       session.id,
-      `${profile.profileId}-r${profile.revision}`,
+      profile.profileId,
       `${job.segmentIndex}.${extension}`
     );
     await rm(destination, { force: true });
@@ -290,8 +300,8 @@ export class SessionJobCoordinator {
     const session = await this.callbacks.getSession(command.sessionId);
     if (session.kind !== 'vod' || !session.source || !session.durationSeconds)
       throw new NotFoundError('VOD session was not found');
-    const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
-    if (!profile) throw new NotFoundError('Profile revision was not found');
+    const profile = await this.repository.getProfile(session.profileId);
+    if (!profile) throw new NotFoundError('Profile was not found');
     const expectedKey = this.cache.contentKey(session, profile, command.segmentIndex);
     if (expectedKey !== command.contentKey)
       throw new UnauthorizedError('Segment content key did not match the immutable session');
@@ -333,7 +343,7 @@ export class SessionJobCoordinator {
 
   async generateDistributedSegment(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     index: number,
     destination: string,
     contentKey: string,
@@ -746,7 +756,7 @@ export class SessionJobCoordinator {
     throw new ConflictError('Job failure update conflicted with repeated concurrent updates');
   }
 
-  async #remoteCandidates(session: RelaySession, profile: ProfileRevision): Promise<string[]> {
+  async #remoteCandidates(session: RelaySession, profile: Profile): Promise<string[]> {
     const dispatcher = this.infrastructure.dispatcher;
     const repository = this.infrastructure.clusterRepository;
     if (!dispatcher || !repository || !session.source) return [];
@@ -756,7 +766,7 @@ export class SessionJobCoordinator {
       (node) =>
         node.roles.includes('source-worker') &&
         node.state === 'online' &&
-        node.capabilities.encoders.includes(profile.video.encoder) &&
+        supportsVideoCodec(node.capabilities, profile.video.codec) &&
         (profile.delivery.method !== 'hls' || (node.capabilities.vodProducerVersion ?? 0) >= 1) &&
         bindings.some(
           (binding) =>

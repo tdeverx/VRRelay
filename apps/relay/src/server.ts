@@ -34,7 +34,7 @@ import {
   CreateCompatibilityResultRequestSchema,
   CreateLiveChannelRequestSchema,
   CreatePersonalTokenRequestSchema,
-  CreateProfileRevisionRequestSchema,
+  ProfileInputSchema,
   CreateProviderRequestSchema,
   CreateSessionRequestSchema,
   DeleteUserQuerySchema,
@@ -1107,11 +1107,19 @@ export async function createServer(
     await mutate(request, ['admin']);
     return reply
       .status(201)
-      .send(
-        await services.profiles.createRevision(
-          parse(CreateProfileRevisionRequestSchema, request.body)
-        )
-      );
+      .send(await services.profiles.create(parse(ProfileInputSchema, request.body)));
+  });
+  app.put('/api/v1/profiles/:profileId', async (request) => {
+    await mutate(request, ['admin']);
+    return services.profiles.update(
+      (request.params as { profileId: string }).profileId,
+      parse(ProfileInputSchema, request.body)
+    );
+  });
+  app.delete('/api/v1/profiles/:profileId', async (request, reply) => {
+    await mutate(request, ['admin']);
+    await services.profiles.delete((request.params as { profileId: string }).profileId);
+    return reply.status(204).send();
   });
   app.get('/api/v1/capabilities', async (request) => {
     await authenticate(request, ['sessions:read']);
@@ -1353,9 +1361,8 @@ export async function createServer(
       },
       async () => {
         const body = parse(PlacementPreviewRequestSchema, request.body);
-        const profile = await services.repository.getProfile(body.profileId, body.profileRevision);
-        if (!profile)
-          throw new ApplicationError('not_found', 'Profile revision was not found', 404);
+        const profile = await services.repository.getProfile(body.profileId);
+        if (!profile) throw new ApplicationError('not_found', 'Profile was not found', 404);
         return services.cluster.previewPlacement({
           policy: body.placementPolicy,
           profile,
@@ -1522,7 +1529,6 @@ export async function createServer(
           context: {
             kind: created.kind,
             profileId: created.profileId,
-            profileRevision: created.profileRevision,
             assignedNodeId: created.assignedNodeId ?? null
           }
         })
@@ -1577,12 +1583,8 @@ export async function createServer(
                 providerUserId: principal.providerUserId!
               }
             );
-          const profile = await services.repository.getProfile(
-            body.profileId,
-            body.profileRevision
-          );
-          if (!profile)
-            throw new ApplicationError('not_found', 'Profile revision was not found', 404);
+          const profile = await services.repository.getProfile(body.profileId);
+          if (!profile) throw new ApplicationError('not_found', 'Profile was not found', 404);
           const placement = await services.cluster.previewPlacement({
             policy: 'auto',
             providerId: body.source.providerId,
@@ -1607,12 +1609,8 @@ export async function createServer(
           );
         }
         if (body.kind === 'vod') {
-          const profile = await services.repository.getProfile(
-            body.profileId,
-            body.profileRevision
-          );
-          if (!profile)
-            throw new ApplicationError('not_found', 'Profile revision was not found', 404);
+          const profile = await services.repository.getProfile(body.profileId);
+          if (!profile) throw new ApplicationError('not_found', 'Profile was not found', 404);
           const placement = await services.cluster.previewPlacement({
             policy: body.placementPolicy,
             providerId: body.source.providerId,

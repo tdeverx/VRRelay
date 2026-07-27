@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { Link2, Search, Tv } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import type { MediaItem, ProfileRevision } from '@vrrelay/domain';
+  import type { MediaItem, Profile } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
   import ProviderArtwork from '#lib/new-ui/components/ProviderArtwork.svelte';
@@ -25,7 +25,7 @@
   let upNext = $state<MediaItem[]>([]);
   let recentlyAdded = $state<MediaItem[]>([]);
   let loadingRows = $state(true);
-  let profiles = $state<ProfileRevision[]>([]);
+  let profiles = $state<Profile[]>([]);
   let profileId = $state('');
   let loading = $state(true);
   let searching = $state(false);
@@ -44,7 +44,7 @@
   let searchRequestId = 0;
   let selectedSeason = $derived(seasons.find((season) => season.id === selectedSeasonId) ?? null);
 
-  function preferredVodProfile(items: ProfileRevision[]): ProfileRevision | undefined {
+  function preferredVodProfile(items: Profile[]): Profile | undefined {
     return (
       items.find((profile) => profile.profileId === 'universal-h264-hls-vod') ??
       items.find(
@@ -165,7 +165,6 @@
       const session = await api.createVodSession({
         source: { providerId: item.providerId, itemId: item.id },
         profileId: profile.profileId,
-        profileRevision: profile.revision,
         platformMode: profile.platform,
         pinned: false,
         reportActivity: true,
@@ -321,7 +320,7 @@
             class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             data-testid="catalog-search-results"
           >
-            {#each items as item}
+            {#each items as item (item.id)}
               <Card.Root class="overflow-hidden" style="padding-top: 0">
                 <ProviderArtwork {item} />
                 <Card.Header>

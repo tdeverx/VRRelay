@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { LiveNormalizer } from '@vrrelay/application';
-import type { ProfileRevision } from '@vrrelay/domain';
+import type { Profile } from '@vrrelay/domain';
 import { redactFfmpegError } from './ffmpeg-transcoder.js';
+import { resolveFfmpegVideoEncoder, type VideoEncoderPreference } from './ffmpeg-encoder.js';
 import { SupervisedChildProcess, type SpawnChildProcess } from './supervised-child-process.js';
 
 export interface FFmpegLiveNormalizerOptions {
@@ -12,6 +13,8 @@ export interface FFmpegLiveNormalizerOptions {
   restartBackoffMaxMs?: number;
   maxStderrBytes?: number;
   spawnChild?: SpawnChildProcess;
+  videoEncoder?: VideoEncoderPreference;
+  availableEncoders?: ReadonlySet<string>;
 }
 
 function optionalArgs(condition: unknown, args: string[]): string[] {
@@ -21,8 +24,11 @@ function optionalArgs(condition: unknown, args: string[]): string[] {
 export function liveNormalizerArgs(
   sourceUrl: string,
   destinationUrl: string,
-  profile: ProfileRevision
+  profile: Profile,
+  videoEncoder: VideoEncoderPreference = 'auto',
+  availableEncoders: ReadonlySet<string> = new Set()
 ): string[] {
+  const encoder = resolveFfmpegVideoEncoder(profile.video.codec, videoEncoder, availableEncoders);
   return [
     '-hide_banner',
     '-loglevel',
@@ -43,7 +49,7 @@ export function liveNormalizerArgs(
       `format=${profile.video.pixelFormat}`
     ].join(','),
     '-c:v',
-    profile.video.encoder,
+    encoder,
     ...optionalArgs(profile.video.profile, ['-profile:v', profile.video.profile!]),
     ...optionalArgs(profile.video.level, ['-level:v', profile.video.level!]),
     ...optionalArgs(profile.video.preset, ['-preset', profile.video.preset!]),
@@ -111,7 +117,7 @@ export class FFmpegLiveNormalizer implements LiveNormalizer {
     ownerId: string | undefined,
     sourceUrl: string,
     destinationUrl: string,
-    profile: ProfileRevision,
+    profile: Profile,
     signal?: AbortSignal
   ): Promise<void> {
     if (this.#processes.has(channelId)) await this.stop(channelId);
@@ -119,7 +125,13 @@ export class FFmpegLiveNormalizer implements LiveNormalizer {
       throw new Error('Live normalizer capacity or restart backoff is active');
     const supervisor = new SupervisedChildProcess({
       executable: this.options.ffmpegPath,
-      arguments: liveNormalizerArgs(sourceUrl, destinationUrl, profile),
+      arguments: liveNormalizerArgs(
+        sourceUrl,
+        destinationUrl,
+        profile,
+        this.options.videoEncoder,
+        this.options.availableEncoders
+      ),
       spawnOptions: { stdio: ['ignore', 'ignore', 'pipe'] },
       startupGraceMs: 250,
       gracefulStopMs: 3_000,

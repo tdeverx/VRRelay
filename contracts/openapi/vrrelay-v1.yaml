@@ -292,11 +292,26 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/ProfileList' }
     post:
-      operationId: createProfileRevision
+      operationId: createProfile
       tags: [Profiles]
-      requestBody: { $ref: '#/components/requestBodies/CreateProfileRevision' }
+      requestBody: { $ref: '#/components/requestBodies/ProfileInput' }
       responses:
         '201': { $ref: '#/components/responses/Profile' }
+  /profiles/{profileId}:
+    put:
+      operationId: updateProfile
+      tags: [Profiles]
+      parameters: [{ $ref: '#/components/parameters/ProfileId' }]
+      requestBody: { $ref: '#/components/requestBodies/ProfileInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Profile' }
+    delete:
+      operationId: deleteProfile
+      tags: [Profiles]
+      parameters: [{ $ref: '#/components/parameters/ProfileId' }]
+      responses:
+        '204': { description: Profile deleted }
+        '409': { $ref: '#/components/responses/Error' }
   /capabilities:
     get:
       operationId: getMediaCapabilities
@@ -624,6 +639,7 @@ components:
       description: Seven-day rotating node certificate signed from a node-generated private key and CSR.
   parameters:
     ProviderId: { name: providerId, in: path, required: true, schema: { type: string } }
+    ProfileId: { name: profileId, in: path, required: true, schema: { type: string } }
     ItemId: { name: itemId, in: path, required: true, schema: { type: string } }
     SessionId: { name: sessionId, in: path, required: true, schema: { type: string } }
     ChannelId: { name: channelId, in: path, required: true, schema: { type: string } }
@@ -657,14 +673,10 @@ components:
         content:
           { application/json: { schema: { $ref: '#/components/schemas/CreateProviderRequest' } } }
       }
-    CreateProfileRevision:
+    ProfileInput:
       {
         required: true,
-        content:
-          {
-            application/json:
-              { schema: { $ref: '#/components/schemas/CreateProfileRevisionRequest' } }
-          }
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProfileInput' } } }
       }
     CreateSession:
       {
@@ -842,12 +854,12 @@ components:
       }
     Profile:
       {
-        description: Immutable profile revision,
-        content: { application/json: { schema: { $ref: '#/components/schemas/ProfileRevision' } } }
+        description: Encoding and delivery profile,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Profile' } } }
       }
     ProfileList:
       {
-        description: Immutable profile revisions,
+        description: Encoding and delivery profiles,
         content: { application/json: { schema: { $ref: '#/components/schemas/ProfileList' } } }
       }
     MediaCapabilities:
@@ -1320,8 +1332,6 @@ components:
       required:
         [
           codec,
-          encoder,
-          hardwareMode,
           decodeMode,
           pixelFormat,
           width,
@@ -1335,9 +1345,6 @@ components:
         ]
       properties:
         codec: { type: string, enum: [h264, h265, av1, copy] }
-        encoder:
-          { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$' }
-        hardwareMode: { type: string, enum: [auto, software, videotoolbox, qsv, vaapi, nvenc, amf] }
         decodeMode:
           { type: string, enum: [auto, software, videotoolbox, d3d11va, qsv, vaapi, cuda] }
         profile:
@@ -1396,7 +1403,7 @@ components:
         burnSubtitles: { type: boolean }
         passthrough: { type: string, enum: [never, compatible, always] }
         maxWorkers: { type: integer, minimum: 1, maximum: 32 }
-    CreateProfileRevisionRequest:
+    ProfileInput:
       type: object
       required: [name, platform, state, video, audio, delivery, processing]
       properties:
@@ -1409,30 +1416,29 @@ components:
         audio: { $ref: '#/components/schemas/AudioSettings' }
         delivery: { $ref: '#/components/schemas/DeliverySettings' }
         processing: { $ref: '#/components/schemas/ProcessingSettings' }
-    ProfileRevision:
+    Profile:
       allOf:
-        - { $ref: '#/components/schemas/CreateProfileRevisionRequest' }
+        - { $ref: '#/components/schemas/ProfileInput' }
         - type: object
-          required: [profileId, revision, createdAt]
+          required: [profileId, createdAt, updatedAt]
           properties:
             profileId: { type: string }
-            revision: { type: integer, minimum: 1 }
             state: { $ref: '#/components/schemas/CompatibilityState' }
             disabledReason: { type: string }
             createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     ProfileList:
       {
         type: object,
         required: [items],
-        properties:
-          { items: { type: array, items: { $ref: '#/components/schemas/ProfileRevision' } } }
+        properties: { items: { type: array, items: { $ref: '#/components/schemas/Profile' } } }
       }
     CatalogProfileList:
       type: object
       required: [defaultProfileId, items]
       properties:
         defaultProfileId: { type: string }
-        items: { type: array, items: { $ref: '#/components/schemas/ProfileRevision' } }
+        items: { type: array, items: { $ref: '#/components/schemas/Profile' } }
     MediaCapabilities:
       type: object
       required: [ffmpegVersion, encoders, muxers, filters, pixelFormats]
@@ -1460,11 +1466,10 @@ components:
         pixelFormats: { type: array, items: { type: string } }
     SessionCommon:
       type: object
-      required: [kind, profileId, profileRevision, platformMode]
+      required: [kind, profileId, platformMode]
       properties:
         name: { type: string, maxLength: 160 }
         profileId: { type: string }
-        profileRevision: { type: integer, minimum: 1 }
         platformMode: { $ref: '#/components/schemas/PlatformMode' }
         pinned: { type: boolean }
         placementPolicy: { $ref: '#/components/schemas/PlacementPolicy' }
@@ -1506,7 +1511,6 @@ components:
           name,
           kind,
           profileId,
-          profileRevision,
           platformMode,
           state,
           pinned,
@@ -1525,7 +1529,6 @@ components:
         source: { $ref: '#/components/schemas/MediaSourceRef' }
         liveChannelId: { type: string }
         profileId: { type: string }
-        profileRevision: { type: integer }
         platformMode: { $ref: '#/components/schemas/PlatformMode' }
         state: { type: string, enum: [idle, queued, starting, active, live, error, stopped] }
         durationSeconds: { type: number }
@@ -1664,7 +1667,6 @@ components:
         originNodeId: { type: string }
         region: { type: string }
         normalizationProfileId: { type: string }
-        normalizationProfileRevision: { type: integer, minimum: 1 }
         normalize: { type: boolean }
         publisherState: { type: string, enum: [offline, online, reconnecting, error] }
         publisherUpdatedAt: { type: string, format: date-time }
@@ -1709,7 +1711,6 @@ components:
           platform,
           player,
           profileId,
-          profileRevision,
           state,
           startup,
           duration,
@@ -1726,7 +1727,6 @@ components:
         platform: { type: string, enum: [pc, quest] }
         player: { type: string }
         profileId: { type: string }
-        profileRevision: { type: integer, minimum: 1 }
         state: { $ref: '#/components/schemas/CompatibilityState' }
         startup: { type: boolean }
         duration: { type: boolean }
@@ -1850,6 +1850,7 @@ components:
         ]
       properties:
         encoders: { type: array, items: { type: string } }
+        videoCodecs: { type: array, items: { type: string, enum: [h264, h265, av1, copy] } }
         hardwareDevices: { type: array, items: { type: string } }
         maxWorkers: { type: integer, minimum: 0, maximum: 9007199254740991 }
         activeWorkers: { type: integer, minimum: 0, maximum: 9007199254740991 }
@@ -2026,11 +2027,10 @@ components:
       }
     PlacementPreviewRequest:
       type: object
-      required: [profileId, profileRevision, placementPolicy]
+      required: [profileId, placementPolicy]
       properties:
         providerId: { type: string }
         profileId: { type: string }
-        profileRevision: { type: integer, minimum: 1 }
         placementPolicy: { $ref: '#/components/schemas/PlacementPolicy' }
         preferredNodeId: { type: string }
         preferredRegion: { type: string }
@@ -2158,7 +2158,7 @@ components:
           vodProducerBufferLowWatermarkMs,
           vodProducerBufferHighWatermarkMs,
           vodProducerMaxCatchupRate,
-          vodProducerEncoder,
+          videoEncoder,
           vodProducerMaxConcurrent,
           vodProducerMaxPerProvider,
           nodeName,
@@ -2184,10 +2184,10 @@ components:
         vodProducerBufferHighWatermarkMs:
           { type: integer, minimum: 8000, maximum: 600000, default: 60000 }
         vodProducerMaxCatchupRate: { type: number, minimum: 1, maximum: 2, default: 2 }
-        vodProducerEncoder:
+        videoEncoder:
           {
             type: string,
-            enum: [auto, libx264, h264_videotoolbox, h264_nvenc, h264_qsv, h264_vaapi, h264_amf],
+            enum: [auto, software, videotoolbox, nvenc, qsv, vaapi, amf],
             default: auto
           }
         vodProducerMaxConcurrent: { type: integer, minimum: 1, maximum: 32, default: 2 }

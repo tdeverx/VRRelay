@@ -9,7 +9,7 @@ import type {
   MediaItem,
   NodeRole,
   PlaybackGrant,
-  ProfileRevision,
+  Profile,
   ProviderConnection,
   RelaySession,
   SegmentJob,
@@ -355,8 +355,8 @@ export class SessionService {
       (!context.providerAccessToken || !context.providerUserId)
     )
       throw new ConflictError('User-owned VOD sessions require provider credentials');
-    const profile = await this.repository.getProfile(input.profileId, input.profileRevision);
-    if (!profile) throw new NotFoundError('Profile revision was not found');
+    const profile = await this.repository.getProfile(input.profileId);
+    if (!profile) throw new NotFoundError('Profile was not found');
     const id = randomUUID();
     const token = opaqueToken();
     const now = new Date().toISOString();
@@ -405,7 +405,6 @@ export class SessionService {
         ? { source: resolvedSource!, durationSeconds }
         : { liveChannelId: input.liveChannelId }),
       profileId: profile.profileId,
-      profileRevision: profile.revision,
       platformMode: input.platformMode,
       state: input.kind === 'live' ? 'live' : 'idle',
       pinned: input.pinned,
@@ -500,19 +499,15 @@ export class SessionService {
     return session;
   }
 
-  async #claimLiveNormalizationProfile(
-    channelId: string,
-    profile: ProfileRevision
-  ): Promise<number> {
+  async #claimLiveNormalizationProfile(channelId: string, profile: Profile): Promise<number> {
     let stored = await this.repository.getVersionedLiveChannel(channelId);
     if (!stored) throw new NotFoundError('Live channel was not found');
     if (!stored.value.normalize) return stored.revision;
     for (let attempt = 0; attempt < MAX_ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
       const channel = stored.value;
       const claimedId = channel.normalizationProfileId;
-      const claimedRevision = channel.normalizationProfileRevision;
-      if (claimedId || claimedRevision) {
-        if (claimedId !== profile.profileId || claimedRevision !== profile.revision)
+      if (claimedId) {
+        if (claimedId !== profile.profileId)
           throw new ConflictError(
             'Live channel already has a different normalization profile; create a separate channel for that profile'
           );
@@ -521,8 +516,7 @@ export class SessionService {
       const result = await this.repository.compareAndSetLiveChannel(
         {
           ...channel,
-          normalizationProfileId: profile.profileId,
-          normalizationProfileRevision: profile.revision
+          normalizationProfileId: profile.profileId
         },
         stored.revision
       );
@@ -548,7 +542,7 @@ export class SessionService {
   async runtimeStats(session: RelaySession): Promise<SessionRuntimeStats> {
     const now = Date.now();
     const producer = await this.#producers?.get(session.id);
-    const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
+    const profile = await this.repository.getProfile(session.profileId);
     let viewerCount = session.viewers;
     if (this.infrastructure.coordination)
       viewerCount = await this.infrastructure.coordination
@@ -855,7 +849,7 @@ export class SessionService {
       this.options.cacheDir,
       'vod',
       session.id,
-      `${profile.profileId}-r${profile.revision}`,
+      profile.profileId,
       `${index}.${extension}`
     );
     const contentKey = this.#cache.contentKey(session, profile, index);
@@ -907,12 +901,7 @@ export class SessionService {
     const { session, profile } = await this.#playback(token);
     if (profile.delivery.segmentType !== 'fmp4')
       throw new NotFoundError('fMP4 initialization segment was not found');
-    const directory = join(
-      this.options.cacheDir,
-      'vod',
-      session.id,
-      `${profile.profileId}-r${profile.revision}`
-    );
+    const directory = join(this.options.cacheDir, 'vod', session.id, profile.profileId);
     const path = join(directory, 'init.mp4');
     try {
       await access(path);
@@ -1006,8 +995,8 @@ export class SessionService {
       this.#ephemeralSourceCredentials.set(command.sessionId, command.sourceCredential);
     try {
       const session = await this.get(command.sessionId);
-      const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
-      if (!profile) throw new NotFoundError('Profile revision was not found');
+      const profile = await this.repository.getProfile(session.profileId);
+      if (!profile) throw new NotFoundError('Profile was not found');
       if (profile.delivery.method === 'hls' && this.#producers) {
         await this.#producers.ensure(session, profile, command.segmentIndex, signal);
         return;
@@ -1209,7 +1198,7 @@ export class SessionService {
 
   async #generateSegment(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     index: number,
     destination: string,
     signal?: AbortSignal
@@ -1254,12 +1243,12 @@ export class SessionService {
       );
       this.infrastructure.metrics?.increment('segments_generated_total', {
         delivery: profile.delivery.segmentType,
-        encoder: profile.video.encoder
+        codec: profile.video.codec
       });
       this.infrastructure.metrics?.observe(
         'segment_generation_seconds',
         (Date.now() - workerStartedAt) / 1_000,
-        { delivery: profile.delivery.segmentType, encoder: profile.video.encoder }
+        { delivery: profile.delivery.segmentType, codec: profile.video.codec }
       );
       this.events.publish(event('worker.completed', { segment: index }, session.id));
       return destination;
@@ -1279,7 +1268,7 @@ export class SessionService {
 
   async #prepareVodProducer(
     session: RelaySession,
-    profile: ProfileRevision,
+    profile: Profile,
     startSegmentIndex: number,
     signal: AbortSignal,
     pacing: VodProducerSourcePacing,
@@ -1428,13 +1417,13 @@ export class SessionService {
     return grant;
   }
 
-  async #playback(token: string): Promise<{ session: RelaySession; profile: ProfileRevision }> {
+  async #playback(token: string): Promise<{ session: RelaySession; profile: Profile }> {
     const grant = await this.#resolvePlaybackGrant(token);
     const session = await this.repository.getSession(grant.sessionId);
     if (!session) throw new NotFoundError('Session was not found');
     if (session.state === 'stopped') throw new ConflictError('Session is stopped');
-    const profile = await this.repository.getProfile(session.profileId, session.profileRevision);
-    if (!profile) throw new NotFoundError('Profile revision was not found');
+    const profile = await this.repository.getProfile(session.profileId);
+    if (!profile) throw new NotFoundError('Profile was not found');
     return { session, profile };
   }
 

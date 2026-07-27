@@ -8,7 +8,7 @@ import type {
   NodeCertificateState,
   NodeRole,
   PlacementPolicy,
-  ProfileRevision,
+  Profile,
   ProviderBinding
 } from '@vrrelay/domain';
 import type {
@@ -30,6 +30,15 @@ const JOIN_ENROLLMENT_RETRY_MS = 5 * 60_000;
 const MAX_ATOMIC_WRITE_ATTEMPTS = 5;
 const DEFAULT_AGENT_LOG_RETENTION_ROWS = 1000;
 const DEFAULT_AGENT_LOG_QUERY_LIMIT = 200;
+
+function supportsVideoCodec(capabilities: NodeCapability, codec: Profile['video']['codec']) {
+  if (codec === 'copy') return true;
+  if (capabilities.videoCodecs) return capabilities.videoCodecs.includes(codec);
+  const names = capabilities.encoders.map((encoder) => encoder.toLowerCase());
+  if (codec === 'h264') return names.some((name) => name.includes('264'));
+  if (codec === 'h265') return names.some((name) => name.includes('265') || name.includes('hevc'));
+  return names.some((name) => name.includes('av1'));
+}
 
 interface JoinEnrollmentClaim {
   csrSha256: string;
@@ -697,7 +706,7 @@ export class ClusterService {
   async previewPlacement(input: {
     policy: PlacementPolicy;
     providerId?: string;
-    profile: ProfileRevision;
+    profile: Profile;
     preferredNodeId?: string;
     preferredRegion?: string;
     isNodeConnected?: (nodeId: string) => boolean;
@@ -710,7 +719,7 @@ export class ClusterService {
     );
     const compatible = nodes.filter(
       (node) =>
-        node.capabilities.encoders.includes(input.profile.video.encoder) &&
+        supportsVideoCodec(node.capabilities, input.profile.video.codec) &&
         (input.profile.delivery.method !== 'hls' ||
           (node.capabilities.vodProducerVersion ?? 0) >= 1) &&
         (!input.providerId || node.capabilities.providerIds.includes(input.providerId))

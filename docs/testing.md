@@ -146,7 +146,7 @@ real-time normalizer, retrieves an MPEG-TS segment through the opaque grant-back
 reconciles publisher disconnect, revokes playback, and deletes the live channel. Pass
 `-- --passthrough` only to test the non-normalizing diagnostic path.
 
-When testing media behavior, record the source properties, immutable profile revision, platform, player, startup, duration, pause, seeks, late join, completion, audio/video, and HTTPS/URL-permission result. Do not infer VRChat compatibility from FFmpeg success alone.
+When testing media behavior, record the source properties, profile name and update time, platform, player, startup, duration, pause, seeks, late join, completion, audio/video, and HTTPS/URL-permission result. Do not infer VRChat compatibility from FFmpeg success alone.
 
 ## Benchmark scenarios
 

@@ -80,9 +80,9 @@ docker compose -f deploy/docker/docker-compose.yml up --build
 
 Use `compose.gpu.yml` as a host-specific example for `/dev/dri` or NVIDIA access. Hardware presets stay disabled unless FFmpeg discovers the relevant encoder. When using the TLS overlay, set `VRRELAY_CADDY_IMAGE` to a digest-pinned Caddy image and keep the controller agent port on raw TCP/TLS passthrough rather than behind the HTTP proxy.
 
-Administrators can stage a global built-in H.264 encoder policy through Runtime settings or
-`VRRELAY_VOD_PRODUCER_ENCODER`. `auto` selects the best discovered encoder; an explicit value
-forces the named encoder after restart and must be available on every source worker. The maximum
+Administrators can stage the app-wide video encoder backend through Runtime settings or
+`VRRELAY_VIDEO_ENCODER`. `auto` selects the best discovered backend for each profile codec; an
+explicit backend applies after restart and must support the selected codec on every source worker. The maximum
 catch-up rate per stream is separately configurable from 1× to 2× with
 `VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE`; each stream automatically scales from 1× to that cap.
 

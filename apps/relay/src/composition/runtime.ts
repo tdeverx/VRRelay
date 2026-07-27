@@ -178,6 +178,13 @@ function nodeCapabilities(
     encoders: capabilities.encoders
       .filter((encoder) => encoder.available)
       .map((encoder) => encoder.name),
+    videoCodecs: [
+      ...new Set(
+        capabilities.encoders
+          .filter((encoder) => encoder.available)
+          .map((encoder) => encoder.codec as 'h264' | 'h265' | 'av1')
+      )
+    ],
     hardwareDevices: capabilities.encoders
       .filter((encoder) => encoder.available && encoder.hardware)
       .map((encoder) => encoder.name),
@@ -367,7 +374,10 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     const secrets = createSecretStore(config, secretBackend);
     const registry = new DefaultProviderRegistry();
     registry.register(new JellyfinProvider(config.applicationVersion));
-    const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
+    const transcoder = new FFmpegTranscoder({
+      ffmpegPath: config.ffmpegPath,
+      videoEncoder: config.videoEncoder
+    });
     const capabilities = await transcoder.discover();
     const events = new InMemoryEventBus();
     const coordination = createCoordinationStore(config);
@@ -423,7 +433,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       nodeId: config.nodeId,
       ...(agentController ? { remote: agentController } : {})
     });
-    const profiles = new ProfileService(repository, capabilities, config.vodProducerEncoder);
+    const profiles = new ProfileService(repository, capabilities);
     await profiles.seed();
 
     const sessions = new SessionService(
@@ -468,6 +478,12 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
     const liveNormalizer = plan.managesLiveIngest
       ? new FFmpegLiveNormalizer({
           ffmpegPath: config.ffmpegPath,
+          videoEncoder: config.videoEncoder,
+          availableEncoders: new Set(
+            capabilities.encoders
+              .filter((encoder) => encoder.available)
+              .map((encoder) => encoder.name)
+          ),
           maxConcurrent: config.liveNormalizerMaxConcurrent,
           maxConcurrentPerOwner: config.liveNormalizerMaxPerOwner
         })
@@ -670,7 +686,10 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
     const secretBackend = resolveSecretBackend(config);
     const secrets = createSecretStore(config, secretBackend);
     const events = new InMemoryEventBus();
-    const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
+    const transcoder = new FFmpegTranscoder({
+      ffmpegPath: config.ffmpegPath,
+      videoEncoder: config.videoEncoder
+    });
     const capabilities = await transcoder.discover();
     const services: {
       sessions?: SessionService;
@@ -825,10 +844,17 @@ export async function startIngestOriginRuntime(config: RelayConfig): Promise<voi
     const secrets = createSecretStore(config, secretBackend);
     const events = new InMemoryEventBus();
     const metrics = new PrometheusMetricsSink({ node: config.nodeId, region: config.nodeRegion });
-    const transcoder = new FFmpegTranscoder({ ffmpegPath: config.ffmpegPath });
+    const transcoder = new FFmpegTranscoder({
+      ffmpegPath: config.ffmpegPath,
+      videoEncoder: config.videoEncoder
+    });
     const capabilities = await transcoder.discover();
     const normalizer = new FFmpegLiveNormalizer({
       ffmpegPath: config.ffmpegPath,
+      videoEncoder: config.videoEncoder,
+      availableEncoders: new Set(
+        capabilities.encoders.filter((encoder) => encoder.available).map((encoder) => encoder.name)
+      ),
       maxConcurrent: config.liveNormalizerMaxConcurrent,
       maxConcurrentPerOwner: config.liveNormalizerMaxPerOwner
     });

@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { Antenna, Copy, Plus, Shield, Trash2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import type { ProfileRevision, PublicLiveChannel } from '@vrrelay/domain';
+  import type { Profile, PublicLiveChannel } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import { loginRoute } from '#lib/new-ui/state.svelte';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
@@ -20,7 +20,7 @@
   import * as Table from '#lib/new-ui/components/ui/table';
 
   let channels = $state<PublicLiveChannel[]>([]);
-  let profiles = $state<ProfileRevision[]>([]);
+  let profiles = $state<Profile[]>([]);
   let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
   let loading = $state(true);
   let error = $state('');
@@ -97,7 +97,6 @@
         name: channel.name,
         liveChannelId: channel.id,
         profileId: profile.profileId,
-        profileRevision: profile.revision,
         platformMode: profile.platform
       });
       toast.success('Live playback URL created.');

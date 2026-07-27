@@ -7,7 +7,7 @@ import type {
   JobLogEntry,
   MediaItem,
   PersonalAccessToken,
-  ProfileRevision,
+  Profile,
   PublicLiveChannel,
   PublicProviderBinding,
   PublicProviderConnection,
@@ -23,7 +23,7 @@ import type {
   CreateCompatibilityResultRequest,
   CreateNodeJoinTokenRequest,
   CreatePersonalTokenRequest,
-  CreateProfileRevisionRequest,
+  ProfileInput,
   CreateProviderBindingRequest,
   CreateProviderRequest,
   CreateSessionRequest,
@@ -43,11 +43,12 @@ import {
   createLiveChannel,
   createNodeJoinToken,
   createPersonalToken,
-  createProfileRevision,
+  createProfile,
   createProvider,
   createProviderBinding,
   createSession,
   deleteLiveChannel,
+  deleteProfile,
   deleteProvider,
   deleteProviderBinding,
   deleteSession,
@@ -100,6 +101,7 @@ import {
   validateProvider,
   validateRuntimeConfiguration,
   updateSignInConfiguration,
+  updateProfile,
   updateUser,
   updateRetentionConfiguration,
   updateRuntimeConfiguration
@@ -303,7 +305,7 @@ export const api = {
   catalogItem: (itemId: string) =>
     result<MediaItem>(getCatalogItem({ ...required, path: { itemId } })),
   catalogProfiles: () =>
-    result<{ defaultProfileId?: string; items: ProfileRevision[] }>(listCatalogProfiles(required)),
+    result<{ defaultProfileId?: string; items: Profile[] }>(listCatalogProfiles(required)),
   users: () =>
     result<{
       items: Array<{
@@ -343,9 +345,12 @@ export const api = {
     ),
   item: (providerId: string, itemId: string) =>
     result<MediaItem>(getProviderItem({ ...required, path: { providerId, itemId } })),
-  profiles: () => result<{ items: ProfileRevision[] }>(listProfiles(required)),
-  createProfileRevision: (body: CreateProfileRevisionRequest) =>
-    result<ProfileRevision>(createProfileRevision({ ...required, body })),
+  profiles: () => result<{ items: Profile[] }>(listProfiles(required)),
+  createProfile: (body: ProfileInput) => result<Profile>(createProfile({ ...required, body })),
+  updateProfile: (profileId: string, body: ProfileInput) =>
+    result<Profile>(updateProfile({ ...required, path: { profileId }, body })),
+  deleteProfile: (profileId: string) =>
+    result<void>(deleteProfile({ ...required, path: { profileId } })),
   capabilities: () =>
     result<{
       ffmpegVersion: string;
@@ -407,7 +412,6 @@ export const api = {
   previewPlacement: (body: {
     providerId?: string;
     profileId: string;
-    profileRevision: number;
     placementPolicy: 'local' | 'hosted' | 'auto';
     preferredNodeId?: string;
     preferredRegion?: string;

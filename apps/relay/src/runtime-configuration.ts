@@ -35,7 +35,7 @@ export function publicRuntimeConfiguration(
       vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
       vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
       vodProducerMaxCatchupRate: config.vodProducerMaxCatchupRate,
-      vodProducerEncoder: config.vodProducerEncoder,
+      videoEncoder: config.videoEncoder,
       vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
       nodeName: config.nodeName,

@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { ShieldCheck, Trash2, UserRound } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import type { ProfileRevision, UserIdentity, UserRole } from '@vrrelay/domain';
+  import type { Profile, UserIdentity } from '@vrrelay/domain';
   import { api, isAuthenticatedError } from '#lib/api';
   import PageHeader from '#lib/new-ui/components/PageHeader.svelte';
   import LoadState from '#lib/new-ui/components/LoadState.svelte';
@@ -13,12 +13,11 @@
   import { Button } from '#lib/new-ui/components/ui/button';
   import * as Card from '#lib/new-ui/components/ui/card';
   import * as Select from '#lib/new-ui/components/ui/select';
-  import { Switch } from '#lib/new-ui/components/ui/switch';
   import { loginRoute } from '#lib/new-ui/state.svelte';
 
   type UserRecord = { value: UserIdentity; revision: number };
   let users = $state<UserRecord[]>([]);
-  let profiles = $state<ProfileRevision[]>([]);
+  let profiles = $state<Profile[]>([]);
   let currentUser = $state<Awaited<ReturnType<typeof api.me>> | null>(null);
   let loading = $state(true);
   let error = $state('');
@@ -36,10 +35,7 @@
       ]);
       users = userResult.items;
       currentUser = me;
-      profiles = profileResult.items.filter(
-        (profile, index, all) =>
-          all.findIndex((item) => item.profileId === profile.profileId) === index
-      );
+      profiles = profileResult.items;
     } catch (reason) {
       if (isAuthenticatedError(reason)) return goto(loginRoute(page.url.pathname));
       error = reason instanceof Error ? reason.message : 'Could not load people and access.';
@@ -51,7 +47,6 @@
   async function save(
     record: UserRecord,
     update: {
-      role?: UserRole;
       allowedProfileIds?: string[];
       defaultProfileId?: string;
     },
@@ -62,7 +57,7 @@
       const allowedProfileIds = update.allowedProfileIds ?? record.value.allowedProfileIds;
       const updated = await api.updateUser(record.value.id, {
         expectedRevision: record.revision,
-        roles: [update.role ?? record.value.roles[0] ?? 'user'],
+        roles: record.value.roles,
         allowedProfileIds,
         ...((update.defaultProfileId ?? record.value.defaultProfileId)
           ? { defaultProfileId: update.defaultProfileId ?? record.value.defaultProfileId }
@@ -79,33 +74,11 @@
     }
   }
 
-  function changeRole(record: UserRecord, role: UserRole) {
-    return save(record, { role }, `${record.value.displayName} is now ${role}.`);
-  }
-
   function changeDefaultProfile(record: UserRecord, defaultProfileId: string) {
-    const allowedProfileIds = record.value.allowedProfileIds.includes(defaultProfileId)
-      ? record.value.allowedProfileIds
-      : [...record.value.allowedProfileIds, defaultProfileId];
     return save(
       record,
-      { allowedProfileIds, defaultProfileId },
-      `Default profile updated for ${record.value.displayName}.`
-    );
-  }
-
-  function changeProfileAccess(record: UserRecord, profileId: string, allowed: boolean) {
-    if (!allowed && record.value.defaultProfileId === profileId) {
-      toast.error('Choose another default profile before removing this entitlement.');
-      return;
-    }
-    const allowedProfileIds = allowed
-      ? [...new Set([...record.value.allowedProfileIds, profileId])]
-      : record.value.allowedProfileIds.filter((id) => id !== profileId);
-    return save(
-      record,
-      { allowedProfileIds },
-      `Profile access updated for ${record.value.displayName}.`
+      { allowedProfileIds: [defaultProfileId], defaultProfileId },
+      `Profile updated for ${record.value.displayName}.`
     );
   }
 
@@ -122,7 +95,7 @@
 <div class="space-y-6 p-4 md:p-6">
   <PageHeader
     title="People & access"
-    description="Grant explicit VRRelay roles to people after their first Jellyfin sign-in."
+    description="Review roles, choose each user's profile, and inspect their entitlements."
   />
   <Card.Root>
     <Card.Header>
@@ -145,10 +118,10 @@
     count={2}
   />
   {#if !loading && !error && users.length > 0}
-    <div class="grid gap-3">
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {#each users as record (record.value.id)}
         <Card.Root>
-          <Card.Header class="gap-4 sm:flex-row sm:items-center">
+          <Card.Header class="gap-4">
             <div class="bg-muted grid size-10 place-items-center rounded-full">
               <UserRound class="size-5" />
             </div>
@@ -160,23 +133,9 @@
                 ).toLocaleString()}</Card.Description
               >
             </div>
-            <Badge variant="outline">{record.value.allowedProfileIds.length} profiles</Badge>
-            <Select.Root
-              type="single"
-              value={record.value.roles[0] ?? 'user'}
-              disabled={busyId === record.value.id}
-              onValueChange={(value) => value && changeRole(record, value as UserRole)}
-            >
-              <Select.Trigger class="w-full sm:w-40"
-                >{record.value.roles[0] ?? 'user'}</Select.Trigger
-              >
-              <Select.Content>
-                <Select.Item value="user">User</Select.Item>
-                <Select.Item value="operator">Operator</Select.Item>
-                <Select.Item value="admin">Admin</Select.Item>
-                <Select.Item value="owner">Owner</Select.Item>
-              </Select.Content>
-            </Select.Root>
+            <div class="flex flex-wrap gap-2">
+              {#each record.value.roles as role}<Badge variant="outline">{role}</Badge>{/each}
+            </div>
             <Button
               variant="destructive"
               size="icon"
@@ -188,7 +147,7 @@
               onclick={() => (pendingDelete = record)}><Trash2 /></Button
             >
           </Card.Header>
-          <Card.Content class="grid gap-5 border-t pt-5 lg:grid-cols-[16rem_1fr]">
+          <Card.Content class="grid gap-5 border-t pt-5">
             <div class="space-y-2">
               <label class="text-sm font-medium" for={`default-profile-${record.value.id}`}
                 >Default profile</label
@@ -210,31 +169,20 @@
                 </Select.Content>
               </Select.Root>
               <p class="text-muted-foreground text-xs">
-                Selecting a default also grants access to that profile.
+                This is the profile available to the user.
               </p>
             </div>
-            <fieldset class="space-y-3" disabled={busyId === record.value.id}>
-              <legend class="text-sm font-medium">Profile entitlements</legend>
-              {#if profiles.length === 0}
-                <p class="text-muted-foreground text-sm">Create a profile to grant access.</p>
-              {:else}
-                <div class="grid gap-3 sm:grid-cols-2">
-                  {#each profiles as profile}
-                    <label
-                      class="flex min-w-0 items-center justify-between gap-3 rounded-lg border p-3 text-sm"
-                    >
-                      <span class="truncate">{profile.name}</span>
-                      <Switch
-                        aria-label={`${profile.name} access for ${record.value.displayName}`}
-                        checked={record.value.allowedProfileIds.includes(profile.profileId)}
-                        onCheckedChange={(checked) =>
-                          changeProfileAccess(record, profile.profileId, checked)}
-                      />
-                    </label>
-                  {/each}
-                </div>
-              {/if}
-            </fieldset>
+            <div class="space-y-2">
+              <p class="text-sm font-medium">Entitlements</p>
+              <div class="flex flex-wrap gap-2">
+                {#each record.value.allowedProfileIds as profileId}
+                  <Badge variant="secondary"
+                    >{profiles.find((profile) => profile.profileId === profileId)?.name ??
+                      profileId}</Badge
+                  >
+                {/each}
+              </div>
+            </div>
           </Card.Content>
         </Card.Root>
       {/each}

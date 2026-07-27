@@ -93,7 +93,6 @@ function session(id: string): RelaySession {
     source: { providerId: 'provider-a', itemId: 'item-a' },
     durationSeconds: 60,
     profileId: 'profile-a',
-    profileRevision: 1,
     platformMode: 'pc',
     state: 'active',
     pinned: false,
@@ -129,7 +128,6 @@ function liveSession(id: string, liveChannelId: string): RelaySession {
     kind: 'live',
     liveChannelId,
     profileId: 'profile-live',
-    profileRevision: 1,
     platformMode: 'pc',
     state: 'live',
     pinned: false,
@@ -681,10 +679,6 @@ function repositoryConcurrencySuite(
           mutate: (value) => ({ ...value, liveChannelId: 'live-other' })
         },
         { name: 'profile', mutate: (value) => ({ ...value, profileId: 'profile-other' }) },
-        {
-          name: 'profile revision',
-          mutate: (value) => ({ ...value, profileRevision: value.profileRevision + 1 })
-        },
         { name: 'platform', mutate: (value) => ({ ...value, platformMode: 'quest' }) },
         {
           name: 'duration',

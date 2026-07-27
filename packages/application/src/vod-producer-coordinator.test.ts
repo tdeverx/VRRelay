@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocalObjectStore, MemoryCoordinationStore, SqliteRepository } from '@vrrelay/adapters';
-import type { ProfileRevision, RelaySession, VodProducer } from '@vrrelay/domain';
+import type { Profile, RelaySession, VodProducer } from '@vrrelay/domain';
 import type { Transcoder } from './index.js';
 import { InMemoryEventBus } from './index.js';
 import { SessionCache } from './session-cache.js';
@@ -24,17 +24,14 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true })));
 });
 
-const profile: ProfileRevision = {
+const profile: Profile = {
   profileId: 'producer-test',
-  revision: 1,
   name: 'Producer test',
   description: 'Persistent producer fixture',
   platform: 'pc',
   state: 'experimental',
   video: {
     codec: 'h264',
-    encoder: 'libx264',
-    hardwareMode: 'software',
     decodeMode: 'auto',
     profile: 'high',
     level: '4.1',
@@ -59,7 +56,8 @@ const profile: ProfileRevision = {
     latencyMode: 'standard'
   },
   processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 1 },
-  createdAt: new Date().toISOString()
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
 };
 
 function session(id = 'session-producer'): RelaySession {
@@ -70,7 +68,6 @@ function session(id = 'session-producer'): RelaySession {
     kind: 'vod',
     source: { providerId: 'provider-1', itemId: 'movie-1', versionId: 'v1' },
     profileId: profile.profileId,
-    profileRevision: profile.revision,
     platformMode: 'universal',
     state: 'idle',
     durationSeconds: 120,

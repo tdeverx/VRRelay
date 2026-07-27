@@ -12,7 +12,7 @@ import type {
   NodeCertificateState,
   AgentLogEntry,
   JobLogEntry,
-  ProfileRevision,
+  Profile,
   ProviderConnection,
   RelaySession,
   SegmentJob,
@@ -66,10 +66,10 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   {
     version: 1,
     name: 'core repository',
-    checksum: 'b686d6e695034e4585ec1152f2b46a6d9110a765f08a8ccb7634e2509c1c532d',
+    checksum: '82040c25e0d99bce36aac1d259d3b13e5cc1c721e02665cb24c57e698121b164',
     statements: [
       'CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY, document JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL)',
-      'CREATE TABLE IF NOT EXISTS profiles(profile_id TEXT NOT NULL, revision INTEGER NOT NULL, document JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(profile_id, revision))',
+      'CREATE TABLE IF NOT EXISTS profiles(profile_id TEXT PRIMARY KEY, document JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL)',
       'CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, document JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL)',
       'CREATE TABLE IF NOT EXISTS playback_grants(token_hash TEXT PRIMARY KEY, session_id TEXT NOT NULL, document JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL)',
       'CREATE INDEX IF NOT EXISTS playback_grants_session ON playback_grants(session_id)',
@@ -233,9 +233,9 @@ const POSTGRES_REQUIRED_COLUMNS: Readonly<
   },
   profiles: {
     profile_id: requiredPostgresColumn('text'),
-    revision: requiredPostgresColumn('int4'),
     document: requiredPostgresColumn('jsonb'),
-    created_at: requiredPostgresColumn('timestamptz')
+    created_at: requiredPostgresColumn('timestamptz'),
+    updated_at: requiredPostgresColumn('timestamptz')
   },
   sessions: {
     id: requiredPostgresColumn('text'),
@@ -342,7 +342,7 @@ const POSTGRES_REQUIRED_COLUMNS: Readonly<
 const POSTGRES_REQUIRED_CONSTRAINTS = [
   { table: 'schema_migrations', type: 'PRIMARY KEY', columns: ['version'] },
   { table: 'providers', type: 'PRIMARY KEY', columns: ['id'] },
-  { table: 'profiles', type: 'PRIMARY KEY', columns: ['profile_id', 'revision'] },
+  { table: 'profiles', type: 'PRIMARY KEY', columns: ['profile_id'] },
   { table: 'sessions', type: 'PRIMARY KEY', columns: ['id'] },
   { table: 'playback_grants', type: 'PRIMARY KEY', columns: ['token_hash'] },
   { table: 'live_channels', type: 'PRIMARY KEY', columns: ['id'] },
@@ -963,26 +963,27 @@ export class PostgresRepository implements Repository, ClusterRepository, AuditR
     }
   }
 
-  async putProfile(value: ProfileRevision): Promise<void> {
+  async putProfile(value: Profile): Promise<void> {
     await this.#pool.query(
-      'INSERT INTO profiles(profile_id,revision,document,created_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',
-      [value.profileId, value.revision, value, value.createdAt]
+      `INSERT INTO profiles(profile_id,document,created_at,updated_at)
+       VALUES($1,$2,$3,$4)
+       ON CONFLICT(profile_id) DO UPDATE SET document=EXCLUDED.document,updated_at=EXCLUDED.updated_at`,
+      [value.profileId, value, value.createdAt, value.updatedAt]
     );
   }
-  async listProfiles() {
-    return this.#list<ProfileRevision>('profiles', 'profile_id, revision DESC');
+
+  async deleteProfile(id: string): Promise<void> {
+    await this.#pool.query('DELETE FROM profiles WHERE profile_id=$1', [id]);
   }
-  async getProfile(id: string, revision?: number): Promise<ProfileRevision | undefined> {
-    const result = revision
-      ? await this.#pool.query(
-          'SELECT document FROM profiles WHERE profile_id=$1 AND revision=$2',
-          [id, revision]
-        )
-      : await this.#pool.query(
-          'SELECT document FROM profiles WHERE profile_id=$1 ORDER BY revision DESC LIMIT 1',
-          [id]
-        );
-    return result.rows[0]?.document as ProfileRevision | undefined;
+
+  async listProfiles() {
+    return this.#list<Profile>('profiles', 'profile_id');
+  }
+  async getProfile(id: string): Promise<Profile | undefined> {
+    const result = await this.#pool.query('SELECT document FROM profiles WHERE profile_id=$1', [
+      id
+    ]);
+    return result.rows[0]?.document as Profile | undefined;
   }
 
   async createSessionWithPlaybackGrant(

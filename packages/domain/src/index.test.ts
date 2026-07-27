@@ -4,8 +4,6 @@ import { VideoSettingsSchema } from './index.js';
 
 const video = {
   codec: 'h264',
-  encoder: 'libx264',
-  hardwareMode: 'software',
   decodeMode: 'auto',
   profile: 'high',
   level: '4.1',
@@ -27,7 +25,5 @@ describe('structured FFmpeg option validation', () => {
     expect(VideoSettingsSchema.safeParse(video).success).toBe(true);
     for (const pixelFormat of ['yuv420p,negate', 'movie=file', 'yuv420p;scale=1:1'])
       expect(VideoSettingsSchema.safeParse({ ...video, pixelFormat }).success).toBe(false);
-    for (const encoder of ['libx264 -i secret', 'libx264,scale', '[libx264]'])
-      expect(VideoSettingsSchema.safeParse({ ...video, encoder }).success).toBe(false);
   });
 });

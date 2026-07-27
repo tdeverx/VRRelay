@@ -382,7 +382,6 @@ async function main() {
         sourceFingerprint: item.versions[0].fingerprint
       },
       profileId: profile.profileId,
-      profileRevision: profile.revision,
       platformMode: 'universal',
       pinned: false,
       reportActivity: true,

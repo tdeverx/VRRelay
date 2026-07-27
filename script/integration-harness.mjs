@@ -402,7 +402,6 @@ async function run() {
           sourceFingerprint: item.versions[0].fingerprint
         },
         profileId: vodProfile.profileId,
-        profileRevision: vodProfile.revision,
         platformMode: 'universal',
         pinned: false,
         reportActivity: true,
@@ -586,7 +585,6 @@ async function run() {
           sourceFingerprint: `${item.versions[0].fingerprint}-independent`
         },
         profileId: vodProfile.profileId,
-        profileRevision: vodProfile.revision,
         platformMode: 'universal',
         pinned: false,
         reportActivity: false,
@@ -747,7 +745,6 @@ async function run() {
         name: 'Acceptance live',
         liveChannelId: liveCreated.channel.id,
         profileId: liveProfile.profileId,
-        profileRevision: liveProfile.revision,
         platformMode: 'universal',
         pinned: true,
         reportActivity: false,

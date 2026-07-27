@@ -698,6 +698,10 @@
       "type": "object",
       "properties": {
         "encoders": { "type": "array", "items": { "type": "string" } },
+        "videoCodecs": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["h264", "h265", "av1", "copy"] }
+        },
         "hardwareDevices": { "type": "array", "items": { "type": "string" } },
         "maxWorkers": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "activeWorkers": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },

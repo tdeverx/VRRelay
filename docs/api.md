@@ -76,8 +76,8 @@ provider token, source URL, grant, or FFmpeg argument is returned.
 `GET /api/v1/cache` and `DELETE /api/v1/cache` operate on the local controller or standalone cache by default. Supplying `nodeId` targets a connected node instead; disconnected targets fail closed rather than falling back to local cache state.
 
 Live channel responses include selected ingest-origin metadata when available
-and include `normalizationProfileId`/`normalizationProfileRevision` after a
-normalized channel is pinned to the first live-session profile. Jellyfin browser sessions create
+and include `normalizationProfileId` after a normalized channel is pinned to the first
+live-session profile. Jellyfin browser sessions create
 user-owned channels: list and mutation routes filter by the current stable identity, while
 operators, administrators, owners, and appropriately scoped personal tokens use the system-wide
 view. Ownership is assigned server-side and is not part of the public channel response.

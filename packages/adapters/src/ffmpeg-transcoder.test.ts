@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ProfileRevision } from '@vrrelay/domain';
+import type { Profile } from '@vrrelay/domain';
 import {
   FFmpegTranscoder,
   ffmpegDecodeAccelerationArgs,
@@ -15,17 +15,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
-const profile: ProfileRevision = {
+const profile: Profile = {
   profileId: 'test-h264',
-  revision: 1,
   name: 'Test H.264',
   description: 'Runtime test profile',
   platform: 'pc',
   state: 'experimental',
   video: {
     codec: 'h264',
-    encoder: 'libx264',
-    hardwareMode: 'software',
     decodeMode: 'auto',
     profile: 'high',
     level: '4.1',
@@ -50,7 +47,8 @@ const profile: ProfileRevision = {
     latencyMode: 'standard'
   },
   processing: { toneMap: false, burnSubtitles: false, passthrough: 'never', maxWorkers: 1 },
-  createdAt: new Date().toISOString()
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
 };
 
 afterEach(async () => {

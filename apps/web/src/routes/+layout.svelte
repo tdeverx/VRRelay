@@ -15,7 +15,7 @@
 
   function routeTitle(pathname: string): string {
     const routes: Array<[string, string]> = [
-      ['/dashboard/settings/profiles/new', 'New Profile Revision'],
+      ['/dashboard/settings/profiles/new', 'New Profile'],
       ['/dashboard/settings/connections', 'Connections'],
       ['/dashboard/settings/profiles', 'Profiles'],
       ['/dashboard/settings/people', 'People & Access'],
@@ -27,7 +27,6 @@
       ['/dashboard/system/services', 'Storage & Routing'],
       ['/dashboard/system/nodes', 'Nodes'],
       ['/dashboard/system/work', 'Jobs & Cache'],
-      ['/dashboard/relay/new', 'Advanced Relay'],
       ['/dashboard/sessions', 'Sessions'],
       ['/dashboard/live', 'Live'],
       ['/dashboard/setup', 'Setup'],

@@ -149,7 +149,7 @@ multi-node verification is still pending.
 Phase 5 has a first build-first implementation checkpoint. Its broader media
 matrix and real-client verification are still pending.
 
-- New profile revisions now start as experiments. The create-profile path rejects
+- New profiles start as experiments. The create-profile path rejects
   manual verified state, low-latency delivery, RTSP, HTTP MPEG-TS, HLS event
   playlists, direct fragmented MP4, mismatched HLS segment/container settings,
   and passthrough-policy profiles instead of accepting schema-only
@@ -262,8 +262,7 @@ the complete administrator workflow set and realtime behavior remains pending.
 - The production-build Playwright suite now covers theme and responsive
   geometry, all administrator destinations, safe login returns, degraded
   readiness, settings read-only behavior, PAT expiry and confirmed revocation,
-  mobile navigation close, persisted desktop collapse, complete advanced relay
-  creation and Sessions handoff, clipboard-denied partial success, role-aware
+  mobile navigation close, persisted desktop collapse, clipboard-denied partial success, role-aware
   login, and confirmed Session deletion. It captures uncaught errors from every
   opened page and retains failure artifacts. Fresh execution of this expanded
   suite remains part of the final high pass. See
