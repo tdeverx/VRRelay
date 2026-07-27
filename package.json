@@ -94,6 +94,13 @@
     "test:watch": "vitest",
     "generate:api": "node script/generate-api.mjs",
     "generate:agent-protocol-schema": "node --import tsx script/generate-agent-protocol-schema.mjs",
+    "verify:browser": "npm run test:browser",
+    "verify:container": "npm run check:compose && script/container-smoke.sh 0.0.0-ci && npm run test:compose && npm run test:cluster-compose",
+    "verify:core": "npm run ci",
+    "verify:deployment": "bash script/verify-deployment.sh",
+    "verify:distributed": "bash script/verify-distributed.sh",
+    "verify:platform:macos": "zsh script/verify-macos-host.sh",
+    "verify:platform:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File script/verify-windows-host.ps1",
     "verify:runtime": "node script/verify-runtime.mjs"
   },
   "devDependencies": {

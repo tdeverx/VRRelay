@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlaybackRequestTracker, logPlaybackRequest, safeRangeHeader } from './request-logging.js';
 
 describe('playback request diagnostics', () => {
-  it('identifies starts, sequential requests, retries, seeks, and resumes without client data', () => {
+  it('confirms a consecutive playback window before identifying a seek', () => {
     const tracker = new PlaybackRequestTracker();
     expect(tracker.observe('session-a', 'private-affinity', 4, 1_000)).toMatchObject({
       change: 'started'
@@ -17,12 +17,20 @@ describe('playback request diagnostics', () => {
       change: 'retry'
     });
     expect(tracker.observe('session-a', 'private-affinity', 20, 4_000)).toMatchObject({
-      change: 'seeked-forward',
+      change: 'reordered',
       segmentDelta: 15
     });
+    expect(tracker.observe('session-a', 'private-affinity', 21, 4_100)).toMatchObject({
+      change: 'seeked-forward',
+      segmentDelta: 1
+    });
     expect(tracker.observe('session-a', 'private-affinity', 3, 5_000)).toMatchObject({
+      change: 'reordered',
+      segmentDelta: -18
+    });
+    expect(tracker.observe('session-a', 'private-affinity', 2, 5_100)).toMatchObject({
       change: 'seeked-backward',
-      segmentDelta: -17
+      segmentDelta: -1
     });
     expect(tracker.observe('session-a', 'private-affinity', 4, 40_001)).toMatchObject({
       change: 'resumed'
@@ -30,6 +38,21 @@ describe('playback request diagnostics', () => {
     expect(
       JSON.stringify(tracker.observe('session-a', 'private-affinity', 5, 41_000))
     ).not.toContain('private-affinity');
+  });
+
+  it('does not mistake interleaved HLS prefetches for seeks', () => {
+    const tracker = new PlaybackRequestTracker();
+    const changes = [
+      tracker.observe('session-a', 'private-affinity', 0, 1_000).change,
+      tracker.observe('session-a', 'private-affinity', 24, 1_100).change,
+      tracker.observe('session-a', 'private-affinity', 0, 1_200).change,
+      tracker.observe('session-a', 'private-affinity', 25, 1_300).change,
+      tracker.observe('session-a', 'private-affinity', 1, 1_400).change,
+      tracker.observe('session-a', 'private-affinity', 26, 1_500).change
+    ];
+
+    expect(changes).not.toContain('seeked-forward');
+    expect(changes).not.toContain('seeked-backward');
   });
 
   it('logs state changes at info and ordinary segment traffic at debug', () => {

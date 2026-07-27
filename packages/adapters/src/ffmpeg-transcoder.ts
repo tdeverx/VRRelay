@@ -24,18 +24,28 @@ export interface FFmpegOptions {
 export function ffmpegDecodeAccelerationArgs(
   mode: ProfileRevision['video']['decodeMode']
 ): string[] {
-  // `auto` keeps FFmpeg's portable software decode path. Automatically
-  // selecting a host hardware API can change decoded surface formats beneath
-  // the same software filter graph. Operators can still request one explicit
-  // validated backend when the worker is configured for it.
+  // Do not ask FFmpeg to probe every compiled accelerator for `auto`. A build
+  // can advertise CUDA or VA-API without the host libraries/devices needed to
+  // initialise them, which makes otherwise portable work abort. Hardware
+  // decode remains an explicit, validated profile choice.
   return mode === 'auto' || mode === 'software' ? [] : ['-hwaccel', mode];
 }
 
 /** @internal */
-export function ffmpegVodReadPacingArgs(initialReadBurstSeconds: number): string[] {
+export function ffmpegVodReadPacingArgs(
+  readRate: number,
+  initialReadBurstSeconds: number
+): string[] {
+  if (!Number.isFinite(readRate) || readRate < 1 || readRate > 2)
+    throw new Error('The VOD producer read rate must be between 1x and 2x');
   if (!Number.isFinite(initialReadBurstSeconds) || initialReadBurstSeconds <= 0)
     throw new Error('The VOD producer initial read burst must be a finite positive duration');
-  return ['-readrate', '2', '-readrate_initial_burst', initialReadBurstSeconds.toFixed(3)];
+  return [
+    '-readrate',
+    readRate.toFixed(3),
+    '-readrate_initial_burst',
+    initialReadBurstSeconds.toFixed(3)
+  ];
 }
 
 /** @internal */
@@ -222,10 +232,10 @@ export class FFmpegTranscoder implements Transcoder {
       ...(request.source.positionedAtSeconds === request.startSeconds
         ? []
         : ['-ss', request.startSeconds.toFixed(3)]),
-      // Keep FFmpeg's average source-read ceiling while allowing the
-      // application watermark pacer to fill its initial buffer before taking
-      // ownership of pause/resume flow control.
-      ...ffmpegVodReadPacingArgs(request.initialReadBurstSeconds),
+      // Cap FFmpeg at this stream's configured maximum. The application pacer
+      // continuously scales the opaque source proxy between normal speed and
+      // that maximum without restarting the upstream connection.
+      ...ffmpegVodReadPacingArgs(request.readRate, request.initialReadBurstSeconds),
       ...this.#inputArgs(request.source, request.profile),
       '-t',
       request.duration.toFixed(3),

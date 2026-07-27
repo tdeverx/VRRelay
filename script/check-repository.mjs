@@ -32,6 +32,19 @@ const failures = [];
 const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 const rootLock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
 
+for (const required of [
+  'verify:core',
+  'verify:browser',
+  'verify:container',
+  'verify:distributed',
+  'verify:deployment',
+  'verify:platform:macos',
+  'verify:platform:windows'
+]) {
+  if (!rootPackage.scripts?.[required])
+    failures.push(`package.json is missing the ${required} verification lane`);
+}
+
 if (rootPackage.devDependencies?.['typescript-compat'] !== 'npm:@typescript/typescript6@6.0.2')
   failures.push('TypeScript API tooling must use the official TypeScript 6 compatibility package');
 if (rootPackage.overrides?.['@sveltejs/kit']?.cookie !== '$cookie')
@@ -202,21 +215,18 @@ for (const path of ['deploy/docker/docker-compose.cluster.yml', 'deploy/integrat
 
 const releaseWorkflow = await readFile(resolve(root, '.github/workflows/release.yml'), 'utf8');
 for (const required of [
-  'npm run test:local-cluster',
-  'npm run test:integration',
-  'npx playwright install --with-deps chromium',
-  'npm run test:browser',
-  'node script/check-kubernetes.mjs rendered.yaml',
+  'push: { branches: [main] }',
+  'workflow_dispatch:',
+  'script/publish-rolling-release.mjs next-build-number',
   'aquasecurity/trivy-action@',
   'needs: [gate, security]'
 ]) {
-  if (!releaseWorkflow.includes(required))
-    failures.push(`release workflow is missing required gate: ${required}`);
+  if (!releaseWorkflow.includes(required)) failures.push(`release workflow is missing ${required}`);
 }
 if (!releaseWorkflow.includes('permissions: { contents: read }'))
   failures.push('release workflow does not default jobs to read-only repository access');
-if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
-  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 3)
+  failures.push('release workflow must replace all three transient handoff artifacts on job retry');
 
 const securityPolicy = await readFile(resolve(root, 'SECURITY.md'), 'utf8');
 for (const required of [
@@ -262,33 +272,41 @@ const integrationWorkflow = await readFile(
   resolve(root, '.github/workflows/integration.yml'),
   'utf8'
 );
+const securityWorkflow = await readFile(resolve(root, '.github/workflows/security.yml'), 'utf8');
+for (const [name, workflow] of [
+  ['CI', ciWorkflow],
+  ['distributed acceptance', integrationWorkflow],
+  ['security', securityWorkflow]
+]) {
+  if (!workflow.includes('pull_request:') || !workflow.includes('merge_group:'))
+    failures.push(`${name} workflow must validate pull requests and merge-queue commits`);
+  if (/^\s+push:\s*\{ branches: \[main\] \}/m.test(workflow))
+    failures.push(`${name} workflow must not duplicate validation after main is merged`);
+}
 for (const required of [
   'docker/setup-qemu-action@',
   'platforms: linux/amd64,linux/arm64',
   'script/install-pinned-ffmpeg-windows.ps1',
   '/Applications/Xcode_26.6.app',
-  'script/check-workflows.sh',
-  'script/check-compose.sh',
-  'script/container-smoke.sh 0.0.0-ci',
-  'script/compose-smoke.sh'
+  'npm run verify:core',
+  'npm run verify:browser',
+  'npm run verify:container',
+  'npm run verify:deployment',
+  'npm run verify:platform:macos',
+  'npm run verify:platform:windows'
 ]) {
   if (!ciWorkflow.includes(required))
     failures.push(`CI multi-architecture build is missing ${required}`);
 }
-if (!releaseWorkflow.includes('script/check-compose.sh'))
-  failures.push('release workflow does not validate every Compose deployment');
-if (!releaseWorkflow.includes('script/container-smoke.sh'))
-  failures.push('release workflow does not boot and verify the release container');
-if (!releaseWorkflow.includes('script/compose-smoke.sh'))
-  failures.push('release workflow does not boot and verify standalone Compose');
 for (const [name, workflow] of [
   ['CI', ciWorkflow],
-  ['distributed acceptance', integrationWorkflow],
-  ['release', releaseWorkflow]
+  ['distributed acceptance', integrationWorkflow]
 ]) {
   if (!workflow.includes('script/install-pinned-ffmpeg-linux.sh'))
     failures.push(`${name} workflow does not install the pinned Linux FFmpeg runtime`);
 }
+if (!integrationWorkflow.includes('npm run verify:distributed'))
+  failures.push('distributed acceptance workflow must invoke the named verification lane');
 if (/^\s+linux\/arm64:\s*$/m.test(ciWorkflow))
   failures.push(
     'CI treats linux/arm64 as an invalid build-action input instead of a platform value'
@@ -297,9 +315,10 @@ const macosPackageScript = await readFile(resolve(root, 'deploy/macos/package.sh
 if (!macosPackageScript.includes('script/verify-macos-dmg.sh'))
   failures.push('macOS packaging does not verify the completed disk image payload');
 for (const required of [
+  'push: { branches: [main] }',
   'workflow_dispatch:',
-  "default: '100'",
   'queue: max',
+  'script/publish-rolling-release.mjs next-build-number',
   'script/publish-rolling-release.mjs identity',
   'build-args: VRRELAY_VERSION=',
   'push-by-digest=true',
@@ -325,6 +344,16 @@ for (const required of [
 ]) {
   if (!releaseWorkflow.includes(required))
     failures.push(`release workflow does not enforce release metadata ${required}`);
+}
+for (const forbidden of [
+  'inputs:',
+  'npm run ci',
+  'npm run test:browser',
+  'npm run test:integration',
+  'npm run test:local-cluster'
+]) {
+  if (releaseWorkflow.includes(forbidden))
+    failures.push(`release workflow must not retain duplicated functional gate ${forbidden}`);
 }
 const kubernetesValues = await readFile(resolve(root, 'deploy/kubernetes/values.yaml'), 'utf8');
 if (
@@ -365,6 +394,8 @@ for (const required of [
   'rollingReleaseAssetLimit = 900',
   'Refusing to overwrite historical release asset',
   'The first rolling release deliverable must be product build 100',
+  'deriveBuildNumber',
+  'next-build-number',
   'assets.push(await describeFile(directory, manifestName))',
   'draft: true',
   'force: true',

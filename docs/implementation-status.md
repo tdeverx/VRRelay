@@ -295,10 +295,9 @@ pending.
 - The authenticated Sessions view now derives ready/streaming/error state from the live producer
   and viewer window and displays short-lived per-node transcode, network, playback-window, and
   cache diagnostics. Viewer identity remains installation-HMACed and expires after 30 seconds.
-- HLS VOD producers now maintain configurable low/high buffer watermarks. Catch-up runs at up to
-  approximately 2× below 30 seconds by default, backpressures the same provider connection at 60
-  seconds, and resumes only at the low watermark so normal request jitter does not exhaust the
-  playback buffer.
+- HLS VOD producers maintain configurable low/high buffer watermarks. Each stream re-evaluates its
+  own headroom every second and continuously scales from 1× to its configured maximum (2× by
+  default), rather than stopping and restarting its provider connection at a threshold.
 - Session runtime diagnostics now expose upstream source connection/request activity. Producer
   admission is bounded globally and per provider. Distant seek replacement remains immediate once
   the dominant-viewer rule selects a new window, avoiding artificial scrubbing delays.

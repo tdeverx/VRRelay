@@ -4,30 +4,23 @@ import { describe, expect, it } from 'vitest';
 import { pacedReadable, VodProducerSourcePacer } from './vod-source-pacing.js';
 
 describe('VOD producer source pacing', () => {
-  it('backpressures the source while buffered and resumes the same stream', async () => {
-    const pacing = new VodProducerSourcePacer();
-    pacing.pause();
-    const output = pacedReadable(Readable.from([Buffer.from('one'), Buffer.from('two')]), pacing);
-    const completed = output.toArray();
-    expect(pacing.state).toBe('buffered');
-    let settled = false;
-    void completed.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    pacing.resume();
-    expect(Buffer.concat(await completed).toString()).toBe('onetwo');
+  it('scales one source stream from its maximum rate back to playback speed', async () => {
+    const pacing = new VodProducerSourcePacer(2);
+    expect(pacing.rate).toBe(2);
     expect(pacing.state).toBe('catching_up');
+    pacing.setRate(1);
+    expect(pacing.rate).toBe(1);
+    expect(pacing.state).toBe('buffered');
+    const output = pacedReadable(Readable.from([Buffer.from('one'), Buffer.from('two')]), pacing);
+    expect(Buffer.concat(await output.toArray()).toString()).toBe('onetwo');
+    expect(() => pacing.setRate(2.1)).toThrow(/between 1x and 2x/);
   });
 
-  it('releases a paused reader when its request is aborted', async () => {
-    const pacing = new VodProducerSourcePacer();
+  it('rejects a paced reader when its request is aborted', async () => {
+    const pacing = new VodProducerSourcePacer(2);
     const controller = new AbortController();
-    pacing.pause();
-    const output = pacedReadable(Readable.from([Buffer.from('held')]), pacing, controller.signal);
-    const completed = output.toArray();
+    pacing.setRate(1);
     controller.abort(new Error('test abort'));
-    await expect(completed).rejects.toThrow('test abort');
+    await expect(pacing.wait(controller.signal)).rejects.toThrow('test abort');
   });
 });

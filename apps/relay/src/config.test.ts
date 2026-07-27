@@ -29,6 +29,8 @@ describe('relay configuration', () => {
       vodProducerIdleTimeoutMs: current.vodProducerIdleTimeoutMs,
       vodProducerBufferLowWatermarkMs: current.vodProducerBufferLowWatermarkMs,
       vodProducerBufferHighWatermarkMs: current.vodProducerBufferHighWatermarkMs,
+      vodProducerMaxCatchupRate: current.vodProducerMaxCatchupRate,
+      vodProducerEncoder: current.vodProducerEncoder,
       vodProducerMaxConcurrent: current.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: current.vodProducerMaxPerProvider,
       nodeName: current.nodeName,
@@ -66,6 +68,8 @@ describe('relay configuration', () => {
         vodProducerIdleTimeoutMs: 60_000,
         vodProducerBufferLowWatermarkMs: 30_000,
         vodProducerBufferHighWatermarkMs: 60_000,
+        vodProducerCatchupRate: 1.5,
+        vodProducerEncoder: 'libx264',
         vodProducerMaxConcurrent: 2,
         vodProducerMaxPerProvider: 2,
         nodeName: 'Configured node',
@@ -77,6 +81,7 @@ describe('relay configuration', () => {
         listenAddr: '127.0.0.1:9000',
         adminUrl: 'http://127.0.0.1:9000',
         maxWorkers: 4,
+        vodProducerMaxCatchupRate: 1.5,
         nodeName: 'Configured node'
       });
       expect(
@@ -122,6 +127,8 @@ describe('relay configuration', () => {
         VRRELAY_VOD_PRODUCER_IDLE_TIMEOUT: '15s',
         VRRELAY_VOD_PRODUCER_BUFFER_LOW_WATERMARK: '30s',
         VRRELAY_VOD_PRODUCER_BUFFER_HIGH_WATERMARK: '60s',
+        VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE: '1.5',
+        VRRELAY_VOD_PRODUCER_ENCODER: 'libx264',
         VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '4',
         VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '3',
         VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT: '4',
@@ -132,6 +139,8 @@ describe('relay configuration', () => {
       vodProducerIdleTimeoutMs: 15_000,
       vodProducerBufferLowWatermarkMs: 30_000,
       vodProducerBufferHighWatermarkMs: 60_000,
+      vodProducerMaxCatchupRate: 1.5,
+      vodProducerEncoder: 'libx264',
       vodProducerMaxConcurrent: 4,
       vodProducerMaxPerProvider: 3,
       liveNormalizerMaxConcurrent: 4,
@@ -143,6 +152,9 @@ describe('relay configuration', () => {
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '0' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CONCURRENT: '33' })).toThrow();
     expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER: '0' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE: '0.9' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE: '2.1' })).toThrow();
+    expect(() => loadConfig({ VRRELAY_VOD_PRODUCER_ENCODER: 'h264_not_real' })).toThrow();
     expect(() =>
       loadConfig({
         VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT: '1',

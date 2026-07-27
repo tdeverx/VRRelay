@@ -2157,6 +2157,8 @@ components:
           vodProducerIdleTimeoutMs,
           vodProducerBufferLowWatermarkMs,
           vodProducerBufferHighWatermarkMs,
+          vodProducerMaxCatchupRate,
+          vodProducerEncoder,
           vodProducerMaxConcurrent,
           vodProducerMaxPerProvider,
           nodeName,
@@ -2181,6 +2183,13 @@ components:
           { type: integer, minimum: 4000, maximum: 300000, default: 30000 }
         vodProducerBufferHighWatermarkMs:
           { type: integer, minimum: 8000, maximum: 600000, default: 60000 }
+        vodProducerMaxCatchupRate: { type: number, minimum: 1, maximum: 2, default: 2 }
+        vodProducerEncoder:
+          {
+            type: string,
+            enum: [auto, libx264, h264_videotoolbox, h264_nvenc, h264_qsv, h264_vaapi, h264_amf],
+            default: auto
+          }
         vodProducerMaxConcurrent: { type: integer, minimum: 1, maximum: 32, default: 2 }
         vodProducerMaxPerProvider: { type: integer, minimum: 1, maximum: 32, default: 2 }
         nodeName: { type: string, minLength: 1, maxLength: 100 }

@@ -466,7 +466,7 @@ async function ownedVodSessionFixture(
 }
 
 describe('profile lifecycle', () => {
-  it('seeds the same software encoder even when host hardware acceleration is available', async () => {
+  it('prefers an available hardware encoder for the built-in profiles', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-seed-'));
     dirs.push(dir);
     const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
@@ -484,12 +484,72 @@ describe('profile lifecycle', () => {
     expect(await service.list()).toHaveLength(5);
     expect(
       (await service.list()).every(
+        (seeded) =>
+          seeded.video.encoder === 'h264_videotoolbox' &&
+          seeded.video.hardwareMode === 'videotoolbox'
+      )
+    ).toBe(true);
+  });
+
+  it('uses a supported forced encoder for all built-in profiles', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-forced-encoder-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new ProfileService(
+      repo,
+      {
+        ...mediaCapabilities,
+        encoders: [
+          { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
+          ...mediaCapabilities.encoders
+        ]
+      },
+      'libx264'
+    );
+
+    await service.seed();
+
+    expect(
+      (await service.list()).every(
         (seeded) => seeded.video.encoder === 'libx264' && seeded.video.hardwareMode === 'software'
       )
     ).toBe(true);
   });
 
-  it('adds a portable revision for an untouched host-specific built-in profile', async () => {
+  it('rejects a forced encoder that is unavailable on the relay', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-unavailable-encoder-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new ProfileService(repo, mediaCapabilities, 'h264_videotoolbox');
+
+    await expect(service.seed()).rejects.toThrow(/forced encoder is not available/);
+  });
+
+  it('moves seeded profiles to a newly forced encoder after a policy change', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-encoder-change-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const capabilities = {
+      ...mediaCapabilities,
+      encoders: [
+        { name: 'h264_videotoolbox', codec: 'h264', hardware: true, available: true },
+        ...mediaCapabilities.encoders
+      ]
+    };
+
+    await new ProfileService(repo, capabilities).seed();
+    await new ProfileService(repo, capabilities, 'libx264').seed();
+
+    expect(await repo.getProfile('universal-h264-hls-vod')).toMatchObject({
+      revision: 2,
+      video: { encoder: 'libx264', hardwareMode: 'software' }
+    });
+  });
+
+  it('keeps an untouched hardware-accelerated built-in profile', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-portable-migration-'));
     dirs.push(dir);
     const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
@@ -516,8 +576,8 @@ describe('profile lifecycle', () => {
     await service.seed();
 
     await expect(repo.getProfile('universal-h264-hls-vod')).resolves.toMatchObject({
-      revision: 2,
-      video: { encoder: 'libx264', hardwareMode: 'software' }
+      revision: 1,
+      video: { encoder: 'h264_videotoolbox', hardwareMode: 'videotoolbox' }
     });
     await expect(repo.getProfile('universal-h264-hls-vod', 1)).resolves.toMatchObject({
       revision: 1,

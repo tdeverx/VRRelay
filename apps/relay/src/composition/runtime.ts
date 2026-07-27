@@ -423,7 +423,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
       nodeId: config.nodeId,
       ...(agentController ? { remote: agentController } : {})
     });
-    const profiles = new ProfileService(repository, capabilities);
+    const profiles = new ProfileService(repository, capabilities, config.vodProducerEncoder);
     await profiles.seed();
 
     const sessions = new SessionService(
@@ -444,6 +444,7 @@ async function startControlPlaneRuntime(config: RelayConfig, plan: RolePlan): Pr
         vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
         vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
         vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+        vodProducerMaxCatchupRate: config.vodProducerMaxCatchupRate,
         vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
         vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
         jobLogRetentionRows: config.jobLogRetentionRows,
@@ -753,6 +754,7 @@ export async function startSourceWorkerRuntime(config: RelayConfig): Promise<voi
         vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
         vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
         vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+        vodProducerMaxCatchupRate: config.vodProducerMaxCatchupRate,
         vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
         vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
         jobLogRetentionRows: config.jobLogRetentionRows,
@@ -1002,6 +1004,7 @@ export async function startEdgeRuntime(config: RelayConfig): Promise<void> {
         vodProducerIdleTimeoutMs: config.vodProducerIdleTimeoutMs,
         vodProducerBufferLowWatermarkMs: config.vodProducerBufferLowWatermarkMs,
         vodProducerBufferHighWatermarkMs: config.vodProducerBufferHighWatermarkMs,
+        vodProducerMaxCatchupRate: config.vodProducerMaxCatchupRate,
         vodProducerMaxConcurrent: config.vodProducerMaxConcurrent,
         vodProducerMaxPerProvider: config.vodProducerMaxPerProvider,
         jobLogRetentionRows: config.jobLogRetentionRows,

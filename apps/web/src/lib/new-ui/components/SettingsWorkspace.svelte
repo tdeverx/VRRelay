@@ -1086,6 +1086,53 @@
                 share one fenced producer generation for each session.</Field.Description
               ></Field.Field
             ><Field.Field
+              ><Field.Label for="producer-max-catchup-rate"
+                >Maximum VOD catch-up rate per stream</Field.Label
+              ><Input
+                id="producer-max-catchup-rate"
+                type="range"
+                min="1"
+                max="2"
+                step="0.1"
+                value={runtimeDraft.vodProducerMaxCatchupRate}
+                disabled={!runtime?.writable}
+                oninput={(event) => {
+                  runtimeDraft!.vodProducerMaxCatchupRate = Number(event.currentTarget.value);
+                  runtimeValidated = false;
+                }}
+              /><Field.Description
+                >Each stream automatically moves between 1× and
+                {runtimeDraft.vodProducerMaxCatchupRate.toFixed(1)}× every second based on its
+                buffer headroom. 1× keeps the stream at normal playback speed.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label>Default H.264 encoder</Field.Label><Select.Root
+                type="single"
+                value={runtimeDraft.vodProducerEncoder}
+                disabled={!runtime?.writable}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  runtimeDraft!.vodProducerEncoder =
+                    value as RuntimeConfiguration['vodProducerEncoder'];
+                  runtimeValidated = false;
+                }}
+                ><Select.Trigger class="w-full">{runtimeDraft.vodProducerEncoder}</Select.Trigger
+                ><Select.Content
+                  ><Select.Group
+                    ><Select.Item value="auto">Auto (best available)</Select.Item><Select.Item
+                      value="libx264">libx264 (software)</Select.Item
+                    ><Select.Item value="h264_videotoolbox">VideoToolbox</Select.Item><Select.Item
+                      value="h264_nvenc">NVIDIA NVENC</Select.Item
+                    ><Select.Item value="h264_qsv">Intel Quick Sync</Select.Item><Select.Item
+                      value="h264_vaapi">VA-API</Select.Item
+                    ><Select.Item value="h264_amf">AMD AMF</Select.Item></Select.Group
+                  ></Select.Content
+                ></Select.Root
+              ><Field.Description
+                >Forces newly created built-in H.264 profiles after restart. The selected encoder
+                must be available on each source worker.</Field.Description
+              ></Field.Field
+            ><Field.Field
               ><Field.Label for="producer-buffer-low"
                 >VOD buffer refill threshold (seconds)</Field.Label
               ><Input
@@ -1102,7 +1149,7 @@
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >When producer headroom reaches this level, catch-up transcoding resumes.</Field.Description
+                >At or below this headroom, the producer uses its configured maximum catch-up rate.</Field.Description
               ></Field.Field
             ><Field.Field
               ><Field.Label for="producer-buffer-high">VOD buffer target (seconds)</Field.Label
@@ -1120,7 +1167,8 @@
                   runtimeValidated = false;
                 }}
               /><Field.Description
-                >Catch-up pauses at this level. It must be greater than the refill threshold.</Field.Description
+                >At or above this headroom, the producer returns to 1×. It must exceed the refill
+                threshold.</Field.Description
               ></Field.Field
             ></Field.Group
           ></Card.Content

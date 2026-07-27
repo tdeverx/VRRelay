@@ -196,14 +196,33 @@ export function planAssetUploads(localAssets, remoteAssets, assetLimit = rolling
   return { uploads, reused };
 }
 
-export function validateBuildSequence(context, remoteAssets) {
-  const historicalBuilds = remoteAssets
+export function completedBuilds(remoteAssets) {
+  return remoteAssets
     .filter((asset) => asset.state === undefined || asset.state === 'uploaded')
     .map((asset) =>
       /^VRRelay-.+-b([0-9]+)-r[0-9]+-a[0-9]+-g([0-9a-f]{12})-manifest\.json$/.exec(asset.name)
     )
     .filter(Boolean)
     .map((match) => ({ number: BigInt(match[1]), shortSha: match[2] }));
+}
+
+export function deriveBuildNumber(sha, remoteAssets) {
+  const historicalBuilds = completedBuilds(remoteAssets);
+  const matchingBuilds = historicalBuilds.filter((build) => build.shortSha === sha.slice(0, 12));
+  const matchingNumbers = new Set(matchingBuilds.map((build) => build.number.toString()));
+  if (matchingNumbers.size > 1)
+    throw new Error('A source commit cannot have more than one completed product build number');
+  if (matchingNumbers.size === 1) return [...matchingNumbers][0];
+  if (historicalBuilds.length === 0) return '100';
+  const highestNumber = historicalBuilds.reduce(
+    (highest, build) => (build.number > highest ? build.number : highest),
+    0n
+  );
+  return (highestNumber + 1n).toString();
+}
+
+export function validateBuildSequence(context, remoteAssets) {
+  const historicalBuilds = completedBuilds(remoteAssets);
   const candidateNumber = BigInt(context.buildNumber);
   if (historicalBuilds.length === 0) {
     if (candidateNumber !== 100n)
@@ -415,6 +434,16 @@ class GitHubReleaseClient {
   }
 }
 
+export async function deriveBuildNumberFromEnvironment(environment = process.env) {
+  const sha = commitSha(environment.GITHUB_SHA);
+  const client = new GitHubReleaseClient({
+    token: environment.GITHUB_TOKEN,
+    repository: environment.GITHUB_REPOSITORY
+  });
+  const release = await client.getRelease();
+  return deriveBuildNumber(sha, release ? await client.listAssets(release.id) : []);
+}
+
 async function ensureRollingRelease(client, sha) {
   let release = await client.getRelease();
   if (release) {
@@ -499,6 +528,10 @@ export async function publishRelease(directory, context, options = {}) {
 
 async function main() {
   const command = process.argv[2];
+  if (command === 'next-build-number') {
+    process.stdout.write(`${await deriveBuildNumberFromEnvironment()}\n`);
+    return;
+  }
   const context = releaseContextFromEnvironment();
   if (command === 'identity') {
     process.stdout.write(`${context.buildId}\n`);
@@ -516,7 +549,7 @@ async function main() {
     return;
   }
   throw new Error(
-    'Usage: node script/publish-rolling-release.mjs identity|prepare [artifact-directory]|publish [artifact-directory]'
+    'Usage: node script/publish-rolling-release.mjs identity|next-build-number|prepare [artifact-directory]|publish [artifact-directory]'
   );
 }
 

@@ -5,61 +5,66 @@ export type VodProducerBufferState = 'catching_up' | 'buffered';
 
 export interface VodProducerSourcePacing {
   readonly state: VodProducerBufferState;
-  pause(): void;
-  resume(): void;
+  readonly rate: number;
+  setRate(rate: number): void;
   wait(signal?: AbortSignal): Promise<void>;
 }
 
 export class VodProducerSourcePacer implements VodProducerSourcePacing {
-  #state: VodProducerBufferState = 'catching_up';
-  #resumePromise: Promise<void> | undefined;
-  #resume: (() => void) | undefined;
+  #rate: number;
+
+  constructor(readonly maximumRate = 2) {
+    if (!Number.isFinite(maximumRate) || maximumRate < 1 || maximumRate > 2)
+      throw new Error('The VOD producer maximum catch-up rate must be between 1x and 2x');
+    this.#rate = maximumRate;
+  }
 
   get state(): VodProducerBufferState {
-    return this.#state;
+    return this.#rate > 1 ? 'catching_up' : 'buffered';
   }
 
-  pause(): void {
-    if (this.#state === 'buffered') return;
-    this.#state = 'buffered';
-    this.#resumePromise = new Promise<void>((resolve) => {
-      this.#resume = resolve;
-    });
+  get rate(): number {
+    return this.#rate;
   }
 
-  resume(): void {
-    if (this.#state === 'catching_up') return;
-    this.#state = 'catching_up';
-    this.#resume?.();
-    this.#resume = undefined;
-    this.#resumePromise = undefined;
+  setRate(rate: number): void {
+    if (!Number.isFinite(rate) || rate < 1 || rate > this.maximumRate)
+      throw new Error(`The VOD producer catch-up rate must be between 1x and ${this.maximumRate}x`);
+    this.#rate = rate;
   }
 
   async wait(signal?: AbortSignal): Promise<void> {
-    while (this.#state === 'buffered') {
+    // FFmpeg reads at this stream's configured maximum.  The proxy opens and
+    // closes short windows to reduce the effective rate without restarting the
+    // producer or its authenticated upstream connection.
+    while (this.#rate < this.maximumRate) {
       if (signal?.aborted) throw signal.reason ?? new Error('Source pacing was aborted');
-      const resumed = this.#resumePromise;
-      if (!resumed) continue;
-      if (!signal) {
-        await resumed;
-        continue;
-      }
-      await new Promise<void>((resolve, reject) => {
-        const aborted = () => reject(signal.reason ?? new Error('Source pacing was aborted'));
-        signal.addEventListener('abort', aborted, { once: true });
-        void resumed.then(
-          () => {
-            signal.removeEventListener('abort', aborted);
-            resolve();
-          },
-          (error) => {
-            signal.removeEventListener('abort', aborted);
-            reject(error);
-          }
-        );
-      });
+      const windowMs = 100;
+      const elapsedMs = performance.now() % windowMs;
+      const openForMs = windowMs * (this.#rate / this.maximumRate);
+      if (elapsedMs < openForMs) return;
+      const delayMs = Math.max(1, Math.ceil(windowMs - elapsedMs));
+      await waitFor(delayMs, signal);
     }
   }
+}
+
+async function waitFor(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', aborted);
+      resolve();
+    }, delayMs);
+    const aborted = () => {
+      clearTimeout(timeout);
+      reject(signal.reason ?? new Error('Source pacing was aborted'));
+    };
+    signal.addEventListener('abort', aborted, { once: true });
+  });
 }
 
 export function pacedReadable(
