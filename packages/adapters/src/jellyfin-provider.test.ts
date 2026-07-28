@@ -164,38 +164,58 @@ describe('Jellyfin request transport', () => {
     expect(requests[0]?.url.searchParams.get('IsPlaceHolder')).toBe('false');
   });
 
-  it('omits catalog entries that have no playable media files', async () => {
+  it('preserves search relevance and rejects only explicit virtual or placeholder items', async () => {
+    const requests: JellyfinConnectorRequest[] = [];
     const provider = new JellyfinProvider('0.1.0', {
       resolveTarget: (rawUrl) =>
         resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
-      requestConnector: async () =>
-        response(
+      requestConnector: async (request) => {
+        requests.push(request);
+        if (request.url.pathname === '/Search/Hints')
+          return response(
+            200,
+            JSON.stringify({
+              SearchHints: [
+                { ItemId: 'series-ready' },
+                { ItemId: 'movie-empty' },
+                { ItemId: 'movie-ready' },
+                { ItemId: 'series-empty' },
+                { ItemId: 'episode-virtual' },
+                { ItemId: 'movie-placeholder' }
+              ],
+              TotalRecordCount: 6
+            }),
+            { 'content-type': 'application/json' }
+          );
+        const items = [
+          { Id: 'movie-ready', Name: 'Ready movie', Type: 'Movie', MediaSources: [{}] },
+          { Id: 'movie-empty', Name: 'Empty movie', Type: 'Movie', MediaSources: [] },
+          { Id: 'series-ready', Name: 'Ready show', Type: 'Series', RecursiveItemCount: 3 },
+          { Id: 'series-empty', Name: 'Empty show', Type: 'Series', RecursiveItemCount: 0 },
+          {
+            Id: 'episode-virtual',
+            Name: 'Virtual episode',
+            Type: 'Episode',
+            LocationType: 'Virtual',
+            MediaSources: [{}]
+          },
+          {
+            Id: 'movie-placeholder',
+            Name: 'Placeholder movie',
+            Type: 'Movie',
+            IsPlaceHolder: true,
+            MediaSources: [{}]
+          }
+        ];
+        return response(
           200,
           JSON.stringify({
-            Items: [
-              { Id: 'movie-ready', Name: 'Ready movie', Type: 'Movie', MediaSources: [{}] },
-              { Id: 'movie-empty', Name: 'Empty movie', Type: 'Movie', MediaSources: [] },
-              { Id: 'series-ready', Name: 'Ready show', Type: 'Series', RecursiveItemCount: 3 },
-              { Id: 'series-empty', Name: 'Empty show', Type: 'Series', RecursiveItemCount: 0 },
-              {
-                Id: 'episode-virtual',
-                Name: 'Virtual episode',
-                Type: 'Episode',
-                LocationType: 'Virtual',
-                MediaSources: [{}]
-              },
-              {
-                Id: 'movie-placeholder',
-                Name: 'Placeholder movie',
-                Type: 'Movie',
-                IsPlaceHolder: true,
-                MediaSources: [{}]
-              }
-            ],
-            TotalRecordCount: 6
+            Items: items,
+            TotalRecordCount: items.length
           }),
           { 'content-type': 'application/json' }
-        )
+        );
+      }
     });
     const now = new Date().toISOString();
     const connection = {
@@ -218,7 +238,22 @@ describe('Jellyfin request transport', () => {
       CatalogQuerySchema.parse({ search: 'media', kinds: ['Movie', 'Series'] })
     );
 
-    expect(result.items.map((item) => item.id)).toEqual(['movie-ready', 'series-ready']);
+    expect(result.items.map((item) => item.id)).toEqual([
+      'series-ready',
+      'movie-empty',
+      'movie-ready',
+      'series-empty'
+    ]);
+    expect(requests.map((request) => request.url.pathname)).toEqual([
+      '/Search/Hints',
+      '/Users/user-1/Items'
+    ]);
+    expect(requests[0]?.url.searchParams.get('SearchTerm')).toBe('media');
+    expect(requests[0]?.url.searchParams.get('IncludeMedia')).toBe('true');
+    expect(requests[0]?.url.searchParams.get('IncludePeople')).toBe('false');
+    expect(requests[1]?.url.searchParams.get('Ids')).toBe(
+      'series-ready,movie-empty,movie-ready,series-empty,episode-virtual,movie-placeholder'
+    );
   });
 
   it('loads artwork through the pinned authenticated transport', async () => {

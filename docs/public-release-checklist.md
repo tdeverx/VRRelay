@@ -20,7 +20,7 @@ This checklist defines the difference between a buildable repository, a release 
 - The Windows installer passes install, service recovery, repair, upgrade, reboot, DPAPI storage, tray exit, and retained-data uninstall tests on Windows x64.
 - Backup, restore, upgrade, rollback, certificate rotation, node drain, and node revocation have retained logs from the release candidate.
 - Every downloaded archive passes the runtime-manifest checksum, every executable reports the declared exact runtime revision (including the shared FFmpeg commit), and each native artifact contains a post-signing `runtime-provenance.json` whose hashes match the binaries actually installed.
-- The FFmpeg complete corresponding-source archive is generated for the exact pinned Windows, Linux x64, and Linux arm64 BtbN builds; its immutable URL and SHA-256 are configured as repository variables, and the release workflow successfully attaches and checksums it.
+- The release workflow generates one FFmpeg complete corresponding-source archive for the exact pinned Windows, Linux x64, and Linux arm64 BtbN builds, passes that verified workflow artifact to every consumer, and successfully attaches and checksums it.
 - The source archive's embedded recipe and per-file manifest pass `node script/windows-source-bundle.mjs --verify`, all production platforms resolve to the same FFmpeg source revision, and a maintainer has audited the collected linked-library sources against the binary configuration before dispatch.
 
 ## Product evidence

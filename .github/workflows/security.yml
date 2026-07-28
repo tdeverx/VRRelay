@@ -1,41 +1,47 @@
-name: Security and SBOM
+name: Security
+
 on:
   pull_request:
   merge_group:
   workflow_dispatch:
-  schedule: [{ cron: '17 4 * * 1' }]
-permissions: { contents: read, security-events: write }
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
-  audit:
+  dependencies-and-files:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
+        with:
+          node-version: '26.5.0'
+          cache: npm
       - run: npm install --global npm@12.0.1
       - run: npm ci
       - run: npm audit --audit-level=high
-      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        with: { path: ., format: spdx-json, output-file: vrrelay.spdx.json }
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: { name: sbom, path: vrrelay.spdx.json }
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          {
-            scan-type: fs,
-            scan-ref: .,
-            format: sarif,
-            output: trivy.sarif,
-            severity: 'HIGH,CRITICAL',
-            exit-code: '1'
-          }
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with: { name: trivy-sarif, path: trivy.sarif, if-no-files-found: ignore }
-      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
-        if: >-
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - if: always() && hashFiles('trivy.sarif') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-scan
+          path: trivy.sarif
+      - if: >-
           always() &&
           github.event.repository.private == false &&
+          hashFiles('trivy.sarif') != '' &&
           (github.event_name != 'pull_request' ||
           github.event.pull_request.head.repo.full_name == github.repository)
-        with: { sarif_file: trivy.sarif }
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          sarif_file: trivy.sarif

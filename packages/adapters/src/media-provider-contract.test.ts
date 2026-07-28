@@ -474,6 +474,9 @@ class FakeJellyfinHttpServer {
     if (requestHeader(request.options, 'X-Emby-Token') !== VALID_SECRET)
       return incomingResponse(401);
     if (method === 'GET' && path === '/System/Info') return incomingResponse(204);
+    if (method === 'GET' && path === '/Search/Hints') {
+      return this.#searchHints(request.url);
+    }
     if (method === 'GET' && path === `/Users/${BASE_IDENTITY.userId}/Items`) {
       return this.#browse(request.url);
     }
@@ -492,18 +495,36 @@ class FakeJellyfinHttpServer {
   };
 
   #browse(url: URL): IncomingMessage {
+    const ids = (url.searchParams.get('Ids') ?? '').split(',').filter(Boolean);
     const parentId = url.searchParams.get('ParentId') ?? undefined;
-    const search = url.searchParams.get('SearchTerm')?.toLocaleLowerCase();
     const kinds = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
     const start = Number(url.searchParams.get('StartIndex') ?? 0);
     const limit = Number(url.searchParams.get('Limit') ?? 50);
     let items = contractItems('jellyfin-contract');
-    if (parentId) items = items.filter((item) => item.parentId === parentId);
+    if (ids.length > 0) items = items.filter((item) => ids.includes(item.id));
+    else if (parentId) items = items.filter((item) => item.parentId === parentId);
     else items = items.filter((item) => !item.parentId);
-    if (search) items = items.filter((item) => item.name.toLocaleLowerCase().includes(search));
     if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.kind));
     return jsonResponse(200, {
       Items: items.slice(start, start + limit).map((item) => jellyfinItem(item.id)),
+      TotalRecordCount: items.length
+    });
+  }
+
+  #searchHints(url: URL): IncomingMessage {
+    const search = (url.searchParams.get('SearchTerm') ?? '').toLocaleLowerCase();
+    const kinds = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
+    const start = Number(url.searchParams.get('StartIndex') ?? 0);
+    const limit = Number(url.searchParams.get('Limit') ?? 50);
+    let items = contractItems('jellyfin-contract').filter((item) => !item.parentId);
+    if (search) items = items.filter((item) => item.name.toLocaleLowerCase().includes(search));
+    if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.kind));
+    return jsonResponse(200, {
+      SearchHints: items.slice(start, start + limit).map((item) => ({
+        ItemId: item.id,
+        Name: item.name,
+        Type: item.kind
+      })),
       TotalRecordCount: items.length
     });
   }
