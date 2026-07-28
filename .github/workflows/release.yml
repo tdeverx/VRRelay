@@ -530,7 +530,7 @@ jobs:
             > release-chart-rendered.yaml
 
           grep -F \
-            "image: $VRRELAY_OCI_REPOSITORY@$VRRELAY_OCI_DIGEST" \
+            "image: \"$VRRELAY_OCI_REPOSITORY@$VRRELAY_OCI_DIGEST\"" \
             release-chart-rendered.yaml
 
           node script/check-kubernetes.mjs \
