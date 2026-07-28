@@ -31,27 +31,26 @@ git diff --exit-code -- apps/web/src/lib/generated/vrrelay-api
 
 Generated client files are committed so consumers and reviewers see contract changes directly.
 
-## GitHub parity lanes
+## Pull-request validation
 
-The named verification lanes are the commands GitHub Actions invokes for pull
-requests and merge-queue commits. Run the matching lane locally when its
-prerequisites are available:
+GitHub runs one check for each release risk. The commands are direct and can be
+run locally when their platform prerequisites are available:
 
 ```sh
-npm run verify:core
-npm run verify:browser
-npm run verify:container
-npm run verify:distributed
-npm run verify:deployment
-npm run verify:platform:macos
-npm run verify:platform:windows
+npm run ci
+npm run test:browser
+npm run test:cluster
+npm run validate:deployment
+npm run validate:macos-package
+npm run validate:windows-build
 ```
 
-The PR and merge queue are the exhaustive deterministic gate. A protected
-`main` merge does not rerun those functional tests; it builds, signs, scans,
-validates, and publishes the rolling release artifacts. Real Jellyfin and live
-service tests remain explicit environment-backed evidence rather than required
-GitHub checks.
+The pull-request and merge-queue checks cover core source behavior, the
+administrator browser journey, the complete cluster, deployment configuration,
+and each release platform. They do not repeat one another. A protected `main`
+merge builds and publishes the rolling release without rerunning the PR suite.
+Real Jellyfin and live-service tests remain explicit environment-backed
+evidence rather than default checks.
 
 Agent-protocol changes also require the strict contract tests and reproducible
 schema freshness gate:
@@ -72,14 +71,14 @@ It covers enrollment retry, certificate proof/rotation/expiry/revocation, replay
 and payload abuse, request cleanup, durable drain/restart behavior, and both DNS
 name and IP-address TLS identities.
 
-## Distributed acceptance harness
+## Cluster acceptance
 
 The release-level harness builds the production container and provisions a disposable cluster with
 one controller, two source workers, one ingest origin, two edges, PostgreSQL, Valkey, MinIO, a
 deterministic Jellyfin-compatible fixture, MediaMTX, and an OBS-compatible FFmpeg publisher.
 
 ```sh
-npm run test:integration
+npm run test:cluster
 ```
 
 It verifies node enrollment over mTLS WSS, node-local primary and failover provider credentials,

@@ -1,97 +1,94 @@
-name: CI
+name: Pull request validation
+
 on:
   pull_request:
   merge_group:
-  push:
-    branches: [main]
   workflow_dispatch:
-permissions: { contents: read }
+
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
 jobs:
-  test:
-    if: github.event_name != 'push'
-    timeout-minutes: 90
-    strategy: { matrix: { os: [ubuntu-latest, windows-latest], node: [26.5.0] } }
-    runs-on: ${{ matrix.os }}
+  core:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
+        with:
+          node-version: '26.5.0'
+          cache: npm
       - run: npm install --global npm@12.0.1
-      - if: runner.os == 'Linux'
-        name: Install the pinned FFmpeg runtime
+      - name: Install pinned FFmpeg
         run: |
           runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
           printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
-      - if: runner.os == 'Windows'
-        name: Install the pinned FFmpeg runtime
-        shell: pwsh
-        run: |
-          $runtimeBin = & script/install-pinned-ffmpeg-windows.ps1 "$env:RUNNER_TEMP\vrrelay-ffmpeg"
-          $runtimeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: npm ci
-      - if: runner.os == 'Windows'
-        run: npm run verify:platform:windows
-      - if: runner.os != 'Windows'
-        run: npm run verify:core
-  macos-host:
-    runs-on: macos-26
-    if: github.event_name != 'push'
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
-      - run: npm install --global npm@12.0.1
-      - name: Select the Swift 6.3 toolchain
-        run: sudo xcode-select --switch /Applications/Xcode_26.6.app
-      - name: Install pinned-FFmpeg build tools
-        run: brew install autoconf automake libtool meson ninja pkg-config
-      - run: npm ci
-      - name: Run the macOS verification lane
-        env:
-          VRRELAY_BUILD_NUMBER: ${{ github.run_number }}
-        run: npm run verify:platform:macos
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: vrrelay-macos-dmg
-          path: dist/VRRelay-*-macOS-arm64.dmg
-          if-no-files-found: error
+      - run: npm run ci
+
   browser:
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
+        with:
+          node-version: '26.5.0'
+          cache: npm
       - run: npm install --global npm@12.0.1
-      - name: Install the pinned FFmpeg runtime
+      - name: Install pinned FFmpeg
         run: |
           runtime_bin="$(script/install-pinned-ffmpeg-linux.sh "$RUNNER_TEMP/vrrelay-ffmpeg")"
           printf '%s\n' "$runtime_bin" >> "$GITHUB_PATH"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run verify:browser
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
+      - run: npm run test:browser
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: browser-failure-artifacts
+          name: browser-failure
           path: tmp/playwright-results/
           if-no-files-found: ignore
-  container:
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
+        with:
+          node-version: '26.5.0'
+          cache: npm
       - run: npm install --global npm@12.0.1
       - run: npm ci
-      - run: npm run verify:container
+      - run: npm run validate:windows-build
+
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26.5.0'
+          cache: npm
+      - run: npm install --global npm@12.0.1
+      - run: sudo xcode-select --switch /Applications/Xcode_26.6.app
+      - run: brew install autoconf automake libtool meson ninja pkg-config
+      - run: npm ci
+      - env:
+          VRRELAY_BUILD_NUMBER: ${{ github.run_number }}
+        run: npm run validate:macos-package
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-dmg
+          path: dist/VRRelay-*-macOS-arm64.dmg
+          if-no-files-found: error
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -100,31 +97,22 @@ jobs:
           file: deploy/docker/Dockerfile
           push: false
           platforms: linux/amd64,linux/arm64
+
   deployment:
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
+        with:
+          node-version: '26.5.0'
+          cache: npm
       - run: npm install --global npm@12.0.1
       - run: npm ci
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-        with: { version: v4.2.3 }
+        with:
+          version: v4.2.3
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_version: 1.12.4
           tofu_wrapper: false
-      - run: npm run verify:deployment
-  merge-build:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: '26.5.0', cache: npm }
-      - run: npm install --global npm@12.0.1
-      - run: npm ci
-      - run: npm run build
+      - run: npm run validate:deployment

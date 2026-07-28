@@ -312,7 +312,7 @@ requireText(
 for (const [source, text, message] of [
   [
     ciWorkflow,
-    'macos-host:\n    runs-on: macos-26',
+    'macos:\n    runs-on: macos-26',
     'macOS host verification must run on the Swift 6.3 macOS 26 runner'
   ],
   [
@@ -605,7 +605,7 @@ for (const [source, text, message] of [
   ],
   [
     ciWorkflow,
-    'npm run verify:platform:windows',
+    'npm run validate:windows-build',
     'Windows CI must compile the native tray controller'
   ],
   [
@@ -739,7 +739,7 @@ for (const forbidden of ['pkgbuild', 'productsign', 'APPLE_INSTALLER_ID']) {
   if (`${macPackage}\n${releaseWorkflow}`.includes(forbidden))
     failures.push(`macOS DMG packaging must not retain PKG-only dependency ${forbidden}`);
 }
-if (!ciWorkflow.includes('vrrelay-macos-dmg'))
+if (!ciWorkflow.includes('name: macos-dmg'))
   failures.push('normal CI must publish a verified development DMG artifact');
 if (/electron/i.test(windowsPackage))
   failures.push('Windows packaging must not download or bundle Electron');

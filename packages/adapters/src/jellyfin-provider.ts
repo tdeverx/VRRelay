@@ -97,6 +97,10 @@ function isPlayableCatalogItem(item: JellyfinItem): boolean {
   return true;
 }
 
+function isSearchResult(item: JellyfinItem): boolean {
+  return !item.IsPlaceHolder && item.LocationType !== 'Virtual';
+}
+
 interface JellyfinItemsResult {
   Items?: JellyfinItem[];
   TotalRecordCount?: number;
@@ -333,7 +337,7 @@ export class JellyfinProvider implements MediaProvider {
     const items = itemIds
       .map((itemId) => byId.get(itemId))
       .filter((item): item is JellyfinItem => item !== undefined)
-      .filter(isPlayableCatalogItem)
+      .filter(isSearchResult)
       .map((item) => this.#mapItem(connection.id, item));
     return { items, total: hints.TotalRecordCount ?? items.length };
   }

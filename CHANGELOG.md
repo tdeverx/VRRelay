@@ -11,6 +11,10 @@ semantic versioning after the first public release.
   packaging and release metadata, removing the dependency on manually configured repository
   variables. Windows releases now produce an unsigned installer when signing credentials are
   absent, while partial signing configuration still fails closed.
+- Simplified pull-request validation into direct, single-purpose core, browser, Windows, macOS,
+  container, deployment, cluster, and security jobs. Removed duplicate macOS core validation,
+  duplicate container and cluster runs, pull-request SBOM generation, post-merge CI duplication,
+  and arbitrary job timeouts.
 - Fixed personal Jellyfin catalogue searches by using Jellyfin's dedicated search-hints endpoint,
   preserving its relevance order while hydrating complete media records, and continuing to exclude
   movies and shows without playable sources.

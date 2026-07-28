@@ -149,6 +149,20 @@ const jellyfin = createServer(async (request, response) => {
     send(200, { Items: [jellyfinItems[3]], TotalRecordCount: 1 });
     return;
   }
+  if (request.method === 'GET' && url.pathname === '/Search/Hints') {
+    const search = url.searchParams.get('SearchTerm')?.toLocaleLowerCase() ?? '';
+    const kinds = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
+    const matches = jellyfinItems.filter(
+      (item) =>
+        item.Name.toLocaleLowerCase().includes(search) &&
+        (kinds.length === 0 || kinds.includes(item.Type))
+    );
+    send(200, {
+      SearchHints: matches.map((item) => ({ ItemId: item.Id })),
+      TotalRecordCount: matches.length
+    });
+    return;
+  }
   if (request.method === 'GET' && /^\/Items\/[^/]+\/Images\/Primary$/.test(url.pathname)) {
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -168,9 +182,11 @@ const jellyfin = createServer(async (request, response) => {
     const kinds = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
     const start = Number(url.searchParams.get('StartIndex') ?? 0);
     const limit = Number(url.searchParams.get('Limit') ?? 50);
+    const ids = new Set((url.searchParams.get('Ids') ?? '').split(',').filter(Boolean));
     let items = jellyfinItems.filter((item) =>
       parentId ? item.ParentId === parentId : recursive || item.ParentId === undefined
     );
+    if (ids.size > 0) items = jellyfinItems.filter((item) => ids.has(item.Id));
     if (search) items = items.filter((item) => item.Name.toLocaleLowerCase().includes(search));
     if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.Type));
     send(200, { Items: items.slice(start, start + limit), TotalRecordCount: items.length });

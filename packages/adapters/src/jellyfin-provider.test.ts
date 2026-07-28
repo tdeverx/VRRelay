@@ -164,7 +164,7 @@ describe('Jellyfin request transport', () => {
     expect(requests[0]?.url.searchParams.get('IsPlaceHolder')).toBe('false');
   });
 
-  it('omits catalog entries that have no playable media files', async () => {
+  it('preserves search relevance and rejects only explicit virtual or placeholder items', async () => {
     const requests: JellyfinConnectorRequest[] = [];
     const provider = new JellyfinProvider('0.1.0', {
       resolveTarget: (rawUrl) =>
@@ -238,7 +238,12 @@ describe('Jellyfin request transport', () => {
       CatalogQuerySchema.parse({ search: 'media', kinds: ['Movie', 'Series'] })
     );
 
-    expect(result.items.map((item) => item.id)).toEqual(['series-ready', 'movie-ready']);
+    expect(result.items.map((item) => item.id)).toEqual([
+      'series-ready',
+      'movie-empty',
+      'movie-ready',
+      'series-empty'
+    ]);
     expect(requests.map((request) => request.url.pathname)).toEqual([
       '/Search/Hints',
       '/Users/user-1/Items'

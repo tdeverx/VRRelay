@@ -33,16 +33,15 @@ const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'ut
 const rootLock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
 
 for (const required of [
-  'verify:core',
-  'verify:browser',
-  'verify:container',
-  'verify:distributed',
-  'verify:deployment',
-  'verify:platform:macos',
-  'verify:platform:windows'
+  'ci',
+  'test:browser',
+  'test:cluster',
+  'validate:deployment',
+  'validate:macos-package',
+  'validate:windows-build'
 ]) {
   if (!rootPackage.scripts?.[required])
-    failures.push(`package.json is missing the ${required} verification lane`);
+    failures.push(`package.json is missing the ${required} task`);
 }
 
 if (rootPackage.devDependencies?.['typescript-compat'] !== 'npm:@typescript/typescript6@6.0.2')
@@ -274,8 +273,8 @@ const integrationWorkflow = await readFile(
 );
 const securityWorkflow = await readFile(resolve(root, '.github/workflows/security.yml'), 'utf8');
 for (const [name, workflow] of [
-  ['CI', ciWorkflow],
-  ['distributed acceptance', integrationWorkflow],
+  ['pull request validation', ciWorkflow],
+  ['cluster acceptance', integrationWorkflow],
   ['security', securityWorkflow]
 ]) {
   if (!workflow.includes('pull_request:') || !workflow.includes('merge_group:'))
@@ -286,14 +285,12 @@ for (const [name, workflow] of [
 for (const required of [
   'docker/setup-qemu-action@',
   'platforms: linux/amd64,linux/arm64',
-  'script/install-pinned-ffmpeg-windows.ps1',
   '/Applications/Xcode_26.6.app',
-  'npm run verify:core',
-  'npm run verify:browser',
-  'npm run verify:container',
-  'npm run verify:deployment',
-  'npm run verify:platform:macos',
-  'npm run verify:platform:windows'
+  'npm run ci',
+  'npm run test:browser',
+  'npm run validate:deployment',
+  'npm run validate:macos-package',
+  'npm run validate:windows-build'
 ]) {
   if (!ciWorkflow.includes(required))
     failures.push(`CI multi-architecture build is missing ${required}`);
@@ -305,8 +302,8 @@ for (const [name, workflow] of [
   if (!workflow.includes('script/install-pinned-ffmpeg-linux.sh'))
     failures.push(`${name} workflow does not install the pinned Linux FFmpeg runtime`);
 }
-if (!integrationWorkflow.includes('npm run verify:distributed'))
-  failures.push('distributed acceptance workflow must invoke the named verification lane');
+if (!integrationWorkflow.includes('npm run test:cluster'))
+  failures.push('cluster acceptance workflow must run the complete cluster test');
 if (/^\s+linux\/arm64:\s*$/m.test(ciWorkflow))
   failures.push(
     'CI treats linux/arm64 as an invalid build-action input instead of a platform value'
@@ -350,7 +347,7 @@ for (const forbidden of [
   'inputs:',
   'npm run ci',
   'npm run test:browser',
-  'npm run test:integration',
+  'npm run test:cluster',
   'npm run test:local-cluster'
 ]) {
   if (releaseWorkflow.includes(forbidden))
