@@ -17,10 +17,13 @@ if ($BuildNumber -notmatch '^[1-9][0-9]*$') { throw 'VRRELAY_BUILD_NUMBER must b
 $BuildId = if ($env:VRRELAY_BUILD_ID) { $env:VRRELAY_BUILD_ID } else { "$Version-b$BuildNumber" }
 if ($BuildId -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw 'VRRELAY_BUILD_ID must be a filesystem-safe release identity' }
 $ReleasePackaging = $env:VRRELAY_RELEASE_PACKAGING -eq '1'
+$SigningCertificateConfigured = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
+$SigningPasswordConfigured = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
+if ($SigningCertificateConfigured -ne $SigningPasswordConfigured) {
+  throw 'Windows signing is only partially configured; provide both signing values or neither'
+}
 if ($ReleasePackaging) {
   if (-not $env:VRRELAY_BUILD_ID) { throw 'VRRELAY_BUILD_ID is required for release packaging' }
-  if (-not $env:WINDOWS_CERTIFICATE) { throw 'WINDOWS_CERTIFICATE is required for release packaging' }
-  if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw 'WINDOWS_CERTIFICATE_PASSWORD is required for release packaging' }
   if (-not $env:VRRELAY_FFMPEG_SOURCE_BUNDLE) { throw 'VRRELAY_FFMPEG_SOURCE_BUNDLE is required for release packaging' }
   if (-not (Test-Path $env:VRRELAY_FFMPEG_SOURCE_BUNDLE)) { throw "FFmpeg source bundle not found: $env:VRRELAY_FFMPEG_SOURCE_BUNDLE" }
   node "$Root\script\windows-source-bundle.mjs" --verify $env:VRRELAY_FFMPEG_SOURCE_BUNDLE
@@ -92,7 +95,7 @@ Set-Content "$Stage\VRRelay.xml" $ServiceConfig
 $Certificate = $null
 try {
   $SignTool = $null
-  if ($env:WINDOWS_CERTIFICATE) {
+  if ($SigningCertificateConfigured) {
     $Certificate = "$Stage\signing.pfx"
     [IO.File]::WriteAllBytes($Certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
     $SignTool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source

@@ -6,6 +6,14 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed post-merge releases by generating the complete corresponding-source archive for the shared
+  FFmpeg 8.1.2 pin inside GitHub Actions and reusing the verified workflow artifact for Windows
+  packaging and release metadata, removing the dependency on manually configured repository
+  variables. Windows releases now produce an unsigned installer when signing credentials are
+  absent, while partial signing configuration still fails closed.
+- Fixed personal Jellyfin catalogue searches by using Jellyfin's dedicated search-hints endpoint,
+  preserving its relevance order while hydrating complete media records, and continuing to exclude
+  movies and shows without playable sources.
 - Simplified media profiles into mutable records with no revision or per-profile encoder state.
   Profiles can now be created from a clean slate and edited, duplicated, or deleted from their
   overflow menu. The app-wide video encoder backend selects the implementation for each profile

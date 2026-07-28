@@ -102,6 +102,15 @@ interface JellyfinItemsResult {
   TotalRecordCount?: number;
 }
 
+interface JellyfinSearchHint {
+  ItemId?: string;
+}
+
+interface JellyfinSearchHintsResult {
+  SearchHints?: JellyfinSearchHint[];
+  TotalRecordCount?: number;
+}
+
 export interface JellyfinProviderOptions {
   resolveTarget?: (rawUrl: string) => Promise<PinnedProviderTarget>;
   requestConnector?: JellyfinRequestConnector;
@@ -220,6 +229,8 @@ export class JellyfinProvider implements MediaProvider {
     query: CatalogQuery,
     signal?: AbortSignal
   ): Promise<{ items: MediaItem[]; total: number }> {
+    if (query.search) return this.#search(connection, secret, query, signal);
+
     const params = new URLSearchParams({
       Recursive: query.parentId ? 'false' : 'true',
       Fields: 'Overview,MediaSources,MediaStreams,PrimaryImageAspectRatio',
@@ -229,11 +240,10 @@ export class JellyfinProvider implements MediaProvider {
       IsPlaceHolder: 'false',
       StartIndex: String(query.offset ?? 0),
       Limit: String(query.limit ?? 50),
-      SortBy: query.search ? 'SortName' : 'DateCreated,SortName',
+      SortBy: 'DateCreated,SortName',
       SortOrder: 'Descending'
     });
     if (query.parentId) params.set('ParentId', query.parentId);
-    if (query.search) params.set('searchTerm', query.search);
     if ((query.kinds?.length ?? 0) > 0) params.set('IncludeItemTypes', query.kinds.join(','));
     let path = connection.userId ? `/Users/${connection.userId}/Items` : '/Items';
     if (query.section === 'continue_watching' && connection.userId) {
@@ -261,6 +271,71 @@ export class JellyfinProvider implements MediaProvider {
         .map((item) => this.#mapItem(connection.id, item)),
       total: result.TotalRecordCount ?? 0
     };
+  }
+
+  async #search(
+    connection: ProviderConnection,
+    secret: string,
+    query: CatalogQuery,
+    signal?: AbortSignal
+  ): Promise<{ items: MediaItem[]; total: number }> {
+    const hintParams = new URLSearchParams({
+      SearchTerm: query.search!,
+      IncludeMedia: 'true',
+      IncludePeople: 'false',
+      IncludeGenres: 'false',
+      IncludeStudios: 'false',
+      IncludeArtists: 'false',
+      StartIndex: String(query.offset ?? 0),
+      Limit: String(query.limit ?? 50)
+    });
+    if (connection.userId) hintParams.set('UserId', connection.userId);
+    if ((query.kinds?.length ?? 0) > 0) hintParams.set('IncludeItemTypes', query.kinds.join(','));
+
+    const hints = await this.#request<JellyfinSearchHintsResult>(
+      connection.baseUrl,
+      `/Search/Hints?${hintParams}`,
+      {
+        token: secret,
+        signal,
+        allowPublicHttp: providerAllowsPublicHttp(connection)
+      }
+    );
+    const itemIds = [
+      ...new Set(
+        (hints.SearchHints ?? [])
+          .map((hint) => hint.ItemId)
+          .filter((itemId): itemId is string => Boolean(itemId))
+      )
+    ];
+    if (itemIds.length === 0) return { items: [], total: hints.TotalRecordCount ?? 0 };
+
+    const itemParams = new URLSearchParams({
+      Ids: itemIds.join(','),
+      Fields: 'Overview,MediaSources,MediaStreams,PrimaryImageAspectRatio',
+      EnableImages: 'true',
+      ExcludeLocationTypes: 'Virtual',
+      IsMissing: 'false',
+      IsPlaceHolder: 'false',
+      EnableTotalRecordCount: 'false'
+    });
+    const path = connection.userId ? `/Users/${connection.userId}/Items` : '/Items';
+    const result = await this.#request<JellyfinItemsResult>(
+      connection.baseUrl,
+      `${path}?${itemParams}`,
+      {
+        token: secret,
+        signal,
+        allowPublicHttp: providerAllowsPublicHttp(connection)
+      }
+    );
+    const byId = new Map((result.Items ?? []).map((item) => [item.Id, item]));
+    const items = itemIds
+      .map((itemId) => byId.get(itemId))
+      .filter((item): item is JellyfinItem => item !== undefined)
+      .filter(isPlayableCatalogItem)
+      .map((item) => this.#mapItem(connection.id, item));
+    return { items, total: hints.TotalRecordCount ?? items.length };
   }
 
   async item(

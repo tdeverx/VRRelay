@@ -98,21 +98,23 @@ licenses, rebuild instructions, source inputs, and per-file `SHA256SUMS` in the
 build-numbered macOS FFmpeg source archive.
 
 Windows and both OCI architectures use the checksum-pinned BtbN GPL build
-recorded in the runtime manifest. Generate its complete corresponding-source
-archive on a machine with Docker, Git, Node, `tar`, `xz`, and sufficient
-temporary disk space:
+recorded in the runtime manifest. The release workflow generates their complete
+corresponding-source archive once from that checked-in recipe, verifies its
+embedded manifest, and passes the same workflow artifact to Windows packaging
+and release metadata. This keeps source publication tied to the exact FFmpeg
+revision used by every production build and does not require separately
+configured repository variables.
+
+To generate and audit the same archive locally, use a machine with Docker, Git,
+Node, `tar`, `xz`, and sufficient temporary disk space:
 
 ```sh
 deploy/windows/build-corresponding-source.sh /absolute/output/ffmpeg-btbn-corresponding-source.tar.xz
 ```
 
-Audit the archive, then set
-`VRRELAY_FFMPEG_SOURCE_BUNDLE_URL` and
-`VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256` to its immutable location and digest.
-The workflow downloads it independently in the Windows and metadata jobs,
-verifies the outer checksum and embedded recipe, and attaches the exact source
-used by that build. Missing source, checksum drift, or recipe drift blocks
-publication.
+The workflow verifies the embedded recipe independently in the Windows and
+metadata jobs and attaches the exact source used by that build. Missing source
+or recipe drift blocks publication.
 
 All production platforms must resolve to the same FFmpeg source revision.
 Platform-specific compiler flags, hardware integrations, packaging, and

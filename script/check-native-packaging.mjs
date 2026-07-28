@@ -317,7 +317,7 @@ for (const [source, text, message] of [
   ],
   [
     releaseWorkflow,
-    'include: [{ os: macos-26, artifact: macos }',
+    '- os: macos-26\n            artifact: macos',
     'macOS release packaging must run on the Swift 6.3 macOS 26 runner'
   ],
   [
@@ -506,13 +506,13 @@ for (const [source, text, message] of [
   ],
   [
     windowsPackage,
-    'WINDOWS_CERTIFICATE is required for release packaging',
-    'Windows release packaging must require a signing certificate'
+    'Windows signing is only partially configured; provide both signing values or neither',
+    'Windows packaging must reject partial signing configuration'
   ],
   [
     windowsPackage,
-    'WINDOWS_CERTIFICATE_PASSWORD is required for release packaging',
-    'Windows release packaging must require the signing certificate password'
+    '$SigningCertificateConfigured -ne $SigningPasswordConfigured',
+    'Windows packaging must allow either complete signing configuration or an unsigned installer'
   ],
   [
     windowsPackage,
@@ -645,13 +645,13 @@ for (const [source, text, message] of [
   ],
   [
     releaseWorkflow,
-    'VRRELAY_FFMPEG_SOURCE_BUNDLE_URL',
-    'release workflow must download the hosted FFmpeg corresponding-source bundle'
+    'deploy/windows/build-corresponding-source.sh',
+    'release workflow must generate the pinned FFmpeg corresponding-source bundle'
   ],
   [
     releaseWorkflow,
-    'VRRELAY_FFMPEG_SOURCE_BUNDLE_SHA256',
-    'release workflow must verify the FFmpeg corresponding-source bundle checksum'
+    'name: ffmpeg-corresponding-source',
+    'release workflow must pass one FFmpeg corresponding-source artifact to every consumer'
   ],
   [
     releaseWorkflow,
@@ -718,8 +718,8 @@ if (
   failures.push('release workflow advances OCI latest before the complete release is published');
 if (/^\s+tags:/m.test(releaseWorkflow))
   failures.push('release workflow must not retain staging or per-build OCI tags');
-if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 3)
-  failures.push('release workflow must replace all three transient handoff artifacts on job retry');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
+  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
 if (
   rollingReleasePublisher.indexOf('await client.updateTag(context.sha)') >
   rollingReleasePublisher.indexOf('await client.updateRelease(')

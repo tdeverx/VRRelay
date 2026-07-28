@@ -215,18 +215,18 @@ for (const path of ['deploy/docker/docker-compose.cluster.yml', 'deploy/integrat
 
 const releaseWorkflow = await readFile(resolve(root, '.github/workflows/release.yml'), 'utf8');
 for (const required of [
-  'push: { branches: [main] }',
+  'branches:\n      - main',
   'workflow_dispatch:',
   'script/publish-rolling-release.mjs next-build-number',
   'aquasecurity/trivy-action@',
-  'needs: [gate, security]'
+  'VRRELAY_BUILD_ID: ${{ needs.gate.outputs.build_id }}'
 ]) {
   if (!releaseWorkflow.includes(required)) failures.push(`release workflow is missing ${required}`);
 }
-if (!releaseWorkflow.includes('permissions: { contents: read }'))
+if (!releaseWorkflow.includes('permissions:\n  contents: read'))
   failures.push('release workflow does not default jobs to read-only repository access');
-if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 3)
-  failures.push('release workflow must replace all three transient handoff artifacts on job retry');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
+  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
 
 const securityPolicy = await readFile(resolve(root, 'SECURITY.md'), 'utf8');
 for (const required of [
@@ -315,12 +315,12 @@ const macosPackageScript = await readFile(resolve(root, 'deploy/macos/package.sh
 if (!macosPackageScript.includes('script/verify-macos-dmg.sh'))
   failures.push('macOS packaging does not verify the completed disk image payload');
 for (const required of [
-  'push: { branches: [main] }',
+  'branches:\n      - main',
   'workflow_dispatch:',
   'queue: max',
   'script/publish-rolling-release.mjs next-build-number',
   'script/publish-rolling-release.mjs identity',
-  'build-args: VRRELAY_VERSION=',
+  'VRRELAY_VERSION=${{ needs.gate.outputs.version }}',
   'push-by-digest=true',
   'docker buildx imagetools create',
   'Verify anonymous OCI access for a public repository',
@@ -328,16 +328,17 @@ for (const required of [
   'docker buildx imagetools inspect',
   'io.vrrelay.build.id=${{ needs.gate.outputs.build_id }}',
   'provenance: true',
-  'VRRELAY_FFMPEG_SOURCE_BUNDLE_URL',
+  'deploy/windows/build-corresponding-source.sh',
+  'name: ffmpeg-corresponding-source',
   'FFmpeg-BtbN-source.tar.xz',
-  'script/windows-source-bundle.mjs --verify',
-  "pattern: 'vrrelay-*'",
+  'script/windows-source-bundle.mjs',
+  'pattern: vrrelay-*',
   'merge-multiple: true',
   'actions/attest@',
   'script/publish-rolling-release.mjs prepare',
   'script/publish-rolling-release.mjs publish',
   'node script/pin-release-chart.mjs',
-  'needs: [gate, oci]',
+  'VRRELAY_OCI_DIGEST: ${{ needs.oci.outputs.digest }}',
   'docs/releasing.md',
   'VRRELAY_BUILD_ID',
   'VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}'
