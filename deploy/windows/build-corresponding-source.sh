@@ -41,7 +41,7 @@ git -C "$WORK/FFmpeg-Builds" checkout --quiet --detach "$BTBN_COMMIT"
 # Upstream's downloader captures the complete dependency source set referenced
 # by this pinned recipe. It intentionally downloads more than the GPL variant
 # needs rather than risking omission of a statically linked component.
-(cd "$WORK/FFmpeg-Builds" && ./download.sh)
+(cd "$WORK/FFmpeg-Builds" && GITHUB_REPOSITORY=btbn/ffmpeg-builds ./download.sh)
 
 git clone --quiet --filter=blob:none https://github.com/FFmpeg/FFmpeg.git "$WORK/FFmpeg"
 git -C "$WORK/FFmpeg" checkout --quiet --detach "$FFMPEG_COMMIT"
