@@ -365,6 +365,14 @@ export const RuntimeConfigurationSchema = z
       .default('auto'),
     vodProducerMaxConcurrent: z.number().int().min(1).max(32).default(2),
     vodProducerMaxPerProvider: z.number().int().min(1).max(32).default(2),
+    liveMaxChannelsTotal: z.number().int().min(1).max(1_000).default(32),
+    liveMaxChannelsPerOwner: z.number().int().min(1).max(100).default(4),
+    liveNormalizerMaxConcurrent: z.number().int().min(1).max(32).default(2),
+    liveNormalizerMaxPerOwner: z.number().int().min(1).max(32).default(1),
+    agentLogRetentionRows: z.number().int().min(100).max(50_000).default(1_000),
+    agentLogQueryLimit: z.number().int().min(1).max(1_000).default(200),
+    jobLogRetentionRows: z.number().int().min(100).max(50_000).default(1_000),
+    jobLogQueryLimit: z.number().int().min(1).max(1_000).default(200),
     nodeName: z.string().trim().min(1).max(100),
     nodeRegion: z.string().trim().min(1).max(100)
   })
@@ -374,6 +382,12 @@ export const RuntimeConfigurationSchema = z
         code: 'custom',
         path: ['vodProducerBufferHighWatermarkMs'],
         message: 'VOD producer high watermark must be greater than the low watermark'
+      });
+    if (value.liveNormalizerMaxPerOwner > value.liveNormalizerMaxConcurrent)
+      context.addIssue({
+        code: 'custom',
+        path: ['liveNormalizerMaxPerOwner'],
+        message: 'Per-owner live normalizer capacity cannot exceed global capacity'
       });
   });
 export type RuntimeConfiguration = z.infer<typeof RuntimeConfigurationSchema>;

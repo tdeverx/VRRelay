@@ -41,11 +41,19 @@ describe('runtime configuration', () => {
       await persistRuntimeConfiguration(config, {
         ...configuration,
         logLevel: 'debug',
-        maxWorkers: 6
+        maxWorkers: 6,
+        liveMaxChannelsTotal: 48,
+        liveNormalizerMaxConcurrent: 4,
+        agentLogRetentionRows: 2_500,
+        jobLogQueryLimit: 400
       });
       expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
         logLevel: 'debug',
-        maxWorkers: 6
+        maxWorkers: 6,
+        liveMaxChannelsTotal: 48,
+        liveNormalizerMaxConcurrent: 4,
+        agentLogRetentionRows: 2_500,
+        jobLogQueryLimit: 400
       });
       if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
       await expect(

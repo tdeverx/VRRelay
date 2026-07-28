@@ -33,6 +33,14 @@ describe('relay configuration', () => {
       videoEncoder: current.videoEncoder,
       vodProducerMaxConcurrent: current.vodProducerMaxConcurrent,
       vodProducerMaxPerProvider: current.vodProducerMaxPerProvider,
+      liveMaxChannelsTotal: current.liveMaxChannelsTotal,
+      liveMaxChannelsPerOwner: current.liveMaxChannelsPerOwner,
+      liveNormalizerMaxConcurrent: current.liveNormalizerMaxConcurrent,
+      liveNormalizerMaxPerOwner: current.liveNormalizerMaxPerOwner,
+      agentLogRetentionRows: current.agentLogRetentionRows,
+      agentLogQueryLimit: current.agentLogQueryLimit,
+      jobLogRetentionRows: current.jobLogRetentionRows,
+      jobLogQueryLimit: current.jobLogQueryLimit,
       nodeName: current.nodeName,
       nodeRegion: current.nodeRegion
     };
@@ -72,6 +80,14 @@ describe('relay configuration', () => {
         videoEncoder: 'software',
         vodProducerMaxConcurrent: 2,
         vodProducerMaxPerProvider: 2,
+        liveMaxChannelsTotal: 48,
+        liveMaxChannelsPerOwner: 6,
+        liveNormalizerMaxConcurrent: 4,
+        liveNormalizerMaxPerOwner: 2,
+        agentLogRetentionRows: 2_500,
+        agentLogQueryLimit: 300,
+        jobLogRetentionRows: 3_000,
+        jobLogQueryLimit: 400,
         nodeName: 'Configured node',
         nodeRegion: 'studio'
       })
@@ -82,15 +98,26 @@ describe('relay configuration', () => {
         adminUrl: 'http://127.0.0.1:9000',
         maxWorkers: 4,
         vodProducerMaxCatchupRate: 1.5,
+        liveMaxChannelsTotal: 48,
+        liveNormalizerMaxPerOwner: 2,
+        agentLogRetentionRows: 2_500,
+        jobLogQueryLimit: 400,
         nodeName: 'Configured node'
       });
       expect(
         loadConfig({
           VRRELAY_RUNTIME_CONFIG: path,
           VRRELAY_LISTEN_ADDR: '127.0.0.1:9200',
-          VRRELAY_MAX_WORKERS: '2'
+          VRRELAY_MAX_WORKERS: '2',
+          VRRELAY_LIVE_MAX_CHANNELS_TOTAL: '24',
+          VRRELAY_JOB_LOG_QUERY_LIMIT: '100'
         })
-      ).toMatchObject({ listenAddr: '127.0.0.1:9200', maxWorkers: 2 });
+      ).toMatchObject({
+        listenAddr: '127.0.0.1:9200',
+        maxWorkers: 2,
+        liveMaxChannelsTotal: 24,
+        jobLogQueryLimit: 100
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

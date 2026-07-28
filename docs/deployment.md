@@ -85,6 +85,9 @@ Administrators can stage the app-wide video encoder backend through Runtime sett
 explicit backend applies after restart and must support the selected codec on every source worker. The maximum
 catch-up rate per stream is separately configurable from 1× to 2× with
 `VRRELAY_VOD_PRODUCER_MAX_CATCHUP_RATE`; each stream automatically scales from 1× to that cap.
+Native installs that provide `VRRELAY_RUNTIME_CONFIG` can also stage live channel/normalizer
+admission limits and node/job diagnostic-log retention from Runtime settings. Explicit environment
+variables keep precedence for orchestrated deployments.
 
 The standalone host ports remain 8099 (HTTP), 1935 (RTMP), 8889 (WHIP), 8189/UDP (WebRTC), and 8890/UDP (SRT). The administration port binds to `127.0.0.1` by default so an unconfigured instance cannot be claimed from the LAN. Set `VRRELAY_HTTP_HOST=0.0.0.0` only after configuring canonical HTTPS administration and playback URLs plus a random first-run setup token. Override the port numbers with `VRRELAY_HTTP_PORT`, `VRRELAY_RTMP_PORT`, `VRRELAY_WHIP_PORT`, `VRRELAY_WEBRTC_UDP_PORT`, and `VRRELAY_SRT_PORT` when running parallel stacks or avoiding a host-port conflict.
 

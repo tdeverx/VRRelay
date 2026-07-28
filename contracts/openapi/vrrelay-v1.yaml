@@ -2161,6 +2161,14 @@ components:
           videoEncoder,
           vodProducerMaxConcurrent,
           vodProducerMaxPerProvider,
+          liveMaxChannelsTotal,
+          liveMaxChannelsPerOwner,
+          liveNormalizerMaxConcurrent,
+          liveNormalizerMaxPerOwner,
+          agentLogRetentionRows,
+          agentLogQueryLimit,
+          jobLogRetentionRows,
+          jobLogQueryLimit,
           nodeName,
           nodeRegion
         ]
@@ -2192,6 +2200,14 @@ components:
           }
         vodProducerMaxConcurrent: { type: integer, minimum: 1, maximum: 32, default: 2 }
         vodProducerMaxPerProvider: { type: integer, minimum: 1, maximum: 32, default: 2 }
+        liveMaxChannelsTotal: { type: integer, minimum: 1, maximum: 1000, default: 32 }
+        liveMaxChannelsPerOwner: { type: integer, minimum: 1, maximum: 100, default: 4 }
+        liveNormalizerMaxConcurrent: { type: integer, minimum: 1, maximum: 32, default: 2 }
+        liveNormalizerMaxPerOwner: { type: integer, minimum: 1, maximum: 32, default: 1 }
+        agentLogRetentionRows: { type: integer, minimum: 100, maximum: 50000, default: 1000 }
+        agentLogQueryLimit: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+        jobLogRetentionRows: { type: integer, minimum: 100, maximum: 50000, default: 1000 }
+        jobLogQueryLimit: { type: integer, minimum: 1, maximum: 1000, default: 200 }
         nodeName: { type: string, minLength: 1, maxLength: 100 }
         nodeRegion: { type: string, minLength: 1, maxLength: 100 }
     RuntimeConfigurationState:

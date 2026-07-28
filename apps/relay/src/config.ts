@@ -421,10 +421,14 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_VOD_PRODUCER_MAX_CONCURRENT ?? runtime?.vodProducerMaxConcurrent,
     vodProducerMaxPerProvider:
       environment.VRRELAY_VOD_PRODUCER_MAX_PER_PROVIDER ?? runtime?.vodProducerMaxPerProvider,
-    liveMaxChannelsTotal: environment.VRRELAY_LIVE_MAX_CHANNELS_TOTAL,
-    liveMaxChannelsPerOwner: environment.VRRELAY_LIVE_MAX_CHANNELS_PER_OWNER,
-    liveNormalizerMaxConcurrent: environment.VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT,
-    liveNormalizerMaxPerOwner: environment.VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER,
+    liveMaxChannelsTotal:
+      environment.VRRELAY_LIVE_MAX_CHANNELS_TOTAL ?? runtime?.liveMaxChannelsTotal,
+    liveMaxChannelsPerOwner:
+      environment.VRRELAY_LIVE_MAX_CHANNELS_PER_OWNER ?? runtime?.liveMaxChannelsPerOwner,
+    liveNormalizerMaxConcurrent:
+      environment.VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT ?? runtime?.liveNormalizerMaxConcurrent,
+    liveNormalizerMaxPerOwner:
+      environment.VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER ?? runtime?.liveNormalizerMaxPerOwner,
     masterKey: optionalEnvironmentValue(environment.VRRELAY_MASTER_KEY),
     secretBackend: environment.VRRELAY_SECRET_BACKEND,
     mediaMtxHlsUrl: environment.VRRELAY_MEDIAMTX_HLS_URL,
@@ -464,10 +468,11 @@ export function loadConfig(environment = process.env): RelayConfig {
       environment.VRRELAY_CONTROLLER_ENROLLMENT_URL
     ),
     nodeJoinToken: optionalEnvironmentValue(environment.VRRELAY_NODE_JOIN_TOKEN),
-    agentLogRetentionRows: environment.VRRELAY_AGENT_LOG_RETENTION_ROWS,
-    agentLogQueryLimit: environment.VRRELAY_AGENT_LOG_QUERY_LIMIT,
-    jobLogRetentionRows: environment.VRRELAY_JOB_LOG_RETENTION_ROWS,
-    jobLogQueryLimit: environment.VRRELAY_JOB_LOG_QUERY_LIMIT,
+    agentLogRetentionRows:
+      environment.VRRELAY_AGENT_LOG_RETENTION_ROWS ?? runtime?.agentLogRetentionRows,
+    agentLogQueryLimit: environment.VRRELAY_AGENT_LOG_QUERY_LIMIT ?? runtime?.agentLogQueryLimit,
+    jobLogRetentionRows: environment.VRRELAY_JOB_LOG_RETENTION_ROWS ?? runtime?.jobLogRetentionRows,
+    jobLogQueryLimit: environment.VRRELAY_JOB_LOG_QUERY_LIMIT ?? runtime?.jobLogQueryLimit,
     repositoryDriver: environment.VRRELAY_REPOSITORY_DRIVER,
     postgresUrl: optionalEnvironmentValue(environment.VRRELAY_POSTGRES_URL),
     pgDumpPath: optionalEnvironmentValue(environment.VRRELAY_PG_DUMP),

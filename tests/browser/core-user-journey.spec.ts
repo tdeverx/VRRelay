@@ -31,6 +31,44 @@ test.beforeEach(async ({ context, page }) => {
   );
 });
 
+test('presents complete, purpose-grouped runtime and profile settings', async ({ page }) => {
+  await page.goto('/dashboard/settings/runtime');
+  await expect(page.getByText('Runtime settings', { exact: true })).toBeVisible();
+  for (const section of [
+    'Node identity',
+    'Capacity and logging',
+    'Cache policy',
+    'VOD production',
+    'Live streaming capacity',
+    'Diagnostic history'
+  ])
+    await expect(page.getByRole('heading', { name: section })).toBeVisible();
+  await expect(page.getByLabel('Maximum live channels')).toHaveValue('32');
+  await expect(page.getByLabel('Maximum normalizers per owner')).toHaveValue('1');
+  await expect(page.getByLabel('Node log rows retained')).toHaveValue('1000');
+  await expect(page.getByLabel('Job log rows per request')).toHaveValue('200');
+
+  await page.goto('/dashboard/settings/profiles/new');
+  await expect(page.getByLabel('Description')).toBeVisible();
+  await page.getByRole('button', { name: '2. Video', exact: true }).click();
+  for (const label of [
+    'Codec profile',
+    'Codec level',
+    'Encoder quality',
+    'Encoder preset',
+    'Encoder tune'
+  ])
+    await expect(page.getByLabel(label)).toBeVisible();
+  await page.getByRole('button', { name: '4. Processing & review', exact: true }).click();
+  await expect(page.getByLabel('Workers per session')).toHaveValue('2');
+
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
 test('configures Jellyfin and creates a relay from a personal search result', async ({ page }) => {
   await page.goto('/dashboard/settings/connections');
 
