@@ -33,19 +33,22 @@ export function ffmpegDecodeAccelerationArgs(mode: Profile['video']['decodeMode'
 
 /** @internal */
 export function ffmpegVodReadPacingArgs(
-  readRate: number,
-  initialReadBurstSeconds: number
+  maximumCatchupRate: number,
+  initialReadBurstSeconds: number,
+  supportsCatchup = true
 ): string[] {
-  if (!Number.isFinite(readRate) || readRate < 1 || readRate > 2)
-    throw new Error('The VOD producer read rate must be between 1x and 2x');
+  if (!Number.isFinite(maximumCatchupRate) || maximumCatchupRate < 1 || maximumCatchupRate > 2)
+    throw new Error('The VOD producer catch-up rate must be between 1x and 2x');
   if (!Number.isFinite(initialReadBurstSeconds) || initialReadBurstSeconds <= 0)
     throw new Error('The VOD producer initial read burst must be a finite positive duration');
-  return [
+  const args = [
     '-readrate',
-    readRate.toFixed(3),
+    '1.000',
     '-readrate_initial_burst',
     initialReadBurstSeconds.toFixed(3)
   ];
+  if (supportsCatchup) args.push('-readrate_catchup', maximumCatchupRate.toFixed(3));
+  return args;
 }
 
 /** @internal */
@@ -101,6 +104,7 @@ export class FFmpegTranscoder implements Transcoder {
   readonly #maxLogBytes: number;
   readonly #videoEncoder: VideoEncoderPreference;
   #availableEncoders = new Set<string>();
+  #supportsReadrateCatchup: boolean | undefined;
 
   constructor(options: FFmpegOptions) {
     this.#ffmpegPath = options.ffmpegPath;
@@ -109,13 +113,15 @@ export class FFmpegTranscoder implements Transcoder {
   }
 
   async discover(signal?: AbortSignal): Promise<MediaCapabilities> {
-    const [version, encoders, muxers, filters, pixelFormats] = await Promise.all([
+    const [version, encoders, muxers, filters, pixelFormats, fullHelp] = await Promise.all([
       this.#capture(['-version'], signal),
       this.#capture(['-hide_banner', '-encoders'], signal),
       this.#capture(['-hide_banner', '-muxers'], signal),
       this.#capture(['-hide_banner', '-filters'], signal),
-      this.#capture(['-hide_banner', '-pix_fmts'], signal)
+      this.#capture(['-hide_banner', '-pix_fmts'], signal),
+      this.#capture(['-hide_banner', '-h', 'full'], signal)
     ]);
+    this.#supportsReadrateCatchup = fullHelp.includes('-readrate_catchup');
     const availableEncoders = new Set(
       encoders
         .split('\n')
@@ -223,6 +229,10 @@ export class FFmpegTranscoder implements Transcoder {
     signal?: AbortSignal
   ): Promise<void> {
     await mkdir(directory, { recursive: true });
+    const supportsReadrateCatchup =
+      this.#supportsReadrateCatchup ??
+      (await this.#capture(['-hide_banner', '-h', 'full'], signal)).includes('-readrate_catchup');
+    this.#supportsReadrateCatchup = supportsReadrateCatchup;
     const fmp4 = request.profile.delivery.segmentType === 'fmp4';
     const extension = fmp4 ? 'm4s' : 'ts';
     const playlist = join(directory, 'producer.m3u8');
@@ -236,10 +246,14 @@ export class FFmpegTranscoder implements Transcoder {
       ...(request.source.positionedAtSeconds === request.startSeconds
         ? []
         : ['-ss', request.startSeconds.toFixed(3)]),
-      // Cap FFmpeg at this stream's configured maximum. The application pacer
-      // continuously scales the opaque source proxy between normal speed and
-      // that maximum without restarting the upstream connection.
-      ...ffmpegVodReadPacingArgs(request.readRate, request.initialReadBurstSeconds),
+      // FFmpeg owns the media clock: build initial headroom without delay,
+      // settle at playback speed, and use the configured ceiling only to
+      // recover time lost while the input or output was blocked.
+      ...ffmpegVodReadPacingArgs(
+        request.readRate,
+        request.initialReadBurstSeconds,
+        supportsReadrateCatchup
+      ),
       ...this.#inputArgs(request.source, request.profile),
       '-t',
       request.duration.toFixed(3),

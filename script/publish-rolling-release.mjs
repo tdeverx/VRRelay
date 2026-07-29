@@ -105,7 +105,6 @@ function requiredAssetNames(buildId) {
     `VRRelay-${buildId}-macOS-arm64.dmg`,
     `VRRelay-${buildId}-macOS-FFmpeg-source.tar.xz`,
     `VRRelay-${buildId}-Windows-x64.exe`,
-    `VRRelay-${buildId}-release-metadata.tar.xz`,
     `VRRelay-${buildId}-FFmpeg-BtbN-source.tar.xz`
   ];
 }

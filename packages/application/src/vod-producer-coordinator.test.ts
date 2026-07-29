@@ -342,11 +342,16 @@ describe('durable VOD producer coordination', () => {
     expect(covered(3, 30)).toBe(false);
   });
 
-  it('fails a code-zero producer that ends before the expected terminal segment', async () => {
+  it('backfills one missing partial terminal segment after a clean producer exit', async () => {
     let finishProducer!: () => void;
     const finish = new Promise<void>((resolve) => {
       finishProducer = resolve;
     });
+    const terminalRequests: Array<{
+      segmentIndex: number;
+      startSeconds: number;
+      duration: number;
+    }> = [];
     const { coordinator, coordination, repository, starts } = await fixture(
       60_000,
       new MemoryCoordinationStore(),
@@ -360,7 +365,14 @@ describe('durable VOD producer coordination', () => {
           filters: [],
           pixelFormats: []
         }),
-        generateSegment: async () => undefined,
+        generateSegment: async (request, destination) => {
+          terminalRequests.push({
+            segmentIndex: request.segmentIndex,
+            startSeconds: request.startSeconds,
+            duration: request.duration
+          });
+          await writeFile(destination, 'backfilled-terminal-segment');
+        },
         produceVod: async (request, directory, onSegment) => {
           observedStarts.push(request.startSegmentIndex);
           await mkdir(directory, { recursive: true });
@@ -385,18 +397,67 @@ describe('durable VOD producer coordination', () => {
     const terminalSegment = coordinator.ensure(selectedSession, profile, 2);
     await new Promise((resolve) => setTimeout(resolve, 20));
     finishProducer();
-    await expect(terminalSegment).rejects.toThrow(
-      'Persistent VOD producer failed before publishing the requested segment'
-    );
+    await expect(terminalSegment).resolves.toBeUndefined();
 
     expect(starts).toEqual([1]);
+    expect(terminalRequests).toEqual([{ segmentIndex: 2, startSeconds: 4, duration: 1 }]);
     expect(await coordinator.get(selectedSession.id)).toMatchObject({
       generation: 1,
-      state: 'failed',
+      state: 'complete',
+      bufferState: 'buffered',
       startSegmentIndex: 1,
-      lastPublishedSegmentIndex: 1,
-      errorMessage: expect.stringContaining('terminal segment 2')
+      lastPublishedSegmentIndex: 2
     });
+    await coordinator.close();
+    repository.close();
+  });
+
+  it('still fails a clean producer that is missing more than the final partial segment', async () => {
+    const generateSegment = vi.fn(async () => undefined);
+    const { coordinator, coordination, repository } = await fixture(
+      60_000,
+      new MemoryCoordinationStore(),
+      {},
+      undefined,
+      () => ({
+        discover: async () => ({
+          ffmpegVersion: 'fixture',
+          encoders: [],
+          muxers: [],
+          filters: [],
+          pixelFormats: []
+        }),
+        generateSegment,
+        produceVod: async (request, directory, onSegment) => {
+          await mkdir(directory, { recursive: true });
+          const path = join(directory, `segment-${request.startSegmentIndex}.ts`);
+          await writeFile(path, 'truncated-segment');
+          await onSegment({ index: request.startSegmentIndex, path });
+        }
+      })
+    );
+    const selectedSession = { ...session('session-multi-segment-truncation'), durationSeconds: 7 };
+    await persistSession(repository, selectedSession);
+    await coordination.recordSegmentDemand({
+      sessionId: selectedSession.id,
+      viewerHash: 'viewer-truncated',
+      segmentIndex: 1,
+      observedAtMs: Date.now(),
+      windowMs: 30_000
+    });
+
+    await coordinator.ensure(selectedSession, profile, 1);
+    await vi.waitFor(
+      async () => {
+        expect(await coordinator.get(selectedSession.id)).toMatchObject({
+          state: 'failed',
+          lastPublishedSegmentIndex: 1,
+          errorMessage: expect.stringContaining('terminal segment 3')
+        });
+      },
+      { timeout: 2_000, interval: 10 }
+    );
+    expect(generateSegment).not.toHaveBeenCalled();
     await coordinator.close();
     repository.close();
   });

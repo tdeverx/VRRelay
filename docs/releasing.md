@@ -22,8 +22,8 @@ source commit. Build 100 could therefore produce an identity such as:
 0.1.0-b000100-r987654321-a1-g0123456789ab
 ```
 
-Native installers, corresponding-source archives, release metadata, checksums,
-and the build manifest include that identity in their filenames. Re-running
+Native installers, corresponding-source archives, checksums, and the build
+manifest include that identity in their filenames. Re-running
 only failed jobs preserves the successful gate's authoritative attempt so old
 and rebuilt jobs cannot produce mixed filenames. The workflow replaces only
 its transient same-run handoff artifacts during such a retry; published release
@@ -70,8 +70,8 @@ the historical archive.
 3. Review dependency and container scans, update
    `deploy/runtime-manifest.json`, and confirm every runtime checksum from its
    authoritative upstream source.
-4. Confirm the Apple and Windows signing secrets and the FFmpeg
-   corresponding-source variables are present.
+4. Confirm the Apple and Windows signing secrets are present and audit the
+   checked-in FFmpeg corresponding-source recipe.
 
 `workflow_dispatch` remains available only to recover or retry a failed
 publication from `main`; it never accepts a manually selected build number.
@@ -101,7 +101,7 @@ Windows and both OCI architectures use the checksum-pinned BtbN GPL build
 recorded in the runtime manifest. The release workflow generates their complete
 corresponding-source archive once from that checked-in recipe, verifies its
 embedded manifest, and passes the same workflow artifact to Windows packaging
-and release metadata. This keeps source publication tied to the exact FFmpeg
+and publication. This keeps source publication tied to the exact FFmpeg
 revision used by every production build and does not require separately
 configured repository variables.
 
@@ -112,8 +112,8 @@ Node, `tar`, `xz`, and sufficient temporary disk space:
 deploy/windows/build-corresponding-source.sh /absolute/output/ffmpeg-btbn-corresponding-source.tar.xz
 ```
 
-The workflow verifies the embedded recipe independently in the Windows and
-metadata jobs and attaches the exact source used by that build. Missing source
+The workflow verifies the embedded recipe independently in the source and
+Windows jobs and attaches the exact source used by that build. Missing source
 or recipe drift blocks publication.
 
 All production platforms must resolve to the same FFmpeg source revision.
@@ -121,19 +121,19 @@ Platform-specific compiler flags, hardware integrations, packaging, and
 signing remain allowed; the dependency version, source commit, and product
 build identity may not drift between macOS, Linux, and Windows.
 
-The release metadata archive also contains the project license, third-party
-notices, runtime manifest, repository SBOM, versioned Helm chart, and their
-checksums. The packaged release chart pins the relay repository and immutable
-OCI digest from the same manifest; the source chart's mutable fallback is
-`latest`, never a semantic-version tag that the workflow does not publish. The
-moving `latest` tag means GitHub's automatic source ZIP and tarball describe
-only the current commit. Historical manifests record the full commit SHA; use
-that immutable SHA when retrieving historical VRRelay source.
+The GitHub release intentionally does not duplicate the repository SBOM,
+notices, runtime manifest, or Helm chart in a metadata archive. The checked-in
+chart's mutable fallback is `latest`, never a semantic-version tag that the
+workflow does not publish, and each completed build manifest records the full
+source commit and immutable OCI digest. Use that commit to retrieve historical
+project source and render the matching chart. GitHub's automatic source ZIP
+and tarball follow the moving `latest` tag and therefore describe only the
+current commit.
 
 ## Provenance, limits, and rollback
 
 The OCI workflow first pushes the multi-platform image by digest without a
-per-build tag. After the native assets, source metadata, attestations, rolling
+per-build tag. After the native assets, corresponding source, attestations, rolling
 release, and manifest have all published successfully, the final job advances
 only `ghcr.io/<owner>/<repository>:latest` to that digest. A failed promotion is
 safe to retry: the completed build remains available by digest and `latest`
@@ -142,7 +142,7 @@ digest, and the build emits registry provenance and an SBOM. Historical
 containers are selected by
 `ghcr.io/<owner>/<repository>@sha256:<digest>`; package cleanup must retain
 those untagged digests. Public repositories also receive GitHub build
-provenance attestations for the completed native and metadata assets:
+provenance attestations for the completed native and corresponding-source assets:
 
 ```sh
 gh attestation verify VRRelay-<build-id>-macOS-arm64.dmg --repo <owner>/<repository>
@@ -167,6 +167,11 @@ GitHub permits at most 1,000 assets on one release. The publisher fails closed
 at 900 rather than deleting history. Establish immutable external archive
 storage and update this policy before reaching that threshold; do not prune old
 assets silently.
+
+Each completed build adds six release assets: two native installers, two
+FFmpeg corresponding-source archives, one checksum file, and one manifest.
+Linux remains distributed as the multi-platform OCI image rather than a native
+desktop installer.
 
 To roll back, select a completed historical manifest, verify its checksums and
 attestation, reinstall its build-numbered native artifact, and deploy the OCI

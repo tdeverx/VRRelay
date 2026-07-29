@@ -133,14 +133,15 @@ Activated object-store/backend configuration records per-node application state 
 The HLS manifest is finite on its first response: it declares `PLAYLIST-TYPE:VOD`, every planned segment duration, and `ENDLIST`. This gives a compatible player a finite duration and seekable segment timeline. The player maintains its own current position; that value is not supplied by the manifest. VRRelay does not synchronize viewers. A VRChat world distributes the URL and playback time and seeks clients as needed.
 
 No permanent alternate rendition is generated. The producer starts at the demanded segment and
-uses a low/high watermark buffer. Every second, each producer measures its own headroom and smoothly
-sets its source pace between 1× and its configured per-stream maximum (2× by default): it uses the
-maximum at or below the low watermark, 1× at or above the high watermark, and linearly scales between
-them. FFmpeg retains that configured maximum as a structured source-read safety ceiling, while the
-application pacer adjusts the existing source connection without restarting it. Headroom is measured
-from the completed segment timeline against a one-speed playback clock anchored when the producer
-generation starts. Segment requests remain demand and seek evidence; an eager player downloading
-every available segment does not collapse measured playback headroom to zero. It stops after 60
+uses a low/high watermark buffer. FFmpeg owns the source media clock: it may read the configured
+high-watermark duration immediately to establish initial headroom, then reads at 1×. Current bundled
+FFmpeg builds use the configured per-stream maximum (2× by default) only to recover time lost while
+input or output was blocked; older compatible FFmpeg builds retain 1× pacing without the optional
+catch-up control. The application measures headroom from the completed segment timeline against a
+one-speed playback clock anchored when the producer generation starts, but does not duty-cycle the
+opaque source connection. Segment requests remain demand and seek evidence; sequential requests and
+an eager player downloading every available segment do not move the anchor or collapse measured
+playback headroom to zero. It stops after 60
 seconds without demand by default (configurable from 15–600 seconds). A segment response still
 waiting on that producer temporarily suppresses only the idle stop for its generation; disconnect,
 completion, or the bounded request deadline releases the waiter, while explicit stop, deletion,

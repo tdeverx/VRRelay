@@ -295,8 +295,9 @@ pending.
   and viewer window and displays short-lived per-node transcode, network, playback-window, and
   cache diagnostics. Viewer identity remains installation-HMACed and expires after 30 seconds.
 - HLS VOD producers maintain configurable low/high buffer watermarks. Each stream re-evaluates its
-  own headroom every second and continuously scales from 1× to its configured maximum (2× by
-  default), rather than stopping and restarting its provider connection at a threshold.
+  own headroom while FFmpeg establishes the initial high-watermark lead, settles at 1×, and uses
+  the configured maximum (2× by default) only to recover time lost to a stall. The opaque provider
+  connection is not chunk-throttled or restarted at a watermark threshold.
 - Session runtime diagnostics now expose upstream source connection/request activity. Producer
   admission is bounded globally and per provider. Distant seek replacement remains immediate once
   the dominant-viewer rule selects a new window, avoiding artificial scrubbing delays.

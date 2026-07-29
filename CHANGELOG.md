@@ -6,6 +6,19 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed ordinary sequential HLS requests being reported as forward seeks, which could move the
+  playback anchor and make buffer headroom appear not to catch up. Distant requests still require
+  confirmation from a following request in the same playback window.
+- Replaced chunk-timed source-proxy throttling with FFmpeg's media-clock pacing: producers build the
+  configured initial headroom, then read at playback speed and use the configured ceiling only to
+  recover from stalls when the bundled FFmpeg supports native catch-up. Clean VOD completion now
+  backfills a missing final partial segment and reports the completed producer as buffered.
+- Mapped missing Jellyfin artwork to a provider-neutral 404 instead of surfacing it as an internal
+  server error.
+- Reduced each rolling GitHub release build to the Windows and macOS installers, their two required
+  FFmpeg corresponding-source archives, one checksum file, and one manifest. Removed the redundant
+  release-metadata/Helm archive; OCI and the source-controlled Helm chart remain the Linux and
+  deployment path.
 - Audited the complete administrator settings path. Runtime settings now expose the existing live
   channel, live normalizer, node-log, and job-log limits through the same validated, non-secret
   staged configuration used by other capacity controls. The settings navigation and dense Runtime
@@ -16,7 +29,7 @@ semantic versioning after the first public release.
   verified profile also preserves its evidence-backed state.
 - Fixed post-merge releases by generating the complete corresponding-source archive for the shared
   FFmpeg 8.1.2 pin inside GitHub Actions and reusing the verified workflow artifact for Windows
-  packaging and release metadata, removing the dependency on manually configured repository
+  packaging and publication, removing the dependency on manually configured repository
   variables. Windows releases now produce an unsigned installer when signing credentials are
   absent, while partial signing configuration still fails closed.
 - Simplified pull-request validation into direct, single-purpose core, browser, Windows, macOS,
@@ -39,8 +52,8 @@ semantic versioning after the first public release.
   stale-run cancellation. Removed unused local build/sync wrappers and the duplicate cluster
   Compose smoke; Windows PR validation now compiles the native tray and production application
   without rerunning the Linux unit, lint, audit, and repository gates.
-- Replaced VOD catch-up aggressiveness with a per-stream maximum rate. Producers now evaluate their
-  own buffer headroom every second and continuously scale between 1× and that maximum without
+- Replaced VOD catch-up aggressiveness with a per-stream maximum rate. Producers evaluate their own
+  buffer headroom while FFmpeg uses that maximum as a bounded stall-recovery rate without
   restarting the shared upstream connection.
 
 - Made pull requests and merge-queue entries the exhaustive deterministic validation gate.
@@ -50,8 +63,8 @@ semantic versioning after the first public release.
   same-commit retries and append-only historical assets.
 - Added staged administrator controls for the app-wide video encoder backend and per-stream VOD
   catch-up maximum. `auto` selects the best discovered backend for each codec, while an explicit
-  choice is validated on startup; each stream automatically scales between 1× and the configured maximum
-  alongside the existing 30–60 second buffer thresholds.
+  choice is validated on startup; each stream builds the configured initial headroom and then
+  remains media-clocked at 1×, with the configured maximum reserved for recovery.
 - Fixed HLS prefetches and interleaved viewer requests being mistaken for user
   seeks. A distant segment request now requires a following request in the
   same playback window before it can move the VOD producer's pacing anchor.
@@ -68,15 +81,15 @@ semantic versioning after the first public release.
   container path remains compatible.
 - Replaced per-version GitHub release tags with one GitHub Actions-managed lightweight `latest`
   tag and release. Product build 100 seeds the explicit build-number sequence; every workflow
-  attempt appends collision-safe, build-numbered native packages, source archives, metadata,
+  attempt appends collision-safe, build-numbered native packages, source archives,
   checksums, and a manifest without overwriting history. OCI builds are staged by immutable digest
   and roll only `latest` after the completed release publishes, while manifests retain historical
   image digests. Selective failed-job retries reuse the gate-authored identity, and release
   publication moves the lightweight ref only after all assets exist so workflow-changing builds
   remain retryable. Interrupted zero-byte GitHub upload placeholders are removed only when their
-  exact build asset is retried; completed assets stay append-only. Release metadata now packages a
-  Helm chart pinned to the same immutable OCI digest, while the source chart falls back to the only
-  mutable tag the workflow publishes: `latest`. Public releases also require an anonymous pull of
+  exact build asset is retried; completed assets stay append-only. The source Helm chart falls back
+  to the only mutable tag the workflow publishes, `latest`, while completed manifests retain the
+  immutable digest. Public releases also require an anonymous pull of
   the staged digest so a default-private GHCR package cannot produce an unusable chart. Release
   checks fail closed on asset collisions, release immutability, source-revision drift, signing
   failures, or the archive safety threshold.
@@ -101,7 +114,7 @@ semantic versioning after the first public release.
   browser session.
 - Fixed transient HLS freezes after seeks and producer buffer cycles by aligning FFmpeg's initial
   source-read allowance with the configured high watermark. This keeps FFmpeg's 2× safety ceiling
-  from competing with the application watermark pacer. A generation-local progress watchdog now
+  reserved for stall recovery after the initial burst. A generation-local progress watchdog now
   restarts only a catching-up producer that has already published, has a pending segment response,
   and then stops publishing for a bounded grace period; buffered and unobserved producers are left
   alone.

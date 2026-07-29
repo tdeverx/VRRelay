@@ -224,8 +224,8 @@ for (const required of [
 }
 if (!releaseWorkflow.includes('permissions:\n  contents: read'))
   failures.push('release workflow does not default jobs to read-only repository access');
-if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
-  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 3)
+  failures.push('release workflow must replace all three transient handoff artifacts on job retry');
 
 const securityPolicy = await readFile(resolve(root, 'SECURITY.md'), 'utf8');
 for (const required of [
@@ -326,7 +326,7 @@ for (const required of [
   'io.vrrelay.build.id=${{ needs.gate.outputs.build_id }}',
   'provenance: true',
   'deploy/windows/build-corresponding-source.sh',
-  'name: ffmpeg-corresponding-source',
+  'name: vrrelay-ffmpeg-source',
   'FFmpeg-BtbN-source.tar.xz',
   'script/windows-source-bundle.mjs',
   'pattern: vrrelay-*',
@@ -334,14 +334,12 @@ for (const required of [
   'actions/attest@',
   'script/publish-rolling-release.mjs prepare',
   'script/publish-rolling-release.mjs publish',
-  'node script/pin-release-chart.mjs',
   'VRRELAY_OCI_DIGEST: ${{ needs.oci.outputs.digest }}',
-  'docs/releasing.md',
   'VRRELAY_BUILD_ID',
   'VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}'
 ]) {
   if (!releaseWorkflow.includes(required))
-    failures.push(`release workflow does not enforce release metadata ${required}`);
+    failures.push(`release workflow does not enforce release requirement ${required}`);
 }
 for (const forbidden of [
   'inputs:',

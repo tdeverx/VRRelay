@@ -55,6 +55,22 @@ describe('playback request diagnostics', () => {
     expect(changes).not.toContain('seeked-backward');
   });
 
+  it('keeps sustained sequential HLS playback classified as ordinary advancement', () => {
+    const tracker = new PlaybackRequestTracker();
+    const changes = Array.from({ length: 100 }, (_, segmentIndex) =>
+      tracker.observe('session-a', 'private-affinity', segmentIndex, 1_000 + segmentIndex * 4_000)
+    );
+
+    expect(changes[0]).toMatchObject({ change: 'started' });
+    expect(changes.slice(1).every((observation) => observation.change === 'advanced')).toBe(true);
+    expect(
+      changes.some(
+        (observation) =>
+          observation.change === 'seeked-forward' || observation.change === 'seeked-backward'
+      )
+    ).toBe(false);
+  });
+
   it('logs state changes at info and ordinary segment traffic at debug', () => {
     const logger = { info: vi.fn(), debug: vi.fn() };
     const tracker = new PlaybackRequestTracker();

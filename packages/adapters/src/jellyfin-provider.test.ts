@@ -292,6 +292,32 @@ describe('Jellyfin request transport', () => {
     });
   });
 
+  it('maps missing artwork to a provider-neutral not-found error', async () => {
+    const now = new Date().toISOString();
+    const provider = new JellyfinProvider('0.1.0', {
+      resolveTarget: (rawUrl) =>
+        resolveProviderRequestTarget(rawUrl, async () => [{ address: '203.0.113.10', family: 4 }]),
+      requestConnector: async () => response(404)
+    });
+    const connection = {
+      id: 'provider',
+      type: 'jellyfin',
+      name: 'Jellyfin',
+      baseUrl: 'https://jellyfin.invalid',
+      authMode: 'delegated',
+      secretRef: 'provider:delegated',
+      capabilities: ['artwork'],
+      healthy: true,
+      allowPublicHttp: false,
+      createdAt: now,
+      updatedAt: now
+    } satisfies ProviderConnection;
+
+    await expect(
+      provider.artwork(connection, 'sensitive-user-token', 'missing-artwork')
+    ).rejects.toMatchObject({ code: 'not_found', statusCode: 404 });
+  });
+
   it('rejects private HTTP that resolves publicly on the pinned connection lookup', async () => {
     const addresses = ['192.168.10.20', '203.0.113.10'];
     const lookup = async () => [{ address: addresses.shift()!, family: 4 }];
