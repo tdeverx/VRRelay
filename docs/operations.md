@@ -104,12 +104,14 @@ Agent log messages are structured, redacted by the controller, stored per node,
 and emitted as `node.log` messages on the authenticated operations event stream.
 `VRRELAY_AGENT_LOG_RETENTION_ROWS` controls how many recent log rows are kept per
 node, and `VRRELAY_AGENT_LOG_QUERY_LIMIT` caps `/api/v1/nodes/{nodeId}/logs`
-responses even when callers request a larger `limit`.
+responses even when callers request a larger `limit`. Both controls are also available in Runtime
+settings when the service manager enables writable staged configuration.
 
 Segment job messages use the same redaction rules, are stored per job, and are
 emitted as `job.log` messages on the authenticated operations event stream.
 `VRRELAY_JOB_LOG_RETENTION_ROWS` controls how many recent rows are kept per job,
-and `VRRELAY_JOB_LOG_QUERY_LIMIT` caps `/api/v1/jobs/{jobId}/logs` responses.
+and `VRRELAY_JOB_LOG_QUERY_LIMIT` caps `/api/v1/jobs/{jobId}/logs` responses. Both controls are
+also available in Runtime settings when staged configuration is writable.
 
 ## Live admission and supervision
 
@@ -117,6 +119,8 @@ Live channel creation is bounded by `VRRELAY_LIVE_MAX_CHANNELS_TOTAL` (default 3
 channels also share `VRRELAY_LIVE_NORMALIZER_MAX_CONCURRENT` (default 2), while
 `VRRELAY_LIVE_NORMALIZER_MAX_PER_OWNER` (default 1) prevents one owner from
 consuming every normalizer slot.
+These four non-secret admission controls are also available in Runtime settings when staged
+configuration is writable.
 Normalizer children drain stderr, apply bounded exponential restart backoff,
 and receive TERM followed by KILL during forced shutdown. Raise these limits
 only after measuring CPU, memory, ingest bandwidth, and restart behavior on the

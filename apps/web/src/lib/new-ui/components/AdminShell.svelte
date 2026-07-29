@@ -63,20 +63,8 @@
         ]
       },
       {
-        label: 'Admin',
+        label: 'Settings',
         items: [
-          {
-            label: 'People & access',
-            href: `${routePrefix}/settings/people`,
-            icon: UsersRound,
-            visible: isOwner
-          },
-          {
-            label: 'Retention',
-            href: `${routePrefix}/settings/retention`,
-            icon: Clock3,
-            visible: isAdmin
-          },
           {
             label: 'Connections',
             href: `${routePrefix}/settings/connections`,
@@ -87,6 +75,18 @@
             label: 'Profiles',
             href: `${routePrefix}/settings/profiles`,
             icon: SlidersHorizontal,
+            visible: isAdmin
+          },
+          {
+            label: 'People & access',
+            href: `${routePrefix}/settings/people`,
+            icon: UsersRound,
+            visible: isOwner
+          },
+          {
+            label: 'Retention',
+            href: `${routePrefix}/settings/retention`,
+            icon: Clock3,
             visible: isAdmin
           },
           {
@@ -106,7 +106,12 @@
             href: `${routePrefix}/settings/api`,
             icon: KeyRound,
             visible: isAdmin
-          },
+          }
+        ]
+      },
+      {
+        label: 'System',
+        items: [
           {
             label: 'Nodes',
             href: `${routePrefix}/system/nodes`,

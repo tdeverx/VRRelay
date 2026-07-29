@@ -5,8 +5,8 @@ import type { ProfileInput } from '@vrrelay/contracts';
 import type { MediaCapabilities, Repository } from './index.js';
 import { ConflictError, NotFoundError } from './errors.js';
 
-function assertImplementedProfile(input: ProfileInput): void {
-  if (input.state === 'verified')
+function assertImplementedProfile(input: ProfileInput, allowVerified = false): void {
+  if (input.state === 'verified' && !allowVerified)
     throw new ConflictError(
       'Profiles must start as experimental until compatibility evidence promotes them'
     );
@@ -166,9 +166,9 @@ export class ProfileService {
   }
 
   async update(profileId: string, input: ProfileInput): Promise<Profile> {
-    await this.#validate(input);
     const current = await this.repository.getProfile(profileId);
     if (!current) throw new NotFoundError('Profile was not found');
+    await this.#validate(input, current.state === 'verified');
     const profile: Profile = {
       ...input,
       profileId,
@@ -201,8 +201,8 @@ export class ProfileService {
     await this.repository.deleteProfile(profileId);
   }
 
-  async #validate(input: ProfileInput): Promise<void> {
-    assertImplementedProfile(input);
+  async #validate(input: ProfileInput, allowVerified = false): Promise<void> {
+    assertImplementedProfile(input, allowVerified);
     const capabilities = this.#capabilities;
     if (!capabilities)
       throw new ConflictError('Media capabilities must be discovered before profiles can be saved');

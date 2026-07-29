@@ -463,6 +463,36 @@ async function ownedVodSessionFixture(
 }
 
 describe('VOD relay service', () => {
+  it('preserves evidence-backed verified state while editing an existing profile', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vrrelay-profile-verified-edit-'));
+    dirs.push(dir);
+    const repo = trackRepository(new SqliteRepository(join(dir, 'db.sqlite')));
+    await repo.migrate();
+    const service = new ProfileService(repo, mediaCapabilities);
+    const now = new Date().toISOString();
+    const verified: Profile = {
+      ...profileInput({ state: 'verified', description: 'Verified baseline' }),
+      profileId: 'verified-profile',
+      createdAt: now,
+      updatedAt: now
+    };
+    await repo.putProfile(verified);
+
+    await expect(
+      service.update(verified.profileId, {
+        ...profileInput({ state: 'verified' }),
+        description: 'Updated without losing verification'
+      })
+    ).resolves.toMatchObject({
+      profileId: verified.profileId,
+      state: 'verified',
+      description: 'Updated without losing verification'
+    });
+    await expect(service.create(profileInput({ state: 'verified' }))).rejects.toThrow(
+      /must start as experimental/
+    );
+  });
+
   it('dispatches Stop to the durable remote producer owner after failover', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vrrelay-session-remote-stop-'));
     dirs.push(dir);

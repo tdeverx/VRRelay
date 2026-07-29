@@ -740,6 +740,14 @@ export type RuntimeConfiguration = {
     videoEncoder: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf';
     vodProducerMaxConcurrent: number;
     vodProducerMaxPerProvider: number;
+    liveMaxChannelsTotal: number;
+    liveMaxChannelsPerOwner: number;
+    liveNormalizerMaxConcurrent: number;
+    liveNormalizerMaxPerOwner: number;
+    agentLogRetentionRows: number;
+    agentLogQueryLimit: number;
+    jobLogRetentionRows: number;
+    jobLogQueryLimit: number;
     nodeName: string;
     nodeRegion: string;
 };

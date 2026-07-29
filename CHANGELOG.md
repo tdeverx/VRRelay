@@ -6,6 +6,14 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Audited the complete administrator settings path. Runtime settings now expose the existing live
+  channel, live normalizer, node-log, and job-log limits through the same validated, non-secret
+  staged configuration used by other capacity controls. The settings navigation and dense Runtime
+  form are grouped by purpose, and the Network setup selector now states that it changes guidance
+  rather than external infrastructure.
+- Fixed profile editing so descriptions, codec profile and level, quality, preset, tune, and
+  per-session worker capacity are editable and no longer silently replaced. Editing an already
+  verified profile also preserves its evidence-backed state.
 - Fixed post-merge releases by generating the complete corresponding-source archive for the shared
   FFmpeg 8.1.2 pin inside GitHub Actions and reusing the verified workflow artifact for Windows
   packaging and release metadata, removing the dependency on manually configured repository

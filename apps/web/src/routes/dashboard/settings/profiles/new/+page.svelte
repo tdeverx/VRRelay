@@ -21,9 +21,13 @@
   let editingId = $state('');
   let duplicateId = $state('');
   let name = $state('New profile');
+  let description = $state('');
+  let profileState = $state<Profile['state']>('experimental');
   let platform = $state<Profile['platform']>('universal');
   let codec = $state<'h264' | 'h265' | 'av1' | 'copy'>('h264');
   let decodeMode = $state<Profile['video']['decodeMode']>('auto');
+  let videoProfile = $state('high');
+  let videoLevel = $state('');
   let pixelFormat = $state('yuv420p');
   let bitrate = $state(8000);
   let maxrate = $state(9000);
@@ -33,6 +37,9 @@
   let frameRate = $state(30);
   let gop = $state(60);
   let bFrames = $state(0);
+  let quality = $state('');
+  let preset = $state('veryfast');
+  let tune = $state('');
   let audioCodec = $state<Profile['audio']['codec']>('aac');
   let audioChannels = $state(2);
   let audioLayout = $state('stereo');
@@ -47,6 +54,7 @@
   let toneMap = $state(false);
   let burnSubtitles = $state(false);
   let passthrough = $state<Profile['processing']['passthrough']>('never');
+  let profileMaxWorkers = $state(2);
   let saving = $state(false);
   let loading = $state(true);
   let loadError = $state('');
@@ -76,9 +84,13 @@
 
   function loadProfile(profile: Profile, duplicate: boolean) {
     name = duplicate ? `${profile.name} copy` : profile.name;
+    description = profile.description ?? '';
+    profileState = duplicate ? 'experimental' : profile.state;
     platform = profile.platform;
     codec = profile.video.codec;
     decodeMode = profile.video.decodeMode;
+    videoProfile = profile.video.profile ?? '';
+    videoLevel = profile.video.level ?? '';
     pixelFormat = profile.video.pixelFormat;
     bitrate = profile.video.bitrateKbps;
     maxrate = profile.video.maxrateKbps;
@@ -88,6 +100,9 @@
     frameRate = profile.video.frameRate;
     gop = profile.video.gop;
     bFrames = profile.video.bFrames;
+    quality = profile.video.quality?.toString() ?? '';
+    preset = profile.video.preset ?? '';
+    tune = profile.video.tune ?? '';
     audioCodec = profile.audio.codec;
     audioChannels = profile.audio.channels;
     audioLayout = profile.audio.layout;
@@ -102,6 +117,7 @@
     toneMap = profile.processing.toneMap;
     burnSubtitles = profile.processing.burnSubtitles;
     passthrough = profile.processing.passthrough;
+    profileMaxWorkers = profile.processing.maxWorkers;
   }
 
   function deliveryContainerOptions(): Array<Profile['delivery']['container']> {
@@ -120,13 +136,14 @@
     try {
       const input = {
         name,
-        description: 'User-created compatibility experiment.',
+        description: description.trim() || undefined,
         platform,
-        state: 'experimental',
+        state: profileState === 'verified' ? 'verified' : 'experimental',
         video: {
           codec,
           decodeMode,
-          profile: codec === 'h264' ? 'high' : undefined,
+          profile: videoProfile.trim() || undefined,
+          level: videoLevel.trim() || undefined,
           pixelFormat,
           bitrateKbps: Number(bitrate),
           maxrateKbps: Number(maxrate),
@@ -136,7 +153,9 @@
           frameRate: Number(frameRate),
           gop: Number(gop),
           bFrames: Number(bFrames),
-          preset: 'veryfast'
+          quality: quality.trim() ? Number(quality) : undefined,
+          preset: preset.trim() || undefined,
+          tune: tune.trim() || undefined
         },
         audio: {
           codec: audioCodec,
@@ -154,7 +173,12 @@
           latencyMode,
           playlistType
         },
-        processing: { toneMap, burnSubtitles, passthrough, maxWorkers: 2 }
+        processing: {
+          toneMap,
+          burnSubtitles,
+          passthrough,
+          maxWorkers: Number(profileMaxWorkers)
+        }
       } satisfies import('@vrrelay/contracts').ProfileInput;
       if (editingId) await api.updateProfile(editingId, input);
       else await api.createProfile(input);
@@ -183,7 +207,7 @@
         >Every setting is validated. VRRelay never accepts raw FFmpeg arguments.</Alert.Description
       ></Alert.Root
     >
-    <nav class="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Profile creation steps">
+    <nav class="grid grid-cols-2 gap-2 xl:grid-cols-4" aria-label="Profile creation steps">
       {#each steps as label, index}
         <Button variant={step === index ? 'default' : 'outline'} onclick={() => (step = index)}>
           {index + 1}. {label}
@@ -203,6 +227,15 @@
                 id="profile-name"
                 bind:value={name}
               /></Field.Field
+            ><Field.Field
+              ><Field.Label for="profile-description">Description</Field.Label><Input
+                id="profile-description"
+                maxlength={500}
+                placeholder="What this profile is intended to support"
+                bind:value={description}
+              /><Field.Description
+                >Shown to administrators when choosing and reviewing profiles.</Field.Description
+              ></Field.Field
             ><Field.Field
               ><Field.Label for="profile-platform">Platform</Field.Label><Select.Root
                 type="single"
@@ -261,6 +294,22 @@
                 bind:value={pixelFormat}
               /></Field.Field
             ><Field.Field
+              ><Field.Label for="video-profile">Codec profile</Field.Label><Input
+                id="video-profile"
+                placeholder="high"
+                bind:value={videoProfile}
+              /><Field.Description
+                >A validated encoder profile name. Leave blank to use the encoder default.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="video-level">Codec level</Field.Label><Input
+                id="video-level"
+                placeholder="4.1"
+                bind:value={videoLevel}
+              /><Field.Description
+                >Leave blank unless the target player requires a specific codec level.</Field.Description
+              ></Field.Field
+            ><Field.Field
               ><Field.Label for="video-width">Width</Field.Label><Input
                 id="video-width"
                 type="number"
@@ -314,7 +363,31 @@
                 id="video-bframes"
                 type="number"
                 min="0"
+                max="16"
                 bind:value={bFrames}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="video-quality">Encoder quality</Field.Label><Input
+                id="video-quality"
+                type="number"
+                min="0"
+                max="63"
+                placeholder="Encoder default"
+                bind:value={quality}
+              /><Field.Description
+                >Optional codec-specific quality value from 0 to 63.</Field.Description
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="video-preset">Encoder preset</Field.Label><Input
+                id="video-preset"
+                placeholder="veryfast"
+                bind:value={preset}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="video-tune">Encoder tune</Field.Label><Input
+                id="video-tune"
+                placeholder="Encoder default"
+                bind:value={tune}
               /></Field.Field
             ></Field.Group
           ></Card.Content
@@ -465,6 +538,16 @@
                   ><Select.Group><Select.Item value="never">Never</Select.Item></Select.Group
                   ></Select.Content
                 ></Select.Root
+              ></Field.Field
+            ><Field.Field
+              ><Field.Label for="profile-max-workers">Workers per session</Field.Label><Input
+                id="profile-max-workers"
+                type="number"
+                min="1"
+                max="32"
+                bind:value={profileMaxWorkers}
+              /><Field.Description
+                >Maximum worker capacity this profile may use for one session.</Field.Description
               ></Field.Field
             ></Field.Group
           ></Card.Content

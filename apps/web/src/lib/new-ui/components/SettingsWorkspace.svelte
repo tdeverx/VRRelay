@@ -771,7 +771,7 @@
           </Alert.Root>
           <Field.Group class="grid md:grid-cols-2">
             <Field.Field class="md:col-span-2">
-              <Field.Label>Access pattern</Field.Label>
+              <Field.Label>Setup guide</Field.Label>
               <Select.Root
                 type="single"
                 value={accessMode}
@@ -795,6 +795,10 @@
                   </Select.Group>
                 </Select.Content>
               </Select.Root>
+              <Field.Description>
+                Chooses the guidance shown below. It does not configure your router, DNS, TLS, or
+                reverse proxy automatically.
+              </Field.Description>
             </Field.Field>
             {#if accessMode === 'nginx-proxy-manager'}
               <Field.Field class="md:col-span-2">
@@ -952,12 +956,19 @@
   {#if !loading && !loadError && initialSection === 'runtime'}
     {#if runtimeDraft}<Card.Root
         ><Card.Header
-          ><Card.Title>Runtime capacity</Card.Title><Card.Description
-            >Changes are validated before being persisted.</Card.Description
+          ><Card.Title>Runtime settings</Card.Title><Card.Description
+            >Tune this node's identity, media capacity, cache, and diagnostic history. Changes are
+            validated before being persisted.</Card.Description
           ></Card.Header
         ><Card.Content
           ><Field.Group class="grid md:grid-cols-2"
-            ><Field.Field
+            ><div class="md:col-span-2">
+              <h3 class="font-medium">Node identity</h3>
+              <p class="text-muted-foreground text-sm">
+                Labels used to identify this node during placement and diagnostics.
+              </p>
+            </div>
+            <Field.Field
               ><Field.Label for="node-name">Node name</Field.Label><Input
                 id="node-name"
                 bind:value={runtimeDraft.nodeName}
@@ -971,7 +982,14 @@
                 disabled={!runtime?.writable}
                 oninput={() => (runtimeValidated = false)}
               /></Field.Field
-            ><Field.Field
+            >
+            <div class="border-t pt-5 md:col-span-2">
+              <h3 class="font-medium">Capacity and logging</h3>
+              <p class="text-muted-foreground text-sm">
+                Bound concurrent work and choose the amount of operational detail recorded.
+              </p>
+            </div>
+            <Field.Field
               ><Field.Label for="max-workers">Maximum workers</Field.Label><Input
                 id="max-workers"
                 type="number"
@@ -1032,7 +1050,14 @@
                 >Detailed mode records every redacted playback request. Normal mode still records
                 client starts, seeks, routing decisions, and configuration changes.</Field.Description
               ></Field.Field
-            ><Field.Field
+            >
+            <div class="border-t pt-5 md:col-span-2">
+              <h3 class="font-medium">Cache policy</h3>
+              <p class="text-muted-foreground text-sm">
+                Bound local media storage and the lifetime of unused cached objects.
+              </p>
+            </div>
+            <Field.Field
               ><Field.Label for="cache-limit">Cache limit (GiB)</Field.Label><Input
                 id="cache-limit"
                 type="number"
@@ -1059,7 +1084,15 @@
                   runtimeValidated = false;
                 }}
               /></Field.Field
-            ><Field.Field
+            >
+            <div class="border-t pt-5 md:col-span-2">
+              <h3 class="font-medium">VOD production</h3>
+              <p class="text-muted-foreground text-sm">
+                Control encoder selection, shared producer lifetime, buffer headroom, and catch-up
+                speed.
+              </p>
+            </div>
+            <Field.Field
               ><Field.Label for="producer-idle-timeout"
                 >VOD producer idle time (seconds)</Field.Label
               ><Input
@@ -1163,6 +1196,104 @@
                 >At or above this headroom, the producer returns to 1×. It must exceed the refill
                 threshold.</Field.Description
               ></Field.Field
+            >
+            <div class="border-t pt-5 md:col-span-2">
+              <h3 class="font-medium">Live streaming capacity</h3>
+              <p class="text-muted-foreground text-sm">
+                Set fair-use limits for channel ownership and live normalizer workers.
+              </p>
+            </div>
+            <Field.Field
+              ><Field.Label for="live-channels-total">Maximum live channels</Field.Label><Input
+                id="live-channels-total"
+                type="number"
+                min="1"
+                max="1000"
+                bind:value={runtimeDraft.liveMaxChannelsTotal}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="live-channels-owner">Maximum channels per owner</Field.Label><Input
+                id="live-channels-owner"
+                type="number"
+                min="1"
+                max="100"
+                bind:value={runtimeDraft.liveMaxChannelsPerOwner}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="live-normalizers-total">Maximum live normalizers</Field.Label
+              ><Input
+                id="live-normalizers-total"
+                type="number"
+                min="1"
+                max="32"
+                bind:value={runtimeDraft.liveNormalizerMaxConcurrent}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="live-normalizers-owner">Maximum normalizers per owner</Field.Label
+              ><Input
+                id="live-normalizers-owner"
+                type="number"
+                min="1"
+                max="32"
+                bind:value={runtimeDraft.liveNormalizerMaxPerOwner}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /><Field.Description
+                >Must not exceed the global live normalizer limit.</Field.Description
+              ></Field.Field
+            >
+            <div class="border-t pt-5 md:col-span-2">
+              <h3 class="font-medium">Diagnostic history</h3>
+              <p class="text-muted-foreground text-sm">
+                Bound retained node and job logs separately from the rows returned per request.
+              </p>
+            </div>
+            <Field.Field
+              ><Field.Label for="agent-log-retention">Node log rows retained</Field.Label><Input
+                id="agent-log-retention"
+                type="number"
+                min="100"
+                max="50000"
+                bind:value={runtimeDraft.agentLogRetentionRows}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="agent-log-query">Node log rows per request</Field.Label><Input
+                id="agent-log-query"
+                type="number"
+                min="1"
+                max="1000"
+                bind:value={runtimeDraft.agentLogQueryLimit}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="job-log-retention">Job log rows retained</Field.Label><Input
+                id="job-log-retention"
+                type="number"
+                min="100"
+                max="50000"
+                bind:value={runtimeDraft.jobLogRetentionRows}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
+            ><Field.Field
+              ><Field.Label for="job-log-query">Job log rows per request</Field.Label><Input
+                id="job-log-query"
+                type="number"
+                min="1"
+                max="1000"
+                bind:value={runtimeDraft.jobLogQueryLimit}
+                disabled={!runtime?.writable}
+                oninput={() => (runtimeValidated = false)}
+              /></Field.Field
             ></Field.Group
           ></Card.Content
         >{#if runtime?.restartRequired}<Card.Footer
