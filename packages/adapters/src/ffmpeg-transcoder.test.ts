@@ -66,10 +66,18 @@ describe('FFmpeg adapter', () => {
     expect(ffmpegDecodeAccelerationArgs('cuda')).toEqual(['-hwaccel', 'cuda']);
   });
 
-  it('aligns FFmpeg initial read pacing with the producer buffer high watermark', () => {
+  it('uses FFmpeg media-clock pacing for initial headroom and bounded recovery', () => {
     expect(ffmpegVodReadPacingArgs(1.5, 60)).toEqual([
       '-readrate',
-      '1.500',
+      '1.000',
+      '-readrate_initial_burst',
+      '60.000',
+      '-readrate_catchup',
+      '1.500'
+    ]);
+    expect(ffmpegVodReadPacingArgs(1.5, 60, false)).toEqual([
+      '-readrate',
+      '1.000',
       '-readrate_initial_burst',
       '60.000'
     ]);

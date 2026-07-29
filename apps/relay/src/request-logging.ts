@@ -95,6 +95,8 @@ export class PlaybackRequestTracker {
       ? undefined
       : segmentIndex === undefined ||
           direction === undefined ||
+          segmentDelta === undefined ||
+          Math.abs(segmentDelta) <= 2 ||
           (idleMs !== undefined && idleMs > CLIENT_RESUME_MS) ||
           candidateConfirmed
         ? undefined

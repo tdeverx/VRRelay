@@ -217,7 +217,7 @@ if (!macFfmpegRecipe) {
     ffmpegSourceInput?.url !== ffmpegSourceArtifact?.url ||
     ffmpegSourceInput?.sha256 !== ffmpegSourceArtifact?.sha256
   )
-    failures.push('macOS and release-metadata FFmpeg source pins must match');
+    failures.push('macOS source-build and shared runtime-manifest FFmpeg pins must match');
 
   for (const [field, required] of [
     ['systemLibraries', ['AudioToolbox', 'CoreText', 'VideoToolbox']],
@@ -650,7 +650,7 @@ for (const [source, text, message] of [
   ],
   [
     releaseWorkflow,
-    'name: ffmpeg-corresponding-source',
+    'name: vrrelay-ffmpeg-source',
     'release workflow must pass one FFmpeg corresponding-source artifact to every consumer'
   ],
   [
@@ -685,11 +685,6 @@ for (const [source, text, message] of [
   ],
   [
     releaseWorkflow,
-    'node script/pin-release-chart.mjs',
-    'release metadata must pin its Helm chart to the authoritative OCI digest'
-  ],
-  [
-    releaseWorkflow,
     'VRRELAY_BUILD_RUN_ATTEMPT: ${{ needs.gate.outputs.run_attempt }}',
     'release jobs must reuse the build identity authored by the successful gate attempt'
   ]
@@ -718,8 +713,10 @@ if (
   failures.push('release workflow advances OCI latest before the complete release is published');
 if (/^\s+tags:/m.test(releaseWorkflow))
   failures.push('release workflow must not retain staging or per-build OCI tags');
-if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 4)
-  failures.push('release workflow must replace all four transient handoff artifacts on job retry');
+if ((releaseWorkflow.match(/overwrite: true/g) ?? []).length !== 3)
+  failures.push('release workflow must replace all three transient handoff artifacts on job retry');
+if (releaseWorkflow.includes('release-metadata'))
+  failures.push('release workflow must not recreate the removed release metadata asset');
 if (
   rollingReleasePublisher.indexOf('await client.updateTag(context.sha)') >
   rollingReleasePublisher.indexOf('await client.updateRelease(')

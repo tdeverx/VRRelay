@@ -673,57 +673,83 @@ export class VodProducerCoordinator {
       this.metrics?.increment('vod_producers_started_total');
       if (!this.transcoder.produceVod)
         throw new CapacityError('The source worker does not support persistent VOD producers');
+      const publishSegment = async (segment: { index: number; path: string }) => {
+        try {
+          if (active.controller.signal.aborted) throw active.controller.signal.reason;
+          const contentKey = this.cache.contentKey(session, profile, segment.index);
+          await this.cache.publishObject(session, profile, segment.index, segment.path, contentKey);
+          active.publishedAny = true;
+          terminalSegmentPublished ||= segment.index >= terminalSegmentIndex;
+          this.#retries.delete(session.id);
+          active.lastPublishedSegmentIndex = segment.index;
+          this.#resetProgressWatch(active, Date.now());
+          await this.#transition(session.id, active.generation, (current) => ({
+            ...current,
+            state: 'running',
+            lastPublishedSegmentIndex: segment.index,
+            bufferState: active.pacing.state,
+            leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(),
+            updatedAt: new Date().toISOString()
+          }));
+          await this.coordination.publish(
+            'segments',
+            JSON.stringify({ contentKey, sessionId: session.id, segmentIndex: segment.index })
+          );
+          this.callbacks.published?.(
+            session.id,
+            segment.index,
+            Math.min(
+              profile.delivery.segmentDuration,
+              Math.max(
+                0,
+                (session.durationSeconds ?? 0) - segment.index * profile.delivery.segmentDuration
+              )
+            ),
+            Date.now()
+          );
+        } finally {
+          await this.cache.removeScratchObject(segment.path);
+        }
+      };
       await this.transcoder.produceVod(
         request,
         directory,
-        async (segment) => {
-          try {
-            if (active.controller.signal.aborted) throw active.controller.signal.reason;
-            const contentKey = this.cache.contentKey(session, profile, segment.index);
-            await this.cache.publishObject(
-              session,
-              profile,
-              segment.index,
-              segment.path,
-              contentKey
-            );
-            active.publishedAny = true;
-            terminalSegmentPublished ||= segment.index >= terminalSegmentIndex;
-            this.#retries.delete(session.id);
-            active.lastPublishedSegmentIndex = segment.index;
-            this.#resetProgressWatch(active, Date.now());
-            await this.#transition(session.id, active.generation, (current) => ({
-              ...current,
-              state: 'running',
-              lastPublishedSegmentIndex: segment.index,
-              bufferState: active.pacing.state,
-              leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(),
-              updatedAt: new Date().toISOString()
-            }));
-            await this.coordination.publish(
-              'segments',
-              JSON.stringify({ contentKey, sessionId: session.id, segmentIndex: segment.index })
-            );
-            this.callbacks.published?.(
-              session.id,
-              segment.index,
-              Math.min(
-                profile.delivery.segmentDuration,
-                Math.max(
-                  0,
-                  (session.durationSeconds ?? 0) - segment.index * profile.delivery.segmentDuration
-                )
-              ),
-              Date.now()
-            );
-          } finally {
-            await this.cache.removeScratchObject(segment.path);
-          }
-        },
+        publishSegment,
         active.controller.signal
       );
       if (active.controller.signal.aborted)
         throw active.controller.signal.reason ?? new Error('Producer was aborted');
+      if (
+        !terminalSegmentPublished &&
+        active.lastPublishedSegmentIndex === terminalSegmentIndex - 1
+      ) {
+        const terminalOffsetSeconds =
+          (terminalSegmentIndex - request.startSegmentIndex) * profile.delivery.segmentDuration;
+        const terminalDuration = Math.min(
+          profile.delivery.segmentDuration,
+          Math.max(0, ffmpegDurationSeconds - terminalOffsetSeconds)
+        );
+        if (terminalDuration > 0) {
+          const extension = profile.delivery.segmentType === 'fmp4' ? 'm4s' : 'ts';
+          const terminalPath = join(directory, `segment-${terminalSegmentIndex}.${extension}`);
+          await this.transcoder.generateSegment(
+            {
+              source: request.source,
+              profile,
+              segmentIndex: terminalSegmentIndex,
+              startSeconds: terminalSegmentIndex * profile.delivery.segmentDuration,
+              duration: terminalDuration,
+              ...(request.audioTrack === undefined ? {} : { audioTrack: request.audioTrack }),
+              ...(request.subtitleTrack === undefined
+                ? {}
+                : { subtitleTrack: request.subtitleTrack })
+            },
+            terminalPath,
+            active.controller.signal
+          );
+          await publishSegment({ index: terminalSegmentIndex, path: terminalPath });
+        }
+      }
       if (!terminalSegmentPublished)
         throw new Error(
           `Persistent VOD producer completed before publishing terminal segment ${terminalSegmentIndex}`
@@ -732,6 +758,7 @@ export class VodProducerCoordinator {
       await this.#transition(session.id, active.generation, (current) => ({
         ...this.#finishAttempt(current, 'complete'),
         state: 'complete',
+        bufferState: 'buffered',
         ownerNodeId: undefined,
         leaseExpiresAt: undefined,
         idleDeadlineAt: undefined,

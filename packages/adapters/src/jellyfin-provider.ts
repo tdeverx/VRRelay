@@ -4,14 +4,15 @@ import { createHash } from 'node:crypto';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { isIP } from 'node:net';
-import type {
-  MediaArtwork,
-  MediaProvider,
-  PlaybackEvent,
-  ProviderCredentials,
-  ProviderIdentity,
-  ProviderTransportPolicy,
-  ResolvedSource
+import {
+  NotFoundError,
+  type MediaArtwork,
+  type MediaProvider,
+  type PlaybackEvent,
+  type ProviderCredentials,
+  type ProviderIdentity,
+  type ProviderTransportPolicy,
+  type ResolvedSource
 } from '@vrrelay/application';
 import type {
   MediaItem,
@@ -388,6 +389,7 @@ export class JellyfinProvider implements MediaProvider {
     }
     if (status < 200 || status >= 300) {
       response.resume();
+      if (status === 404) throw new NotFoundError('Jellyfin artwork was not found');
       throw new Error(`Jellyfin artwork request failed (${status})`);
     }
     const headers = response.headers as Record<string, string | string[] | undefined>;

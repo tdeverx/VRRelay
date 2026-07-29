@@ -38,7 +38,7 @@ import type {
 import { CapacityError, ConflictError, NotFoundError, UnauthorizedError } from './errors.js';
 import { createServiceEvent as event, hashToken, opaqueToken } from './service-helpers.js';
 import { SessionCache } from './session-cache.js';
-import { pacedReadable, type VodProducerSourcePacing } from './vod-source-pacing.js';
+import type { VodProducerSourcePacing } from './vod-source-pacing.js';
 import { SessionJobCoordinator } from './session-jobs.js';
 import { estimateVodProducerBufferMs, VodProducerCoordinator } from './vod-producer-coordinator.js';
 
@@ -251,7 +251,6 @@ export class SessionService {
       provider: MediaProvider;
       expiresAt: number;
       sessionId?: string;
-      pacing?: VodProducerSourcePacing;
       producerSignal?: AbortSignal;
       producerGeneration?: number;
     }
@@ -949,9 +948,6 @@ export class SessionService {
       : await grant.provider.openSource(grant.source, range, effectiveSignal);
     return {
       ...source,
-      ...(grant.pacing
-        ? { stream: pacedReadable(source.stream, grant.pacing, effectiveSignal) }
-        : {}),
       ...(grant.sessionId ? { sessionId: grant.sessionId } : {})
     };
   }
@@ -1271,7 +1267,7 @@ export class SessionService {
     profile: Profile,
     startSegmentIndex: number,
     signal: AbortSignal,
-    pacing: VodProducerSourcePacing,
+    _pacing: VodProducerSourcePacing,
     producerGeneration: number
   ) {
     if (!session.source || !session.durationSeconds)
@@ -1297,7 +1293,7 @@ export class SessionService {
           signal
         );
     return {
-      source: this.#proxySource(source, provider, session.id, pacing, signal, producerGeneration),
+      source: this.#proxySource(source, provider, session.id, signal, producerGeneration),
       profile,
       startSegmentIndex,
       startSeconds,
@@ -1554,7 +1550,6 @@ export class SessionService {
     source: ResolvedSource,
     provider: MediaProvider,
     sessionId?: string,
-    pacing?: VodProducerSourcePacing,
     producerSignal?: AbortSignal,
     producerGeneration?: number
   ): ResolvedSource {
@@ -1567,7 +1562,6 @@ export class SessionService {
       // signal and removed on release/lease loss.
       expiresAt: producerSignal ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000,
       ...(sessionId ? { sessionId } : {}),
-      ...(pacing ? { pacing } : {}),
       ...(producerSignal ? { producerSignal } : {}),
       ...(producerGeneration !== undefined ? { producerGeneration } : {})
     });
