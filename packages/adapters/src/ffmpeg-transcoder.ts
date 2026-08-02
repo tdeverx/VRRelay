@@ -52,6 +52,14 @@ export function ffmpegVodReadPacingArgs(
 }
 
 /** @internal */
+export function ffmpegVideoEncoderCompatibilityArgs(encoder: string): string[] {
+  // VideoToolbox can emit an internal H.264 SEI NAL that FFmpeg cannot safely
+  // extend with A/53 caption data. VRRelay does not expose embedded captions,
+  // so disable only that merge path while retaining hardware encoding.
+  return encoder === 'h264_videotoolbox' ? ['-a53cc', '0'] : [];
+}
+
+/** @internal */
 export async function monitorVodProducerOutput(
   runningProducer: Promise<void>,
   scan: () => Promise<void>,
@@ -424,6 +432,7 @@ export class FFmpegTranscoder implements Transcoder {
       filters.join(','),
       '-c:v',
       encoder,
+      ...ffmpegVideoEncoderCompatibilityArgs(encoder),
       '-b:v',
       `${video.bitrateKbps}k`,
       '-maxrate',

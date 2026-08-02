@@ -8,6 +8,7 @@ import type { Profile } from '@vrrelay/domain';
 import {
   FFmpegTranscoder,
   ffmpegDecodeAccelerationArgs,
+  ffmpegVideoEncoderCompatibilityArgs,
   ffmpegVodReadPacingArgs,
   monitorVodProducerOutput,
   redactFfmpegError
@@ -84,6 +85,12 @@ describe('FFmpeg adapter', () => {
     expect(() => ffmpegVodReadPacingArgs(2, 0)).toThrow(/finite positive duration/);
     expect(() => ffmpegVodReadPacingArgs(2, Number.NaN)).toThrow(/finite positive duration/);
     expect(() => ffmpegVodReadPacingArgs(2.1, 60)).toThrow(/between 1x and 2x/);
+  });
+
+  it('disables only the broken VideoToolbox A/53 caption merge path', () => {
+    expect(ffmpegVideoEncoderCompatibilityArgs('h264_videotoolbox')).toEqual(['-a53cc', '0']);
+    expect(ffmpegVideoEncoderCompatibilityArgs('hevc_videotoolbox')).toEqual([]);
+    expect(ffmpegVideoEncoderCompatibilityArgs('libx264')).toEqual([]);
   });
 
   it('redacts internal grants, credentials, and source URLs from FFmpeg failures', () => {
