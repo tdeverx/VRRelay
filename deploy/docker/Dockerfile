@@ -24,20 +24,20 @@ RUN apt-get update && \
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) \
-        archive='ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz'; \
-        sha256='68e304f5518d3e22cd825e6fb738d0d9a04a8f36127873a18fc6646457e95b92' ;; \
+        archive='ffmpeg-n8.1.2-34-g9b6c8969e0-linux64-gpl-8.1.tar.xz'; \
+        sha256='09fc77be269c7053e438b7e96548e4af97604faf96a42c4a3c56a1ad74c22c0a' ;; \
       arm64) \
-        archive='ffmpeg-n8.1.2-22-g94138f6973-linuxarm64-gpl-8.1.tar.xz'; \
-        sha256='d8f8ad1568cf4247a7a834a6cd88c5c4c2c5115b02d4b5e49bdd1a51a3a6cd0b' ;; \
+        archive='ffmpeg-n8.1.2-34-g9b6c8969e0-linuxarm64-gpl-8.1.tar.xz'; \
+        sha256='177e40c91564dec3840096f3bf1ffe696b94330585972462cfc739fa29fe0e1a' ;; \
       *) echo "Unsupported FFmpeg architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
     curl --fail --location --retry 3 \
-      "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-15-14-01/$archive" \
+      "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/$archive" \
       --output /tmp/ffmpeg.tar.xz; \
     echo "$sha256  /tmp/ffmpeg.tar.xz" | sha256sum --check --strict; \
     mkdir -p /opt/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1; \
-    /opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep -F 'ffmpeg version n8.1.2-22-g94138f6973'; \
+    /opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep -F 'ffmpeg version n8.1.2-34-g9b6c8969e0'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -F 'libx264'; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -filters | grep -F 'subtitles'
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-16",
+  "updatedAt": "2026-08-03",
   "components": [
     {
       "name": "node",
@@ -30,20 +30,20 @@
     {
       "name": "ffmpeg",
       "version": "8.1.2",
-      "runtimeVersion": "8.1.2-22-g94138f6973",
+      "runtimeVersion": "8.1.2-34-g9b6c8969e0",
       "license": "GPL-3.0-or-later",
-      "source": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/94138f6973dd1ac6208ace92148ac0d172455d65",
+      "source": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
       "sourceNotes": {
-        "darwin-arm64": "The native package builds a minimal headless arm64 binary from FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65, matching the pinned Linux and Windows runtimes. Third-party libraries are linked statically; Apple system frameworks remain dynamic.",
-        "linux-x64": "The pinned BtbN GPL build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65. OCI and Windows binaries share one complete corresponding-source bundle.",
-        "linux-arm64": "The pinned BtbN GPL build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65. OCI and Windows binaries share one complete corresponding-source bundle.",
-        "windows-x64": "The BtbN build is based on FFmpeg commit 94138f6973dd1ac6208ace92148ac0d172455d65 and its GPL dependency build scripts. Binary releases are blocked unless the complete corresponding-source bundle is attached."
+        "darwin-arm64": "The native package builds a minimal headless arm64 binary from FFmpeg commit 9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b, matching the pinned Linux and Windows runtimes. Third-party libraries are linked statically; Apple system frameworks remain dynamic.",
+        "linux-x64": "The pinned BtbN GPL build is based on FFmpeg commit 9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b. OCI and Windows binaries share one complete corresponding-source bundle.",
+        "linux-arm64": "The pinned BtbN GPL build is based on FFmpeg commit 9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b. OCI and Windows binaries share one complete corresponding-source bundle.",
+        "windows-x64": "The BtbN build is based on FFmpeg commit 9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b and its GPL dependency build scripts. Binary releases are blocked unless the complete corresponding-source bundle is attached."
       },
       "capabilities": ["h264", "aac", "mpegts-hls", "fmp4-hls", "subtitles", "tonemap"],
       "sourceBuilds": {
         "darwin-arm64": {
           "buildScript": "deploy/macos/build-ffmpeg.sh",
-          "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
+          "ffmpegCommit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
           "target": "arm64-apple-darwin",
           "minimumMacOS": "15.0",
           "linkage": "static-third-party",
@@ -56,11 +56,11 @@
             {
               "name": "ffmpeg",
               "version": "8.1.2",
-              "revision": "94138f6973dd1ac6208ace92148ac0d172455d65",
+              "revision": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
               "license": "GPL-3.0-or-later",
-              "file": "ffmpeg-94138f6973dd1ac6208ace92148ac0d172455d65.tar.gz",
-              "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/94138f6973dd1ac6208ace92148ac0d172455d65",
-              "sha256": "41cc834ca4c8b63733b5ea9d215aed7b6cf8e29c4f96c8c61aff187d47e02937"
+              "file": "ffmpeg-9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b.tar.gz",
+              "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
+              "sha256": "7e779215eae16ad7e93ddad59bd82822bd3d34e4dc61f9996f9481b2c0605bc3"
             },
             {
               "name": "x264",
@@ -123,45 +123,45 @@
       },
       "artifacts": {
         "source": {
-          "file": "ffmpeg-94138f6973dd1ac6208ace92148ac0d172455d65.tar.gz",
-          "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/94138f6973dd1ac6208ace92148ac0d172455d65",
-          "sha256": "41cc834ca4c8b63733b5ea9d215aed7b6cf8e29c4f96c8c61aff187d47e02937",
-          "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65"
+          "file": "ffmpeg-9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b.tar.gz",
+          "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
+          "sha256": "7e779215eae16ad7e93ddad59bd82822bd3d34e4dc61f9996f9481b2c0605bc3",
+          "ffmpegCommit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
         },
         "linux-x64": {
-          "file": "ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz",
-          "sha256": "68e304f5518d3e22cd825e6fb738d0d9a04a8f36127873a18fc6646457e95b92",
+          "file": "ffmpeg-n8.1.2-34-g9b6c8969e0-linux64-gpl-8.1.tar.xz",
+          "sha256": "09fc77be269c7053e438b7e96548e4af97604faf96a42c4a3c56a1ad74c22c0a",
           "buildRecipe": {
             "provider": "BtbN/FFmpeg-Builds",
-            "releaseTag": "autobuild-2026-07-15-14-01",
-            "repositoryCommit": "1f74efed63f467dbf0d1e5dd8548bf2188f4ad21",
-            "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
+            "releaseTag": "autobuild-2026-07-31-14-10",
+            "repositoryCommit": "a99e8230eae00d1cee38f23076a7a1f55cd984e2",
+            "ffmpegCommit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
             "target": "linux64",
             "variant": "gpl",
             "addins": ["8.1"]
           }
         },
         "linux-arm64": {
-          "file": "ffmpeg-n8.1.2-22-g94138f6973-linuxarm64-gpl-8.1.tar.xz",
-          "sha256": "d8f8ad1568cf4247a7a834a6cd88c5c4c2c5115b02d4b5e49bdd1a51a3a6cd0b",
+          "file": "ffmpeg-n8.1.2-34-g9b6c8969e0-linuxarm64-gpl-8.1.tar.xz",
+          "sha256": "177e40c91564dec3840096f3bf1ffe696b94330585972462cfc739fa29fe0e1a",
           "buildRecipe": {
             "provider": "BtbN/FFmpeg-Builds",
-            "releaseTag": "autobuild-2026-07-15-14-01",
-            "repositoryCommit": "1f74efed63f467dbf0d1e5dd8548bf2188f4ad21",
-            "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
+            "releaseTag": "autobuild-2026-07-31-14-10",
+            "repositoryCommit": "a99e8230eae00d1cee38f23076a7a1f55cd984e2",
+            "ffmpegCommit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
             "target": "linuxarm64",
             "variant": "gpl",
             "addins": ["8.1"]
           }
         },
         "windows-x64": {
-          "file": "ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip",
-          "sha256": "0af1621d3a2e418b86d8ff4704f5d5a70bcce611edd6c5110d092533b170952c",
+          "file": "ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-8.1.zip",
+          "sha256": "cc4156d51387566ea8ba653fc3a04897bdf812fddf652428d9030bbf7ae24835",
           "buildRecipe": {
             "provider": "BtbN/FFmpeg-Builds",
-            "releaseTag": "autobuild-2026-07-15-14-01",
-            "repositoryCommit": "1f74efed63f467dbf0d1e5dd8548bf2188f4ad21",
-            "ffmpegCommit": "94138f6973dd1ac6208ace92148ac0d172455d65",
+            "releaseTag": "autobuild-2026-07-31-14-10",
+            "repositoryCommit": "a99e8230eae00d1cee38f23076a7a1f55cd984e2",
+            "ffmpegCommit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
             "target": "win64",
             "variant": "gpl",
             "addins": ["8.1"]

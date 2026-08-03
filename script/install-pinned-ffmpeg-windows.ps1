@@ -13,8 +13,8 @@ if ($Destination -eq [IO.Path]::GetPathRoot($Destination)) {
 }
 
 $Root = (Resolve-Path "$PSScriptRoot\..").Path
-$Archive = 'ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip'
-$Url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-15-14-01/$Archive"
+$Archive = 'ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-8.1.zip'
+$Url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/$Archive"
 $Work = Join-Path ([IO.Path]::GetTempPath()) "vrrelay-ffmpeg-$([Guid]::NewGuid().ToString('N'))"
 $ArchivePath = Join-Path $Work $Archive
 
@@ -32,7 +32,7 @@ try {
   $VersionOutput = (& $Ffmpeg.FullName -nostdin -hide_banner -version 2>&1) -join "`n"
   $EncoderOutput = (& $Ffmpeg.FullName -nostdin -hide_banner -encoders 2>&1) -join "`n"
   $FilterOutput = (& $Ffmpeg.FullName -nostdin -hide_banner -filters 2>&1) -join "`n"
-  if ($VersionOutput -notlike '*ffmpeg version n8.1.2-22-g94138f6973*') {
+  if ($VersionOutput -notlike '*ffmpeg version n8.1.2-34-g9b6c8969e0*') {
     throw 'Pinned FFmpeg version check failed.'
   }
   if ($EncoderOutput -notlike '*libx264*') { throw 'Pinned FFmpeg lacks libx264.' }
