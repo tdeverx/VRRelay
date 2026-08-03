@@ -251,7 +251,7 @@ FFMPEG_CONFIGURE_ARGS=(
   --disable-ffprobe
   --disable-doc
   --disable-debug
-  "--extra-version=22-g$FFMPEG_SHORT_COMMIT"
+  "--extra-version=34-g$FFMPEG_SHORT_COMMIT"
   --pkg-config-flags=--static
   "--extra-cflags=$CFLAGS"
   "--extra-cxxflags=$CXXFLAGS"
@@ -285,7 +285,7 @@ fi
 "$OUTPUT_DIR/ffmpeg" -nostdin -hide_banner -filters > "$WORK/ffmpeg-filters.txt" 2>/dev/null
 "$OUTPUT_DIR/ffmpeg" -nostdin -hide_banner -muxers > "$WORK/ffmpeg-muxers.txt" 2>/dev/null
 "$OUTPUT_DIR/ffmpeg" -nostdin -hide_banner -protocols > "$WORK/ffmpeg-protocols.txt" 2>/dev/null
-grep -Fq "ffmpeg version ${SOURCE_VERSION[ffmpeg]}-22-g$FFMPEG_SHORT_COMMIT" \
+grep -Fq "ffmpeg version ${SOURCE_VERSION[ffmpeg]}-34-g$FFMPEG_SHORT_COMMIT" \
   "$WORK/ffmpeg-version.txt"
 grep -Fq -- '--enable-gpl' "$WORK/ffmpeg-version.txt"
 grep -Fq -- '--enable-version3' "$WORK/ffmpeg-version.txt"

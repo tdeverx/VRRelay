@@ -508,7 +508,7 @@ const ffmpegLinux = ['linux-x64', 'linux-arm64'].map(
 );
 const ffmpegComponent = runtimeComponents.get('ffmpeg');
 const sharedFfmpegRevision = ffmpegComponent?.artifacts?.source?.ffmpegCommit;
-const expectedFfmpegRuntimeVersion = `${ffmpegComponent?.version}-22-g${sharedFfmpegRevision?.slice(0, 10)}`;
+const expectedFfmpegRuntimeVersion = `${ffmpegComponent?.version}-34-g${sharedFfmpegRevision?.slice(0, 10)}`;
 const macFfmpegRecipe = ffmpegComponent?.sourceBuilds?.['darwin-arm64'];
 const macFfmpegInput = macFfmpegRecipe?.inputs?.find((input) => input.name === 'ffmpeg');
 for (const [platform, revision] of [

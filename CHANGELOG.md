@@ -6,6 +6,10 @@ semantic versioning after the first public release.
 
 ## Unreleased
 
+- Fixed VideoToolbox H.264 producer restart loops on sources carrying A/53 closed-caption data by
+  disabling FFmpeg's broken caption-to-SEI merge path while retaining hardware encoding.
+- Re-pinned bundled Linux and Windows FFmpeg to BtbN's retained July 2026 month-end build so clean
+  CI, container, and native-package builds no longer depend on an expired daily release.
 - Fixed ordinary sequential HLS requests being reported as forward seeks, which could move the
   playback anchor and make buffer headroom appear not to catch up. Distant requests still require
   confirmation from a following request in the same playback window.

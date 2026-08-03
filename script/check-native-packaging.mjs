@@ -234,7 +234,7 @@ if (!macFfmpegRecipe) {
 }
 
 const sharedFfmpegRevision = ffmpeg?.artifacts?.source?.ffmpegCommit;
-const expectedFfmpegRuntimeVersion = `${ffmpeg?.version}-22-g${sharedFfmpegRevision?.slice(0, 10)}`;
+const expectedFfmpegRuntimeVersion = `${ffmpeg?.version}-34-g${sharedFfmpegRevision?.slice(0, 10)}`;
 const macFfmpegInput = macFfmpegRecipe?.inputs?.find((input) => input.name === 'ffmpeg');
 const platformFfmpegRevisions = new Map([
   ['macOS recipe', macFfmpegRecipe?.ffmpegCommit],
@@ -615,7 +615,7 @@ for (const [source, text, message] of [
   ],
   [
     windowsSource,
-    'FFMPEG_COMMIT="94138f6973dd1ac6208ace92148ac0d172455d65"',
+    'FFMPEG_COMMIT="9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"',
     'Windows corresponding-source recipe must pin the FFmpeg source commit'
   ],
   [

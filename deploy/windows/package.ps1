@@ -45,11 +45,11 @@ function Get-VerifiedRuntime([string]$Url, [string]$Destination) {
 $NodeZip = "$Stage\downloads\node-v26.5.0-win-x64.zip"
 $MediaMtxZip = "$Stage\downloads\mediamtx_v1.19.2_windows_amd64.zip"
 $WinSW = "$Stage\downloads\WinSW-x64.exe"
-$FfmpegZip = "$Stage\downloads\ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip"
+$FfmpegZip = "$Stage\downloads\ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-8.1.zip"
 Get-VerifiedRuntime 'https://nodejs.org/download/release/v26.5.0/node-v26.5.0-win-x64.zip' $NodeZip
 Get-VerifiedRuntime 'https://github.com/bluenviron/mediamtx/releases/download/v1.19.2/mediamtx_v1.19.2_windows_amd64.zip' $MediaMtxZip
 Get-VerifiedRuntime 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' $WinSW
-Get-VerifiedRuntime 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-15-14-01/ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip' $FfmpegZip
+Get-VerifiedRuntime 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-8.1.zip' $FfmpegZip
 Expand-Archive $NodeZip "$Stage\downloads\node" -Force
 Expand-Archive $MediaMtxZip "$Stage\downloads\mediamtx" -Force
 Expand-Archive $FfmpegZip "$Stage\downloads\ffmpeg" -Force

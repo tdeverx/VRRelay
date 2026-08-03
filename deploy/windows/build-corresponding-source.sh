@@ -4,14 +4,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUTPUT="${1:-$ROOT/dist/ffmpeg-btbn-corresponding-source.tar.xz}"
-BTBN_TAG="autobuild-2026-07-15-14-01"
-BTBN_COMMIT="1f74efed63f467dbf0d1e5dd8548bf2188f4ad21"
-FFMPEG_COMMIT="94138f6973dd1ac6208ace92148ac0d172455d65"
+BTBN_TAG="autobuild-2026-07-31-14-10"
+BTBN_COMMIT="a99e8230eae00d1cee38f23076a7a1f55cd984e2"
+FFMPEG_COMMIT="9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
 TARGET="win64"
 LINUX_TARGETS=(linux64 linuxarm64)
 VARIANT="gpl"
 ADDINS="8.1"
-SOURCE_DATE_EPOCH="1784124135"
+SOURCE_DATE_EPOCH="1785507056"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
