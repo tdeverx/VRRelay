@@ -17,8 +17,8 @@
     "@fastify/cookie": "^11.1.2",
     "@fastify/proxy-addr": "^5.1.0",
     "@fastify/helmet": "^13.1.0",
-    "@fastify/rate-limit": "^11.1.0",
-    "@fastify/static": "^10.1.2",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.3",
     "@fastify/websocket": "^11.3.0",
     "@node-rs/argon2": "^2.0.2",
     "@vrrelay/adapters": "*",
@@ -26,8 +26,8 @@
     "@vrrelay/contracts": "*",
     "@vrrelay/domain": "*",
     "dotenv": "^17.4.2",
-    "fastify": "^5.10.0",
-    "ws": "^8.21.1",
+    "fastify": "^5.11.3",
+    "ws": "^8.21.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
