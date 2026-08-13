@@ -32,6 +32,6 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "tsx": "^4.23.1"
+    "tsx": "^4.23.12"
   }
 }
