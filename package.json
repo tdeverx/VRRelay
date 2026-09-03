@@ -113,7 +113,7 @@
     "typescript-compat": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "allowScripts": {
     "better-sqlite3@13.0.1": false,

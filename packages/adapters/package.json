@@ -18,18 +18,18 @@
   "dependencies": {
     "@vrrelay/domain": "*",
     "@vrrelay/application": "*",
-    "@aws-sdk/client-s3": "^3.1095.0",
+    "@aws-sdk/client-s3": "^3.1122.0",
     "@azure/storage-blob": "^12.33.0",
-    "@google-cloud/storage": "^7.21.0",
-    "better-sqlite3": "^13.0.1",
-    "ioredis": "^5.11.1",
+    "@google-cloud/storage": "^8.0.1",
+    "better-sqlite3": "^13.0.3",
+    "ioredis": "^6.0.0",
     "node-forge": "^1.4.0",
-    "pg": "^8.22.0",
+    "pg": "^8.23.0",
     "prom-client": "^15.1.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node-forge": "^1.3.14",
-    "@types/pg": "^8.20.0"
+    "@types/pg": "^8.23.1"
   }
 }
